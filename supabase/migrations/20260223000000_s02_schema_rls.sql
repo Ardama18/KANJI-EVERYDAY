@@ -111,3 +111,161 @@ CREATE TRIGGER set_illustrations_updated_at
 BEFORE UPDATE ON public.illustrations
 FOR EACH ROW
 EXECUTE FUNCTION public.update_updated_at_column();
+
+ALTER TABLE public.users_profile ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.decks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cards ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.deck_cards ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.review_states ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.illustrations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.study_sessions ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY users_profile_select_owner
+ON public.users_profile
+FOR SELECT
+USING (auth.uid() = user_id);
+
+CREATE POLICY users_profile_insert_owner
+ON public.users_profile
+FOR INSERT
+WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY users_profile_update_owner
+ON public.users_profile
+FOR UPDATE
+USING (auth.uid() = user_id)
+WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY decks_select_owner
+ON public.decks
+FOR SELECT
+USING (auth.uid() = owner_user_id);
+
+CREATE POLICY decks_insert_owner
+ON public.decks
+FOR INSERT
+WITH CHECK (auth.uid() = owner_user_id);
+
+CREATE POLICY decks_update_owner
+ON public.decks
+FOR UPDATE
+USING (auth.uid() = owner_user_id)
+WITH CHECK (auth.uid() = owner_user_id);
+
+CREATE POLICY cards_select_public
+ON public.cards
+FOR SELECT
+USING (visibility = 'public');
+
+CREATE POLICY cards_select_private_owner
+ON public.cards
+FOR SELECT
+USING (visibility = 'private' AND auth.uid() = owner_user_id);
+
+CREATE POLICY cards_insert_private_owner
+ON public.cards
+FOR INSERT
+WITH CHECK (visibility = 'private' AND auth.uid() = owner_user_id);
+
+CREATE POLICY cards_update_private_owner
+ON public.cards
+FOR UPDATE
+USING (visibility = 'private' AND auth.uid() = owner_user_id)
+WITH CHECK (visibility = 'private' AND auth.uid() = owner_user_id);
+
+CREATE POLICY cards_delete_private_owner
+ON public.cards
+FOR DELETE
+USING (visibility = 'private' AND auth.uid() = owner_user_id);
+
+CREATE POLICY deck_cards_select_owner_deck
+ON public.deck_cards
+FOR SELECT
+USING (
+  EXISTS (
+    SELECT 1
+    FROM public.decks
+    WHERE decks.id = deck_cards.deck_id
+      AND decks.owner_user_id = auth.uid()
+  )
+);
+
+CREATE POLICY deck_cards_insert_owner_deck
+ON public.deck_cards
+FOR INSERT
+WITH CHECK (
+  EXISTS (
+    SELECT 1
+    FROM public.decks
+    WHERE decks.id = deck_cards.deck_id
+      AND decks.owner_user_id = auth.uid()
+  )
+);
+
+CREATE POLICY deck_cards_update_owner_deck
+ON public.deck_cards
+FOR UPDATE
+USING (
+  EXISTS (
+    SELECT 1
+    FROM public.decks
+    WHERE decks.id = deck_cards.deck_id
+      AND decks.owner_user_id = auth.uid()
+  )
+)
+WITH CHECK (
+  EXISTS (
+    SELECT 1
+    FROM public.decks
+    WHERE decks.id = deck_cards.deck_id
+      AND decks.owner_user_id = auth.uid()
+  )
+);
+
+CREATE POLICY review_states_select_owner
+ON public.review_states
+FOR SELECT
+USING (auth.uid() = user_id);
+
+CREATE POLICY review_states_insert_owner
+ON public.review_states
+FOR INSERT
+WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY review_states_update_owner
+ON public.review_states
+FOR UPDATE
+USING (auth.uid() = user_id)
+WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY illustrations_select_owner
+ON public.illustrations
+FOR SELECT
+USING (auth.uid() = owner_user_id);
+
+CREATE POLICY illustrations_insert_owner
+ON public.illustrations
+FOR INSERT
+WITH CHECK (auth.uid() = owner_user_id);
+
+CREATE POLICY illustrations_update_owner
+ON public.illustrations
+FOR UPDATE
+USING (auth.uid() = owner_user_id)
+WITH CHECK (auth.uid() = owner_user_id);
+
+CREATE POLICY study_sessions_select_owner
+ON public.study_sessions
+FOR SELECT
+USING (auth.uid() = user_id);
+
+CREATE POLICY study_sessions_insert_owner
+ON public.study_sessions
+FOR INSERT
+WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY study_sessions_update_owner
+ON public.study_sessions
+FOR UPDATE
+USING (auth.uid() = user_id)
+WITH CHECK (auth.uid() = user_id);

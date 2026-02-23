@@ -14,6 +14,7 @@ import {
   runSql,
   sqlLiteral,
 } from "./helpers/s02-db-testkit";
+import { createRlsFixture } from "./helpers/rls-actors";
 import {
   assertSchemaContract,
   hasUniqueIllustrationKeyConstraint,
@@ -40,6 +41,19 @@ interface UpdatedAtRow {
 
 interface CountRow {
   count: number;
+}
+
+interface IdRow {
+  id: string;
+}
+
+interface RlsStatusRow {
+  table_name: string;
+  row_security_enabled: boolean;
+}
+
+function expectRlsDenied(operation: () => void): void {
+  expect(operation).toThrow(/row-level security|permission denied/iu);
 }
 
 describe("database-schema-rls 統合テスト", () => {
@@ -229,7 +243,41 @@ describe("database-schema-rls 統合テスト", () => {
   // @category: integration
   // @dependency: supabase/migrations/*_s02_schema_rls.sql
   // @complexity: low
-  it.todo("AC-04: 7テーブルすべてでRLSが有効化される");
+  it("AC-04: 7テーブルすべてでRLSが有効化される", () => {
+    const rows = queryRows<RlsStatusRow>(`
+      SELECT
+        c.relname AS table_name,
+        c.relrowsecurity AS row_security_enabled
+      FROM pg_class AS c
+      INNER JOIN pg_namespace AS n
+        ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public'
+        AND c.relname IN (
+          'users_profile',
+          'decks',
+          'cards',
+          'deck_cards',
+          'review_states',
+          'illustrations',
+          'study_sessions'
+        )
+      ORDER BY c.relname
+    `);
+
+    expect(rows).toHaveLength(7);
+    expect(rows.map((row) => row.table_name)).toEqual([
+      "cards",
+      "deck_cards",
+      "decks",
+      "illustrations",
+      "review_states",
+      "study_sessions",
+      "users_profile",
+    ]);
+    for (const row of rows) {
+      expect(row.row_security_enabled).toBe(true);
+    }
+  });
 
   // AC原文 (AC-05): もし `cards.visibility='public'` なら、システムは未認証ユーザー（anonymous）を含む全ユーザーにSELECTを許可し、INSERT/UPDATE/DELETEを拒否すること。
   // AC解釈: public行は閲覧専用で、匿名・認証済みの別を問わず書き込み禁止。
@@ -239,7 +287,113 @@ describe("database-schema-rls 統合テスト", () => {
   // @category: integration
   // @dependency: cards RLS policies, anonymous/authenticated DB sessions
   // @complexity: high
-  it.todo("AC-05: cards public行は全員SELECT可かつ全員書き込み不可（read-only）である");
+  it("AC-05: cards public行は全員SELECT可かつ全員書き込み不可（read-only）である", () => {
+    const fixture = createRlsFixture("ac05");
+    const nowSuffix = Date.now();
+
+    try {
+      const { actors, ownerUserId, nonOwnerUserId, publicCardId } = fixture;
+
+      for (const actor of [actors.owner, actors.nonOwner, actors.anonymous]) {
+        const selectedRows = actor.queryRows<IdRow>(`
+          SELECT id::text AS id
+          FROM public.cards
+          WHERE id = ${sqlLiteral(publicCardId)}::uuid
+        `);
+        expect(selectedRows).toEqual([{ id: publicCardId }]);
+      }
+
+      expectRlsDenied(() => {
+        actors.owner.runSql(`
+          INSERT INTO public.cards (
+            owner_user_id,
+            visibility,
+            skill,
+            pattern,
+            front_text,
+            back_text,
+            card_key
+          ) VALUES (
+            ${sqlLiteral(ownerUserId)}::uuid,
+            'public',
+            'reading',
+            'R1',
+            'ac05-owner-public-front',
+            'ac05-owner-public-back',
+            ${sqlLiteral(`ac05-owner-public-${nowSuffix}`)}
+          )
+        `);
+      });
+
+      expectRlsDenied(() => {
+        actors.nonOwner.runSql(`
+          INSERT INTO public.cards (
+            owner_user_id,
+            visibility,
+            skill,
+            pattern,
+            front_text,
+            back_text,
+            card_key
+          ) VALUES (
+            ${sqlLiteral(nonOwnerUserId)}::uuid,
+            'public',
+            'reading',
+            'R1',
+            'ac05-non-owner-public-front',
+            'ac05-non-owner-public-back',
+            ${sqlLiteral(`ac05-non-owner-public-${nowSuffix}`)}
+          )
+        `);
+      });
+
+      expectRlsDenied(() => {
+        actors.anonymous.runSql(`
+          INSERT INTO public.cards (
+            visibility,
+            skill,
+            pattern,
+            front_text,
+            back_text,
+            card_key
+          ) VALUES (
+            'public',
+            'reading',
+            'R1',
+            'ac05-anonymous-public-front',
+            'ac05-anonymous-public-back',
+            ${sqlLiteral(`ac05-anonymous-public-${nowSuffix}`)}
+          )
+        `);
+      });
+
+      for (const actor of [actors.owner, actors.nonOwner, actors.anonymous]) {
+        const updatedRows = actor.queryRows<IdRow>(`
+          UPDATE public.cards
+          SET back_text = ${sqlLiteral(`ac05-updated-by-${actor.role}`)}
+          WHERE id = ${sqlLiteral(publicCardId)}::uuid
+          RETURNING id::text AS id
+        `);
+        expect(updatedRows).toHaveLength(0);
+
+        const deletedRows = actor.queryRows<IdRow>(`
+          DELETE FROM public.cards
+          WHERE id = ${sqlLiteral(publicCardId)}::uuid
+          RETURNING id::text AS id
+        `);
+        expect(deletedRows).toHaveLength(0);
+      }
+
+      const remainedRows = queryRows<CountRow>(`
+        SELECT COUNT(*)::int AS count
+        FROM public.cards
+        WHERE id = ${sqlLiteral(publicCardId)}::uuid
+      `);
+      expect(remainedRows[0]?.count).toBe(1);
+    } finally {
+      fixture.cleanup();
+    }
+  });
 
   // AC原文 (AC-06): もし `cards.visibility='private'` なら、システムは所有者本人にのみINSERT/UPDATE/DELETEを許可すること。
   // AC解釈: private行の書き込みはowner strictで、非所有者/未認証は拒否される必要がある。
@@ -249,7 +403,134 @@ describe("database-schema-rls 統合テスト", () => {
   // @category: integration
   // @dependency: cards RLS policies, owner/non-owner identities
   // @complexity: high
-  it.todo("AC-06: cards private行は所有者本人のみINSERT/UPDATE/DELETE可能である");
+  it("AC-06: cards private行は所有者本人のみINSERT/UPDATE/DELETE可能である", () => {
+    const fixture = createRlsFixture("ac06");
+    const nowSuffix = Date.now();
+
+    try {
+      const { actors, ownerUserId, privateCardId } = fixture;
+
+      const ownerInsertedRows = actors.owner.queryRows<IdRow>(`
+        INSERT INTO public.cards (
+          owner_user_id,
+          visibility,
+          skill,
+          pattern,
+          front_text,
+          back_text,
+          card_key
+        ) VALUES (
+          ${sqlLiteral(ownerUserId)}::uuid,
+          'private',
+          'reading',
+          'R2',
+          'ac06-owner-private-front',
+          'ac06-owner-private-back',
+          ${sqlLiteral(`ac06-owner-private-${nowSuffix}`)}
+        )
+        RETURNING id::text AS id
+      `);
+      expect(ownerInsertedRows).toHaveLength(1);
+
+      expectRlsDenied(() => {
+        actors.nonOwner.runSql(`
+          INSERT INTO public.cards (
+            owner_user_id,
+            visibility,
+            skill,
+            pattern,
+            front_text,
+            back_text,
+            card_key
+          ) VALUES (
+            ${sqlLiteral(ownerUserId)}::uuid,
+            'private',
+            'reading',
+            'R2',
+            'ac06-non-owner-private-front',
+            'ac06-non-owner-private-back',
+            ${sqlLiteral(`ac06-non-owner-private-${nowSuffix}`)}
+          )
+        `);
+      });
+
+      expectRlsDenied(() => {
+        actors.anonymous.runSql(`
+          INSERT INTO public.cards (
+            owner_user_id,
+            visibility,
+            skill,
+            pattern,
+            front_text,
+            back_text,
+            card_key
+          ) VALUES (
+            ${sqlLiteral(ownerUserId)}::uuid,
+            'private',
+            'reading',
+            'R2',
+            'ac06-anonymous-private-front',
+            'ac06-anonymous-private-back',
+            ${sqlLiteral(`ac06-anonymous-private-${nowSuffix}`)}
+          )
+        `);
+      });
+
+      const ownerUpdatedRows = actors.owner.queryRows<IdRow>(`
+        UPDATE public.cards
+        SET back_text = 'ac06-owner-updated'
+        WHERE id = ${sqlLiteral(privateCardId)}::uuid
+        RETURNING id::text AS id
+      `);
+      expect(ownerUpdatedRows).toEqual([{ id: privateCardId }]);
+
+      const nonOwnerUpdatedRows = actors.nonOwner.queryRows<IdRow>(`
+        UPDATE public.cards
+        SET back_text = 'ac06-non-owner-update-attempt'
+        WHERE id = ${sqlLiteral(privateCardId)}::uuid
+        RETURNING id::text AS id
+      `);
+      expect(nonOwnerUpdatedRows).toHaveLength(0);
+
+      const anonymousUpdatedRows = actors.anonymous.queryRows<IdRow>(`
+        UPDATE public.cards
+        SET back_text = 'ac06-anonymous-update-attempt'
+        WHERE id = ${sqlLiteral(privateCardId)}::uuid
+        RETURNING id::text AS id
+      `);
+      expect(anonymousUpdatedRows).toHaveLength(0);
+
+      runSql(`
+        UPDATE public.study_sessions
+        SET current_card_id = NULL
+        WHERE user_id = ${sqlLiteral(ownerUserId)}::uuid
+          AND current_card_id = ${sqlLiteral(privateCardId)}::uuid
+      `);
+
+      const nonOwnerDeletedRows = actors.nonOwner.queryRows<IdRow>(`
+        DELETE FROM public.cards
+        WHERE id = ${sqlLiteral(privateCardId)}::uuid
+        RETURNING id::text AS id
+      `);
+      expect(nonOwnerDeletedRows).toHaveLength(0);
+
+      const anonymousDeletedRows = actors.anonymous.queryRows<IdRow>(`
+        DELETE FROM public.cards
+        WHERE id = ${sqlLiteral(privateCardId)}::uuid
+        RETURNING id::text AS id
+      `);
+      expect(anonymousDeletedRows).toHaveLength(0);
+
+      const ownerDeletedRows = actors.owner.queryRows<IdRow>(`
+        DELETE FROM public.cards
+        WHERE id = ${sqlLiteral(privateCardId)}::uuid
+        RETURNING id::text AS id
+      `);
+      expect(ownerDeletedRows).toEqual([{ id: privateCardId }]);
+    } finally {
+      fixture.cleanup();
+    }
+  });
 
   // AC原文 (AC-07): システムは `illustrations` をprivate + owner scopedとして扱い、非所有者/未認証のSELECT/INSERT/UPDATE/DELETEを拒否すること。
   // AC解釈: illustrationsは全操作でownerのみ許可される。
@@ -259,7 +540,108 @@ describe("database-schema-rls 統合テスト", () => {
   // @category: integration
   // @dependency: illustrations table policies, authenticated roles
   // @complexity: high
-  it.todo("AC-07: illustrations は private + owner scoped で non-owner/anonymous を全操作拒否する");
+  it("AC-07: illustrations は private + owner scoped で non-owner/anonymous を全操作拒否する", () => {
+    const fixture = createRlsFixture("ac07");
+    const nowSuffix = Date.now();
+
+    try {
+      const { actors, ownerUserId, ownerIllustrationId } = fixture;
+
+      const ownerSelectedRows = actors.owner.queryRows<IdRow>(`
+        SELECT id::text AS id
+        FROM public.illustrations
+        WHERE id = ${sqlLiteral(ownerIllustrationId)}::uuid
+      `);
+      expect(ownerSelectedRows).toEqual([{ id: ownerIllustrationId }]);
+
+      const nonOwnerSelectedRows = actors.nonOwner.queryRows<IdRow>(`
+        SELECT id::text AS id
+        FROM public.illustrations
+        WHERE id = ${sqlLiteral(ownerIllustrationId)}::uuid
+      `);
+      expect(nonOwnerSelectedRows).toHaveLength(0);
+
+      const anonymousSelectedRows = actors.anonymous.queryRows<IdRow>(`
+        SELECT id::text AS id
+        FROM public.illustrations
+        WHERE id = ${sqlLiteral(ownerIllustrationId)}::uuid
+      `);
+      expect(anonymousSelectedRows).toHaveLength(0);
+
+      const ownerInsertedRows = actors.owner.queryRows<IdRow>(`
+        INSERT INTO public.illustrations (owner_user_id, illustration_key, status)
+        VALUES (
+          ${sqlLiteral(ownerUserId)}::uuid,
+          ${sqlLiteral(`ac07-owner-illustration-${nowSuffix}`)},
+          'pending'
+        )
+        RETURNING id::text AS id
+      `);
+      expect(ownerInsertedRows).toHaveLength(1);
+
+      expectRlsDenied(() => {
+        actors.nonOwner.runSql(`
+          INSERT INTO public.illustrations (owner_user_id, illustration_key, status)
+          VALUES (
+            ${sqlLiteral(ownerUserId)}::uuid,
+            ${sqlLiteral(`ac07-non-owner-illustration-${nowSuffix}`)},
+            'pending'
+          )
+        `);
+      });
+
+      expectRlsDenied(() => {
+        actors.anonymous.runSql(`
+          INSERT INTO public.illustrations (owner_user_id, illustration_key, status)
+          VALUES (
+            ${sqlLiteral(ownerUserId)}::uuid,
+            ${sqlLiteral(`ac07-anonymous-illustration-${nowSuffix}`)},
+            'pending'
+          )
+        `);
+      });
+
+      const ownerUpdatedRows = actors.owner.queryRows<IdRow>(`
+        UPDATE public.illustrations
+        SET status = 'ready'
+        WHERE id = ${sqlLiteral(ownerIllustrationId)}::uuid
+        RETURNING id::text AS id
+      `);
+      expect(ownerUpdatedRows).toEqual([{ id: ownerIllustrationId }]);
+
+      const nonOwnerUpdatedRows = actors.nonOwner.queryRows<IdRow>(`
+        UPDATE public.illustrations
+        SET status = 'failed'
+        WHERE id = ${sqlLiteral(ownerIllustrationId)}::uuid
+        RETURNING id::text AS id
+      `);
+      expect(nonOwnerUpdatedRows).toHaveLength(0);
+
+      const anonymousUpdatedRows = actors.anonymous.queryRows<IdRow>(`
+        UPDATE public.illustrations
+        SET status = 'failed'
+        WHERE id = ${sqlLiteral(ownerIllustrationId)}::uuid
+        RETURNING id::text AS id
+      `);
+      expect(anonymousUpdatedRows).toHaveLength(0);
+
+      const nonOwnerDeletedRows = actors.nonOwner.queryRows<IdRow>(`
+        DELETE FROM public.illustrations
+        WHERE id = ${sqlLiteral(ownerIllustrationId)}::uuid
+        RETURNING id::text AS id
+      `);
+      expect(nonOwnerDeletedRows).toHaveLength(0);
+
+      const anonymousDeletedRows = actors.anonymous.queryRows<IdRow>(`
+        DELETE FROM public.illustrations
+        WHERE id = ${sqlLiteral(ownerIllustrationId)}::uuid
+        RETURNING id::text AS id
+      `);
+      expect(anonymousDeletedRows).toHaveLength(0);
+    } finally {
+      fixture.cleanup();
+    }
+  });
 
   // AC原文 (AC-08): システムは `users_profile`, `decks`, `deck_cards`, `review_states`, `study_sessions` のSELECT/INSERT/UPDATEを所有者本人（または自分自身）のみに制限すること。
   // AC解釈: 5テーブルの主要操作はowner-only境界で一貫し、他ユーザーアクセスを拒否する必要がある。
@@ -269,7 +651,285 @@ describe("database-schema-rls 統合テスト", () => {
   // @category: integration
   // @dependency: users_profile/decks/deck_cards/review_states/study_sessions policies
   // @complexity: high
-  it.todo("AC-08: 5テーブルのSELECT/INSERT/UPDATEは所有者本人のみに制限される");
+  it("AC-08: 5テーブルのSELECT/INSERT/UPDATEは所有者本人のみに制限される", () => {
+    const fixture = createRlsFixture("ac08");
+    const nowSuffix = Date.now();
+
+    try {
+      const {
+        actors,
+        ownerUserId,
+        ownerDeckId,
+        privateCardId,
+        publicCardId,
+        ownerSecondaryCardId,
+        ownerStudySessionId,
+      } = fixture;
+
+      const ownerProfileRows = actors.owner.queryRows<IdRow>(`
+        SELECT user_id::text AS id
+        FROM public.users_profile
+        WHERE user_id = ${sqlLiteral(ownerUserId)}::uuid
+      `);
+      expect(ownerProfileRows).toEqual([{ id: ownerUserId }]);
+
+      const nonOwnerProfileRows = actors.nonOwner.queryRows<IdRow>(`
+        SELECT user_id::text AS id
+        FROM public.users_profile
+        WHERE user_id = ${sqlLiteral(ownerUserId)}::uuid
+      `);
+      expect(nonOwnerProfileRows).toHaveLength(0);
+
+      runSql(`
+        DELETE FROM public.users_profile
+        WHERE user_id = ${sqlLiteral(ownerUserId)}::uuid
+      `);
+
+      expectRlsDenied(() => {
+        actors.nonOwner.runSql(`
+          INSERT INTO public.users_profile (user_id, display_name)
+          VALUES (${sqlLiteral(ownerUserId)}::uuid, 'ac08-non-owner-profile')
+        `);
+      });
+
+      actors.owner.runSql(`
+        INSERT INTO public.users_profile (user_id, display_name)
+        VALUES (${sqlLiteral(ownerUserId)}::uuid, 'ac08-owner-profile')
+      `);
+
+      const ownerProfileUpdatedRows = actors.owner.queryRows<IdRow>(`
+        UPDATE public.users_profile
+        SET display_name = 'ac08-owner-profile-updated'
+        WHERE user_id = ${sqlLiteral(ownerUserId)}::uuid
+        RETURNING user_id::text AS id
+      `);
+      expect(ownerProfileUpdatedRows).toEqual([{ id: ownerUserId }]);
+
+      const nonOwnerProfileUpdatedRows = actors.nonOwner.queryRows<IdRow>(`
+        UPDATE public.users_profile
+        SET display_name = 'ac08-non-owner-profile-update-attempt'
+        WHERE user_id = ${sqlLiteral(ownerUserId)}::uuid
+        RETURNING user_id::text AS id
+      `);
+      expect(nonOwnerProfileUpdatedRows).toHaveLength(0);
+
+      const ownerDeckRows = actors.owner.queryRows<IdRow>(`
+        SELECT id::text AS id
+        FROM public.decks
+        WHERE id = ${sqlLiteral(ownerDeckId)}::uuid
+      `);
+      expect(ownerDeckRows).toEqual([{ id: ownerDeckId }]);
+
+      const nonOwnerDeckRows = actors.nonOwner.queryRows<IdRow>(`
+        SELECT id::text AS id
+        FROM public.decks
+        WHERE id = ${sqlLiteral(ownerDeckId)}::uuid
+      `);
+      expect(nonOwnerDeckRows).toHaveLength(0);
+
+      const ownerInsertedDeckRows = actors.owner.queryRows<IdRow>(`
+        INSERT INTO public.decks (owner_user_id, name, new_limit_per_day)
+        VALUES (
+          ${sqlLiteral(ownerUserId)}::uuid,
+          ${sqlLiteral(`ac08-owner-deck-${nowSuffix}`)},
+          12
+        )
+        RETURNING id::text AS id
+      `);
+      expect(ownerInsertedDeckRows).toHaveLength(1);
+
+      expectRlsDenied(() => {
+        actors.nonOwner.runSql(`
+          INSERT INTO public.decks (owner_user_id, name)
+          VALUES (
+            ${sqlLiteral(ownerUserId)}::uuid,
+            ${sqlLiteral(`ac08-non-owner-deck-${nowSuffix}`)}
+          )
+        `);
+      });
+
+      const ownerUpdatedDeckRows = actors.owner.queryRows<IdRow>(`
+        UPDATE public.decks
+        SET new_limit_per_day = 22
+        WHERE id = ${sqlLiteral(ownerDeckId)}::uuid
+        RETURNING id::text AS id
+      `);
+      expect(ownerUpdatedDeckRows).toEqual([{ id: ownerDeckId }]);
+
+      const nonOwnerUpdatedDeckRows = actors.nonOwner.queryRows<IdRow>(`
+        UPDATE public.decks
+        SET new_limit_per_day = 30
+        WHERE id = ${sqlLiteral(ownerDeckId)}::uuid
+        RETURNING id::text AS id
+      `);
+      expect(nonOwnerUpdatedDeckRows).toHaveLength(0);
+
+      const ownerDeckCardRows = actors.owner.queryRows<IdRow>(`
+        SELECT card_id::text AS id
+        FROM public.deck_cards
+        WHERE deck_id = ${sqlLiteral(ownerDeckId)}::uuid
+          AND card_id = ${sqlLiteral(privateCardId)}::uuid
+      `);
+      expect(ownerDeckCardRows).toEqual([{ id: privateCardId }]);
+
+      const nonOwnerDeckCardRows = actors.nonOwner.queryRows<IdRow>(`
+        SELECT card_id::text AS id
+        FROM public.deck_cards
+        WHERE deck_id = ${sqlLiteral(ownerDeckId)}::uuid
+          AND card_id = ${sqlLiteral(privateCardId)}::uuid
+      `);
+      expect(nonOwnerDeckCardRows).toHaveLength(0);
+
+      expectRlsDenied(() => {
+        actors.nonOwner.runSql(`
+          INSERT INTO public.deck_cards (deck_id, card_id)
+          VALUES (
+            ${sqlLiteral(ownerDeckId)}::uuid,
+            ${sqlLiteral(publicCardId)}::uuid
+          )
+        `);
+      });
+
+      const ownerInsertedDeckCardRows = actors.owner.queryRows<IdRow>(`
+        INSERT INTO public.deck_cards (deck_id, card_id)
+        VALUES (
+          ${sqlLiteral(ownerDeckId)}::uuid,
+          ${sqlLiteral(ownerSecondaryCardId)}::uuid
+        )
+        RETURNING card_id::text AS id
+      `);
+      expect(ownerInsertedDeckCardRows).toEqual([{ id: ownerSecondaryCardId }]);
+
+      const ownerUpdatedDeckCardRows = actors.owner.queryRows<IdRow>(`
+        UPDATE public.deck_cards
+        SET card_id = ${sqlLiteral(publicCardId)}::uuid
+        WHERE deck_id = ${sqlLiteral(ownerDeckId)}::uuid
+          AND card_id = ${sqlLiteral(privateCardId)}::uuid
+        RETURNING card_id::text AS id
+      `);
+      expect(ownerUpdatedDeckCardRows).toEqual([{ id: publicCardId }]);
+
+      const nonOwnerUpdatedDeckCardRows = actors.nonOwner.queryRows<IdRow>(`
+        UPDATE public.deck_cards
+        SET card_id = ${sqlLiteral(privateCardId)}::uuid
+        WHERE deck_id = ${sqlLiteral(ownerDeckId)}::uuid
+          AND card_id = ${sqlLiteral(publicCardId)}::uuid
+        RETURNING card_id::text AS id
+      `);
+      expect(nonOwnerUpdatedDeckCardRows).toHaveLength(0);
+
+      const ownerReviewRows = actors.owner.queryRows<IdRow>(`
+        SELECT card_id::text AS id
+        FROM public.review_states
+        WHERE user_id = ${sqlLiteral(ownerUserId)}::uuid
+          AND card_id = ${sqlLiteral(privateCardId)}::uuid
+      `);
+      expect(ownerReviewRows).toEqual([{ id: privateCardId }]);
+
+      const nonOwnerReviewRows = actors.nonOwner.queryRows<IdRow>(`
+        SELECT card_id::text AS id
+        FROM public.review_states
+        WHERE user_id = ${sqlLiteral(ownerUserId)}::uuid
+          AND card_id = ${sqlLiteral(privateCardId)}::uuid
+      `);
+      expect(nonOwnerReviewRows).toHaveLength(0);
+
+      expectRlsDenied(() => {
+        actors.nonOwner.runSql(`
+          INSERT INTO public.review_states (user_id, card_id, due_date)
+          VALUES (
+            ${sqlLiteral(ownerUserId)}::uuid,
+            ${sqlLiteral(ownerSecondaryCardId)}::uuid,
+            CURRENT_DATE
+          )
+        `);
+      });
+
+      const ownerInsertedReviewRows = actors.owner.queryRows<IdRow>(`
+        INSERT INTO public.review_states (user_id, card_id, due_date, level)
+        VALUES (
+          ${sqlLiteral(ownerUserId)}::uuid,
+          ${sqlLiteral(ownerSecondaryCardId)}::uuid,
+          CURRENT_DATE,
+          1
+        )
+        RETURNING card_id::text AS id
+      `);
+      expect(ownerInsertedReviewRows).toEqual([{ id: ownerSecondaryCardId }]);
+
+      const ownerUpdatedReviewRows = actors.owner.queryRows<IdRow>(`
+        UPDATE public.review_states
+        SET level = level + 1
+        WHERE user_id = ${sqlLiteral(ownerUserId)}::uuid
+          AND card_id = ${sqlLiteral(privateCardId)}::uuid
+        RETURNING card_id::text AS id
+      `);
+      expect(ownerUpdatedReviewRows).toEqual([{ id: privateCardId }]);
+
+      const nonOwnerUpdatedReviewRows = actors.nonOwner.queryRows<IdRow>(`
+        UPDATE public.review_states
+        SET level = level + 1
+        WHERE user_id = ${sqlLiteral(ownerUserId)}::uuid
+          AND card_id = ${sqlLiteral(privateCardId)}::uuid
+        RETURNING card_id::text AS id
+      `);
+      expect(nonOwnerUpdatedReviewRows).toHaveLength(0);
+
+      const ownerStudySessionRows = actors.owner.queryRows<IdRow>(`
+        SELECT id::text AS id
+        FROM public.study_sessions
+        WHERE id = ${sqlLiteral(ownerStudySessionId)}::uuid
+      `);
+      expect(ownerStudySessionRows).toEqual([{ id: ownerStudySessionId }]);
+
+      const nonOwnerStudySessionRows = actors.nonOwner.queryRows<IdRow>(`
+        SELECT id::text AS id
+        FROM public.study_sessions
+        WHERE id = ${sqlLiteral(ownerStudySessionId)}::uuid
+      `);
+      expect(nonOwnerStudySessionRows).toHaveLength(0);
+
+      expectRlsDenied(() => {
+        actors.nonOwner.runSql(`
+          INSERT INTO public.study_sessions (user_id, deck_id, current_card_id)
+          VALUES (
+            ${sqlLiteral(ownerUserId)}::uuid,
+            ${sqlLiteral(ownerDeckId)}::uuid,
+            ${sqlLiteral(publicCardId)}::uuid
+          )
+        `);
+      });
+
+      const ownerInsertedStudySessionRows = actors.owner.queryRows<IdRow>(`
+        INSERT INTO public.study_sessions (user_id, deck_id, current_card_id)
+        VALUES (
+          ${sqlLiteral(ownerUserId)}::uuid,
+          ${sqlLiteral(ownerDeckId)}::uuid,
+          ${sqlLiteral(ownerSecondaryCardId)}::uuid
+        )
+        RETURNING id::text AS id
+      `);
+      expect(ownerInsertedStudySessionRows).toHaveLength(1);
+
+      const ownerUpdatedStudySessionRows = actors.owner.queryRows<IdRow>(`
+        UPDATE public.study_sessions
+        SET revealed = true
+        WHERE id = ${sqlLiteral(ownerStudySessionId)}::uuid
+        RETURNING id::text AS id
+      `);
+      expect(ownerUpdatedStudySessionRows).toEqual([{ id: ownerStudySessionId }]);
+
+      const nonOwnerUpdatedStudySessionRows = actors.nonOwner.queryRows<IdRow>(`
+        UPDATE public.study_sessions
+        SET revealed = true
+        WHERE id = ${sqlLiteral(ownerStudySessionId)}::uuid
+        RETURNING id::text AS id
+      `);
+      expect(nonOwnerUpdatedStudySessionRows).toHaveLength(0);
+    } finally {
+      fixture.cleanup();
+    }
+  });
 
   // AC原文 (AC-09): もしDELETEポリシーが明示されていないテーブルDELETEが試行された場合、システムは操作を拒否すること。
   // AC解釈: cards private owner DELETE以外はdefault denyで拒否される必要がある。
@@ -279,7 +939,153 @@ describe("database-schema-rls 統合テスト", () => {
   // @category: edge-case
   // @dependency: table DELETE policies, default deny behavior
   // @complexity: medium
-  it.todo("AC-09: 明示DELETEポリシー未定義テーブルのDELETE試行はすべて拒否される");
+  it("AC-09: 明示DELETEポリシー未定義テーブルのDELETE試行はすべて拒否される", () => {
+    const fixture = createRlsFixture("ac09");
+
+    try {
+      const {
+        actors,
+        ownerUserId,
+        ownerDeckId,
+        privateCardId,
+        publicCardId,
+        ownerIllustrationId,
+        ownerStudySessionId,
+      } = fixture;
+
+      const deniedDeleteTargets = [
+        {
+          countSql: `
+            SELECT COUNT(*)::int AS count
+            FROM public.users_profile
+            WHERE user_id = ${sqlLiteral(ownerUserId)}::uuid
+          `,
+          deleteSql: `
+            DELETE FROM public.users_profile
+            WHERE user_id = ${sqlLiteral(ownerUserId)}::uuid
+            RETURNING user_id::text AS id
+          `,
+        },
+        {
+          countSql: `
+            SELECT COUNT(*)::int AS count
+            FROM public.decks
+            WHERE id = ${sqlLiteral(ownerDeckId)}::uuid
+          `,
+          deleteSql: `
+            DELETE FROM public.decks
+            WHERE id = ${sqlLiteral(ownerDeckId)}::uuid
+            RETURNING id::text AS id
+          `,
+        },
+        {
+          countSql: `
+            SELECT COUNT(*)::int AS count
+            FROM public.deck_cards
+            WHERE deck_id = ${sqlLiteral(ownerDeckId)}::uuid
+              AND card_id = ${sqlLiteral(privateCardId)}::uuid
+          `,
+          deleteSql: `
+            DELETE FROM public.deck_cards
+            WHERE deck_id = ${sqlLiteral(ownerDeckId)}::uuid
+              AND card_id = ${sqlLiteral(privateCardId)}::uuid
+            RETURNING card_id::text AS id
+          `,
+        },
+        {
+          countSql: `
+            SELECT COUNT(*)::int AS count
+            FROM public.review_states
+            WHERE user_id = ${sqlLiteral(ownerUserId)}::uuid
+              AND card_id = ${sqlLiteral(privateCardId)}::uuid
+          `,
+          deleteSql: `
+            DELETE FROM public.review_states
+            WHERE user_id = ${sqlLiteral(ownerUserId)}::uuid
+              AND card_id = ${sqlLiteral(privateCardId)}::uuid
+            RETURNING card_id::text AS id
+          `,
+        },
+        {
+          countSql: `
+            SELECT COUNT(*)::int AS count
+            FROM public.illustrations
+            WHERE id = ${sqlLiteral(ownerIllustrationId)}::uuid
+          `,
+          deleteSql: `
+            DELETE FROM public.illustrations
+            WHERE id = ${sqlLiteral(ownerIllustrationId)}::uuid
+            RETURNING id::text AS id
+          `,
+        },
+        {
+          countSql: `
+            SELECT COUNT(*)::int AS count
+            FROM public.study_sessions
+            WHERE id = ${sqlLiteral(ownerStudySessionId)}::uuid
+          `,
+          deleteSql: `
+            DELETE FROM public.study_sessions
+            WHERE id = ${sqlLiteral(ownerStudySessionId)}::uuid
+            RETURNING id::text AS id
+          `,
+        },
+        {
+          countSql: `
+            SELECT COUNT(*)::int AS count
+            FROM public.cards
+            WHERE id = ${sqlLiteral(publicCardId)}::uuid
+          `,
+          deleteSql: `
+            DELETE FROM public.cards
+            WHERE id = ${sqlLiteral(publicCardId)}::uuid
+            RETURNING id::text AS id
+          `,
+        },
+      ];
+
+      for (const target of deniedDeleteTargets) {
+        const beforeCount = queryRows<CountRow>(target.countSql)[0]?.count;
+        expect(beforeCount).toBe(1);
+
+        const deletedRows = actors.owner.queryRows<IdRow>(target.deleteSql);
+        expect(deletedRows).toHaveLength(0);
+
+        const afterCount = queryRows<CountRow>(target.countSql)[0]?.count;
+        expect(afterCount).toBe(beforeCount);
+      }
+
+      runSql(`
+        UPDATE public.study_sessions
+        SET current_card_id = NULL
+        WHERE user_id = ${sqlLiteral(ownerUserId)}::uuid
+          AND current_card_id = ${sqlLiteral(privateCardId)}::uuid
+      `);
+
+      const nonOwnerPrivateDeleteRows = actors.nonOwner.queryRows<IdRow>(`
+        DELETE FROM public.cards
+        WHERE id = ${sqlLiteral(privateCardId)}::uuid
+        RETURNING id::text AS id
+      `);
+      expect(nonOwnerPrivateDeleteRows).toHaveLength(0);
+
+      const anonymousPrivateDeleteRows = actors.anonymous.queryRows<IdRow>(`
+        DELETE FROM public.cards
+        WHERE id = ${sqlLiteral(privateCardId)}::uuid
+        RETURNING id::text AS id
+      `);
+      expect(anonymousPrivateDeleteRows).toHaveLength(0);
+
+      const ownerPrivateDeleteRows = actors.owner.queryRows<IdRow>(`
+        DELETE FROM public.cards
+        WHERE id = ${sqlLiteral(privateCardId)}::uuid
+        RETURNING id::text AS id
+      `);
+      expect(ownerPrivateDeleteRows).toEqual([{ id: privateCardId }]);
+    } finally {
+      fixture.cleanup();
+    }
+  });
 
   // 実行順序: Phase 2 - Storage Policy
 

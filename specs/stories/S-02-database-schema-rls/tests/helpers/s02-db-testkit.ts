@@ -8,6 +8,13 @@ export interface AuthUserFixture {
   email: string;
 }
 
+export type RlsRole = "anon" | "authenticated";
+
+export interface RlsSession {
+  role: RlsRole;
+  userId: string | null;
+}
+
 function getDatabaseUrl(): string {
   return (
     process.env.S02_TEST_DATABASE_URL ??
@@ -46,6 +53,53 @@ function psql(args: string[]): string {
   }
 }
 
+function queryRowsFromStatement<T extends Record<string, unknown>>(statement: string): T[] {
+  const wrappedQuery = `
+    WITH result_row AS (
+      ${statement}
+    )
+    SELECT COALESCE(json_agg(row_to_json(result_row)), '[]'::json)::text AS data
+    FROM result_row
+  `;
+  const output = psql(["-c", wrappedQuery]).trim();
+  return parseJsonRows<T>(output);
+}
+
+function parseJsonRows<T extends Record<string, unknown>>(output: string): T[] {
+  if (output.length === 0) {
+    return [];
+  }
+
+  return JSON.parse(output) as T[];
+}
+
+function buildJwtClaims(session: RlsSession): string {
+  const claims: Record<string, string> = {
+    role: session.role,
+  };
+
+  if (session.userId !== null) {
+    claims.sub = session.userId;
+  }
+
+  return JSON.stringify(claims);
+}
+
+function buildSessionScopedSql(session: RlsSession, statement: string): string {
+  const subject = session.userId ?? "";
+  const claims = buildJwtClaims(session);
+
+  return `
+    BEGIN;
+    SET LOCAL ROLE ${session.role};
+    SET LOCAL request.jwt.claim.role = ${sqlLiteral(session.role)};
+    SET LOCAL request.jwt.claim.sub = ${sqlLiteral(subject)};
+    SET LOCAL request.jwt.claims = ${sqlLiteral(claims)};
+    ${statement};
+    COMMIT;
+  `;
+}
+
 export function runSql(sql: string): void {
   const statement = trimTrailingSemicolon(sql);
   psql(["-c", statement]);
@@ -53,18 +107,30 @@ export function runSql(sql: string): void {
 
 export function queryRows<T extends Record<string, unknown>>(sql: string): T[] {
   const statement = trimTrailingSemicolon(sql);
+  return queryRowsFromStatement<T>(statement);
+}
+
+export function runSqlAsRls(session: RlsSession, sql: string): void {
+  const statement = trimTrailingSemicolon(sql);
+  psql(["-c", buildSessionScopedSql(session, statement)]);
+}
+
+export function queryRowsAsRls<T extends Record<string, unknown>>(
+  session: RlsSession,
+  sql: string
+): T[] {
+  const statement = trimTrailingSemicolon(sql);
   const wrappedQuery = `
+    WITH result_row AS (
+      ${statement}
+    )
     SELECT COALESCE(json_agg(row_to_json(result_row)), '[]'::json)::text AS data
-    FROM (${statement}) AS result_row
+    FROM result_row
   `;
+  const scopedSql = buildSessionScopedSql(session, wrappedQuery);
+  const output = psql(["-c", scopedSql]).trim();
 
-  const output = psql(["-c", wrappedQuery]).trim();
-
-  if (output.length === 0) {
-    return [];
-  }
-
-  return JSON.parse(output) as T[];
+  return parseJsonRows<T>(output);
 }
 
 export function sqlLiteral(value: string): string {
