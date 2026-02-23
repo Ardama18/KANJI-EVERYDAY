@@ -84,7 +84,7 @@
 | カラム | 型 | 制約 | デフォルト | 説明 |
 |--------|-----|------|-----------|------|
 | `id` | `uuid` | PK | `gen_random_uuid()` | イラストID |
-| `owner_user_id` | `uuid` | FK → auth.users(id) ON DELETE CASCADE, NULL可 | `NULL` | 所有者（公開イラストはNULL） |
+| `owner_user_id` | `uuid` | NOT NULL, FK → auth.users(id) ON DELETE CASCADE | - | 所有者 |
 | `illustration_key` | `text` | NOT NULL | - | イラストキー（cards.illustration_key と対応） |
 | `status` | `text` | NOT NULL, CHECK ('pending', 'ready', 'failed') | `'pending'` | 生成状態 |
 | `storage_path` | `text` | | `NULL` | Supabase Storage 内のパス |
@@ -129,7 +129,6 @@
 - `SELECT`: `auth.uid() = owner_user_id`
 - `INSERT`: `auth.uid() = owner_user_id`
 - `UPDATE`: `auth.uid() = owner_user_id`
-- `DELETE`: `auth.uid() = owner_user_id`
 
 ### cards
 - `SELECT`: `visibility = 'public' OR (visibility = 'private' AND auth.uid() = owner_user_id)`
@@ -139,7 +138,7 @@
 ### deck_cards
 - `SELECT`: デッキの owner であること（`EXISTS (SELECT 1 FROM decks WHERE decks.id = deck_cards.deck_id AND decks.owner_user_id = auth.uid())`）
 - `INSERT`: 同上
-- `DELETE`: 同上
+- `UPDATE`: 同上
 
 ### review_states
 - `SELECT`: `auth.uid() = user_id`
@@ -147,7 +146,7 @@
 - `UPDATE`: `auth.uid() = user_id`
 
 ### illustrations
-- `SELECT`: `owner_user_id IS NULL OR auth.uid() = owner_user_id`（公開イラストは全員閲覧可）
+- `SELECT`: `auth.uid() = owner_user_id`
 - `INSERT`: `auth.uid() = owner_user_id`
 - `UPDATE`: `auth.uid() = owner_user_id`
 
@@ -179,7 +178,7 @@ $$ LANGUAGE plpgsql;
 ## 6. TypeScript 型定義
 
 - Supabase CLI の `supabase gen types typescript` で自動生成
-- 生成先: `src/types/database.ts`
+- 生成先: `frontend/src/types/database.ts`
 - 生成された型を Supabase Client の初期化時にジェネリクスとして渡す
 
 # 技術要件
@@ -195,5 +194,5 @@ $$ LANGUAGE plpgsql;
 - ポリシー未設定のテーブルへのアクセスはデフォルトで拒否される
 
 ## 型定義の生成と使用
-- `supabase gen types typescript --local > src/types/database.ts`
+- `supabase gen types typescript --local > frontend/src/types/database.ts`
 - 生成された `Database` 型を `createServerClient<Database>(...)` のように使用

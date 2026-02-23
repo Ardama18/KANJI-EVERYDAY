@@ -80,7 +80,7 @@ W1（ひらがな→漢字）: front_text="あたたかい", back_text="温か�
 - `src/lib/supabase/server.ts`: サーバー用 Supabase Client
 - `src/lib/supabase/client.ts`: クライアント用 Supabase Client
 - `src/lib/date.ts`: JST 日付ユーティリティ（today, tomorrow の JST 基準計算）
-- `src/types/database.ts`: Supabase 生成型定義
+- `frontend/src/types/database.ts`: Supabase 生成型定義
 
 ## セキュリティ要件
 
