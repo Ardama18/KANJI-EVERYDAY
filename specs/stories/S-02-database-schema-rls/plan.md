@@ -32,7 +32,7 @@ ui_design: none
 ## 影響範囲
 ### 対象ファイル
 - [ ] `supabase/migrations/*_s02_schema_rls.sql`
-- [ ] `supabase/migrations/*_s02_storage_illustrations.sql`
+- [x] `supabase/migrations/*_s02_storage_illustrations.sql`
 - [ ] `frontend/src/types/database.ts`
 - [ ] `frontend/src/lib/supabase/server.ts`
 - [ ] `frontend/src/lib/supabase/client.ts`
@@ -131,10 +131,10 @@ flowchart TD
 **目的**: `illustrations` バケットをprivate + owner scopedでDB境界と整合させる。
 
 #### タスク
-- [ ] `*_s02_storage_illustrations.sql` を作成し、`illustrations` バケットを `public=false` で作成する
+- [x] `*_s02_storage_illustrations.sql` を作成し、`illustrations` バケットを `public=false` で作成する
   - 実装: `supabase/migrations/*_s02_storage_illustrations.sql`
   - 統合テスト: AC-10
-- [ ] `storage.objects` のowner scoped policyを実装し、non-owner/anonymous拒否を保証する
+- [x] `storage.objects` のowner scoped policyを実装し、non-owner/anonymous拒否を保証する
   - 実装: `supabase/migrations/*_s02_storage_illustrations.sql`
   - 統合テスト: AC-10
 - [ ] Phase 2対象の統合テストを実装・実行し、DB行境界とStorage境界の一致を確認する
