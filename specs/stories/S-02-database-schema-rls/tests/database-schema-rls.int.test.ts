@@ -7,6 +7,9 @@
 // AC-01, AC-02, AC-03, AC-04, AC-05, AC-06, AC-07, AC-08, AC-09, AC-10, AC-11, AC-12
 
 import { describe, expect, it } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { createRlsFixture } from "./helpers/rls-actors";
 import { createAuthUserFixture, queryRows, runSql, sqlLiteral } from "./helpers/s02-db-testkit";
@@ -74,6 +77,19 @@ interface StoragePolicyRow {
 function expectRlsDenied(operation: () => void): void {
 	expect(operation).toThrow(/row-level security|permission denied/iu);
 }
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const frontendDatabaseTypePath = path.resolve(__dirname, "../../../../frontend/src/types/database.ts");
+const expectedPublicTables = [
+	"users_profile",
+	"decks",
+	"cards",
+	"deck_cards",
+	"review_states",
+	"illustrations",
+	"study_sessions",
+] as const;
 
 describe("database-schema-rls 統合テスト", () => {
 	// 実行順序: Phase 0 - Schema / Extension / Trigger
@@ -1339,5 +1355,21 @@ describe("database-schema-rls 統合テスト", () => {
 	// @category: integration
 	// @dependency: supabase CLI, frontend/src/types/database.ts
 	// @complexity: medium
-	it.todo("AC-12: 型生成結果が frontend/src/types/database.ts に出力され7テーブル型を含む");
+	it("AC-12: 型生成結果が frontend/src/types/database.ts に出力され7テーブル型を含む", () => {
+		expect(fs.existsSync(frontendDatabaseTypePath)).toBe(true);
+		expect(fs.existsSync(path.resolve(__dirname, "../../../../frontend/types/database.ts"))).toBe(false);
+
+		const generatedTypeFile = fs.readFileSync(frontendDatabaseTypePath, "utf8");
+
+		expect(generatedTypeFile).toContain("export type Database =");
+		expect(generatedTypeFile).toContain("public: {");
+		expect(generatedTypeFile).toContain("Tables: {");
+
+		for (const tableName of expectedPublicTables) {
+			expect(generatedTypeFile).toContain(`${tableName}: {`);
+		}
+
+		const databaseTypeExports = generatedTypeFile.match(/export type Database =/gu) ?? [];
+		expect(databaseTypeExports).toHaveLength(1);
+	});
 });

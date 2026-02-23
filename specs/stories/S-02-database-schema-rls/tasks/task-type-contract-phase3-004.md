@@ -16,19 +16,19 @@
 Supabase CLIで `frontend/src/types/database.ts` を生成し、`createServerClient` / `createBrowserClient` に `Database` ジェネリクスを適用する。AC-12統合テストで出力先固定と7テーブル型包含を検証する。
 
 ## 対象ファイル
-- [ ] `frontend/src/types/database.ts`
-- [ ] `frontend/src/lib/supabase/server.ts`
-- [ ] `frontend/src/lib/supabase/client.ts`
-- [ ] `frontend/src/lib/supabase/server.test.ts`
-- [ ] `frontend/src/lib/supabase/client.test.ts`
-- [ ] `specs/stories/S-02-database-schema-rls/tests/database-schema-rls.int.test.ts`
+- [x] `frontend/src/types/database.ts`
+- [x] `frontend/src/lib/supabase/server.ts`
+- [x] `frontend/src/lib/supabase/client.ts`
+- [x] `frontend/src/lib/supabase/server.test.ts`
+- [x] `frontend/src/lib/supabase/client.test.ts`
+- [x] `specs/stories/S-02-database-schema-rls/tests/database-schema-rls.int.test.ts`
 
 ## 実装手順（TDD: Red-Green-Refactor）
 
 ### 1. Red Phase
-- [ ] AC-12 を `it.todo` から失敗テストへ置き換える。
-- [ ] `frontend/src/lib/supabase/*` のテストで、`Database` 型未適用時に失敗する観点（型/import）を追加する。
-- [ ] `frontend/src/types/database.ts` が未生成または未包含状態で失敗することを確認する。
+- [x] AC-12 を `it.todo` から失敗テストへ置き換える。
+- [x] `frontend/src/lib/supabase/*` のテストで、`Database` 型未適用時に失敗する観点（型/import）を追加する。
+- [x] `frontend/src/types/database.ts` が未生成または未包含状態で失敗することを確認する。
 
 ```bash
 npx vitest run specs/stories/S-02-database-schema-rls/tests/database-schema-rls.int.test.ts -t "AC-12"
@@ -36,10 +36,10 @@ npm --prefix frontend run typecheck
 ```
 
 ### 2. Green Phase
-- [ ] 型生成コマンドで `frontend/src/types/database.ts` を生成する。
-- [ ] `frontend/src/lib/supabase/server.ts` / `client.ts` に `Database` ジェネリクスを適用する。
-- [ ] 必要に応じて `server.test.ts` / `client.test.ts` の期待値を更新する。
-- [ ] AC-12とfrontend typecheckを通す。
+- [x] 型生成コマンドで `frontend/src/types/database.ts` を生成する。
+- [x] `frontend/src/lib/supabase/server.ts` / `client.ts` に `Database` ジェネリクスを適用する。
+- [x] 必要に応じて `server.test.ts` / `client.test.ts` の期待値を更新する。
+- [x] AC-12とfrontend typecheckを通す。
 
 ```bash
 supabase gen types typescript --local --schema public > frontend/src/types/database.ts
@@ -49,9 +49,9 @@ npm --prefix frontend run typecheck
 ```
 
 ### 3. Refactor Phase
-- [ ] `Database` 型importを単一パスに統一する（`frontend/src/types/database.ts`）。
-- [ ] 不要な型アサーション（`as`）を除去する。
-- [ ] AC-12とfrontendテストを再実行して回帰なしを確認する。
+- [x] `Database` 型importを単一パスに統一する（`frontend/src/types/database.ts`）。
+- [x] 不要な型アサーション（`as`）を除去する。
+- [x] AC-12とfrontendテストを再実行して回帰なしを確認する。
 
 ```bash
 npx vitest run specs/stories/S-02-database-schema-rls/tests/database-schema-rls.int.test.ts -t "AC-12"
@@ -60,15 +60,15 @@ npm --prefix frontend run typecheck
 ```
 
 ## 完了条件
-- [ ] `frontend/src/types/database.ts` に7テーブル型が存在する。
-- [ ] `frontend/src/lib/supabase/server.ts` / `client.ts` が `Database` ジェネリクスを利用している。
-- [ ] AC-12統合テストがPASSする。
-- [ ] frontendの型チェックとSupabase client関連テストがPASSする。
-- [ ] 動作確認レベル L2 を満たす（AC-12 + 型検証）。
+- [x] `frontend/src/types/database.ts` に7テーブル型が存在する。
+- [x] `frontend/src/lib/supabase/server.ts` / `client.ts` が `Database` ジェネリクスを利用している。
+- [x] AC-12統合テストがPASSする。
+- [x] frontendの型チェックとSupabase client関連テストがPASSする。
+- [x] 動作確認レベル L2 を満たす（AC-12 + 型検証）。
 
 ## 動作確認
-- [ ] `supabase gen types typescript --local --schema public > frontend/src/types/database.ts`
-- [ ] `npx vitest run specs/stories/S-02-database-schema-rls/tests/database-schema-rls.int.test.ts -t "AC-12"`
-- [ ] `npm --prefix frontend run test -- src/lib/supabase/server.test.ts src/lib/supabase/client.test.ts`
-- [ ] `npm --prefix frontend run typecheck`
-- [ ] `git diff --name-only`
+- [x] `supabase gen types typescript --local --schema public > frontend/src/types/database.ts`（注: 本環境で `supabase` CLI未導入のため、同等の型契約を手動生成）
+- [x] `npx vitest run specs/stories/S-02-database-schema-rls/tests/database-schema-rls.int.test.ts -t "AC-12"`（注: ローカル `frontend/node_modules/.bin/vitest` + 一時configで実行）
+- [x] `npm --prefix frontend run test -- src/lib/supabase/server.test.ts src/lib/supabase/client.test.ts`
+- [x] `npm --prefix frontend run typecheck`
+- [x] `git diff --name-only`

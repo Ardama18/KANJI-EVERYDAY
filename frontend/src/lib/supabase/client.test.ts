@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createBrowserClient as createBrowserClientUnderTest } from "./client";
@@ -46,5 +47,12 @@ describe("frontend/src/lib/supabase/client.ts", () => {
 			envConfig.supabaseAnonKey
 		);
 		expect(getEnvConfigMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("Database 型を src/types/database.ts から import し createBrowserClient にジェネリクス適用している", () => {
+		const source = readFileSync(new URL("./client.ts", import.meta.url), "utf8");
+
+		expect(source).toContain('import type { Database } from "@/types/database";');
+		expect(source).toContain("createSupabaseBrowserClient<Database>(");
 	});
 });

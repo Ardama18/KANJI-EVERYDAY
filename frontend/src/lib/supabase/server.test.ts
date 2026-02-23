@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createServerClient as createServerClientUnderTest } from "./server";
@@ -71,6 +72,13 @@ describe("frontend/src/lib/supabase/server.ts", () => {
 				remove: expect.any(Function),
 			}),
 		});
+	});
+
+	it("Database 型を src/types/database.ts から import し createServerClient にジェネリクス適用している", () => {
+		const source = readFileSync(new URL("./server.ts", import.meta.url), "utf8");
+
+		expect(source).toContain('import type { Database } from "@/types/database";');
+		expect(source).toContain("createSupabaseServerClient<Database>(");
 	});
 
 	it("cookieStore を createServerClient へ透過的に転送する", () => {

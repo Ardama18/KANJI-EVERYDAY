@@ -1,3 +1,4 @@
+import type { Database } from "@/types/database";
 import { createServerClient as createSupabaseServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
@@ -8,7 +9,7 @@ export const createServerClient = () => {
 
 	const cookieStore = cookies();
 
-	return createSupabaseServerClient(supabaseUrl, supabaseAnonKey, {
+	return createSupabaseServerClient<Database>(supabaseUrl, supabaseAnonKey, {
 		cookies: {
 			get(name: string) {
 				return cookieStore.get(name)?.value;
