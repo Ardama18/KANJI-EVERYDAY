@@ -1,0 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+}
+
+.app-root {
+  min-height: 100vh;
+  background:
+    linear-gradient(180deg, #f8fafc 0%, #edf2ff 65%, #ffffff 100%);
+}
+
+.app-page {
+  width: min(680px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 2rem 1rem 3rem;
+  color: #0f172a;
+}
+
+.app-link {
+  display: inline-block;
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #93c5fd;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  text-decoration: none;
+}
+
+.app-link:hover,
+.app-link:focus-visible {
+  background: #dbeafe;
+}
+
+ul {
+  margin: 1rem 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.75rem;
+}
