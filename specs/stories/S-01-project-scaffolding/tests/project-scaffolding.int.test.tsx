@@ -103,8 +103,8 @@ describe("project-scaffolding 統合テスト", () => {
 
     expect(serverSource).toContain("getEnvConfig(")
     expect(browserSource).toContain("getEnvConfig(")
-    expect(serverSource).toContain("createSupabaseServerClient(")
-    expect(browserSource).toContain("createSupabaseBrowserClient(")
+    expect(serverSource).toMatch(/createSupabaseServerClient(?:<[^>]+>)?\(/)
+    expect(browserSource).toMatch(/createSupabaseBrowserClient(?:<[^>]+>)?\(/)
     expect(serverSource).not.toContain("SUPABASE_SERVICE_ROLE_KEY")
     expect(browserSource).not.toContain("SUPABASE_SERVICE_ROLE_KEY")
   })
