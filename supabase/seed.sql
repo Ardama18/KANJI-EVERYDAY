@@ -155,25 +155,51 @@ seed_cards AS (
 		illustration_key,
 		pattern || ':' || front_text || ':' || back_text AS card_key
 	FROM seed_card_blueprints
+),
+upserted_seed_cards AS (
+	INSERT INTO public.cards (
+		owner_user_id,
+		visibility,
+		skill,
+		pattern,
+		front_text,
+		back_text,
+		illustration_key,
+		card_key
+	)
+	SELECT
+		owner_user_id,
+		visibility,
+		skill,
+		pattern,
+		front_text,
+		back_text,
+		illustration_key,
+		card_key
+	FROM seed_cards
+	ON CONFLICT (card_key) DO NOTHING
+	RETURNING
+		id,
+		card_key
+),
+resolved_seed_cards AS (
+	SELECT
+		id,
+		card_key
+	FROM upserted_seed_cards
+	UNION
+	SELECT
+		cards.id,
+		cards.card_key
+	FROM public.cards AS cards
+	INNER JOIN seed_cards ON seed_cards.card_key = cards.card_key
 )
-INSERT INTO public.cards (
-	owner_user_id,
-	visibility,
-	skill,
-	pattern,
-	front_text,
-	back_text,
-	illustration_key,
-	card_key
+INSERT INTO public.deck_cards (
+	deck_id,
+	card_id
 )
 SELECT
-	owner_user_id,
-	visibility,
-	skill,
-	pattern,
-	front_text,
-	back_text,
-	illustration_key,
-	card_key
-FROM seed_cards
-ON CONFLICT (card_key) DO NOTHING;
+	'00000000-0000-4000-8000-0000000000d4'::uuid AS deck_id,
+	resolved_seed_cards.id AS card_id
+FROM resolved_seed_cards
+ON CONFLICT (deck_id, card_id) DO NOTHING;

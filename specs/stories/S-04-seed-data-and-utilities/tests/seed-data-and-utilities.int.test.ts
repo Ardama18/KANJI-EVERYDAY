@@ -327,7 +327,31 @@ describe("seed-data-and-utilities 統合テスト", () => {
 	// @category: integration
 	// @dependency: supabase/seed.sql, public.deck_cards
 	// @complexity: medium
-	it.todo("IT-AC10: Seed deck と全 Seed cards の deck_cards 紐付けが 100 件になる");
+	it("IT-AC10: Seed deck と全 Seed cards の deck_cards 紐付けが 100 件になる", () => {
+		const deckCardCount = queryRows<CountRow>(`
+      SELECT COUNT(*)::int AS count
+      FROM public.deck_cards
+      WHERE deck_id = ${sqlLiteral(SEED_DECK_ID)}::uuid
+    `)[0];
+		expect(deckCardCount?.count).toBe(100);
+
+		const unlinkedSeedCardCount = queryRows<CountRow>(`
+      WITH seed_cards AS (
+        SELECT id
+        FROM public.cards
+        WHERE pattern IN ('R1', 'W1')
+          AND visibility = 'public'
+          AND owner_user_id IS NULL
+      )
+      SELECT COUNT(*)::int AS count
+      FROM seed_cards
+      LEFT JOIN public.deck_cards
+        ON deck_cards.card_id = seed_cards.id
+       AND deck_cards.deck_id = ${sqlLiteral(SEED_DECK_ID)}::uuid
+      WHERE deck_cards.card_id IS NULL
+    `)[0];
+		expect(unlinkedSeedCardCount?.count).toBe(0);
+	});
 
 	// AC原文 (AC-11): もし Seed を再実行した場合、システムは `cards` を `ON CONFLICT (card_key) DO NOTHING`、`decks` を `ON CONFLICT (id)`、`deck_cards` を `ON CONFLICT (deck_id, card_id) DO NOTHING` で処理し、`cards/decks/deck_cards` の件数を増やさないこと。
 	// AC解釈: 再実行時に重複を防ぐ冪等制御が 3 テーブルで同時に成立する必要がある。
