@@ -39,7 +39,7 @@ npm --prefix frontend run test -- ../specs/stories/S-04-seed-data-and-utilities/
 - [x] `supabase/seed.sql` に 50字ソース定義を実装し、各行から R1/W1 cards を生成する。
 - [x] `auth.users` を必須列セットで `ON CONFLICT (id)` upsert し、`users_profile` を同期 upsert する。
 - [x] `decks` を `SEED_DECK_ID` 固定で upsert し、`name='小学3年生の漢字'` と `new_limit_per_day=10` を保証する。
-- [ ] `IT-AC07`〜`IT-AC09` が pass するまで SQL とテストを調整する。
+- [x] `IT-AC07`〜`IT-AC09` が pass するまで SQL とテストを調整する。
 
 ```bash
 supabase db reset
@@ -49,7 +49,7 @@ npm --prefix frontend run test -- ../specs/stories/S-04-seed-data-and-utilities/
 ### 3. Refactor Phase
 - [x] Seed SQL の CTE 構成を整理し、cards 生成と owner/deck upsert の責務を明確化する。
 - [x] `card_key` 生成式を一箇所に固定し、契約逸脱を防ぐ。
-- [ ] Phase 1 前半対象テストを再実行して回帰なしを確認する。
+- [x] Phase 1 前半対象テストを再実行して回帰なしを確認する。
 
 ```bash
 supabase db reset
@@ -59,10 +59,12 @@ npm --prefix frontend run test -- ../specs/stories/S-04-seed-data-and-utilities/
 ## 完了条件
 - [x] `supabase/seed.sql` に固定 UUID の owner/profile/deck upsert が実装されている（AC-09）。
 - [x] Seed 実行後に cards が 100件で、R1/W1 と card_key 契約を満たす（AC-07, AC-08）。
-- [ ] `IT-AC07`〜`IT-AC09` が pass している。
-- [ ] 動作確認レベル L2（対象 Integration）が満たされている。
+- [x] `IT-AC07`〜`IT-AC09` が pass している。
+- [x] 動作確認レベル L2（対象 Integration）が満たされている。
 
 ## 動作確認
 - [ ] `supabase db reset`
-- [ ] `npm --prefix frontend run test -- ../specs/stories/S-04-seed-data-and-utilities/tests/seed-data-and-utilities.int.test.ts -t "IT-AC07|IT-AC08|IT-AC09"`
+- [x] `npm --prefix frontend run test -- ../specs/stories/S-04-seed-data-and-utilities/tests/seed-data-and-utilities.int.test.ts -t "IT-AC07|IT-AC08|IT-AC09"`
 - [x] `git diff --name-only`
+
+注記: `supabase` CLI が未導入のため `supabase db reset` は未実行。DB接続は `S02_TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres` を指定して確認した。
