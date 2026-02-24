@@ -1,10 +1,376 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createServerClient, createServiceRoleClient } from "@/lib/supabase/server";
+const createServerClientMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/supabase/server", () => ({
+	createServerClient: createServerClientMock,
+}));
+
+import {
+	__resetProcessIllustrationGenerationImplementationForTest,
+	__setProcessIllustrationGenerationImplementationForTest,
+	triggerIllustrationGeneration,
+} from "./illustration-actions";
+
+type QueryError = {
+	message: string;
+};
+
+type QueryResult<TData> = {
+	data: TData;
+	error: QueryError | null;
+};
+
+type User = {
+	id: string;
+};
+
+type CardRow = {
+	id: string;
+	owner_user_id: string | null;
+	illustration_key: string | null;
+	back_text: string;
+	skill: string;
+};
+
+type IllustrationRow = {
+	id: string;
+	status: string;
+};
+
+type IdRow = {
+	id: string;
+};
+
+type TriggerTestOptions = {
+	user: User | null;
+	card: CardRow | null;
+	existingIllustration: IllustrationRow | null;
+	updateResult: QueryResult<IdRow>;
+	insertResult: QueryResult<IdRow>;
+};
+
+const createDefaultOptions = (): TriggerTestOptions => ({
+	user: { id: "user-1" },
+	card: {
+		id: "card-1",
+		owner_user_id: "user-1",
+		illustration_key: "kanji-key-1",
+		back_text: "example back text",
+		skill: "reading",
+	},
+	existingIllustration: null,
+	updateResult: {
+		data: { id: "illustration-retry" },
+		error: null,
+	},
+	insertResult: {
+		data: { id: "illustration-new" },
+		error: null,
+	},
+});
+
+const createSupabaseDouble = (overrides?: Partial<TriggerTestOptions>) => {
+	const options = {
+		...createDefaultOptions(),
+		...overrides,
+	};
+
+	const getUserMock = vi.fn<() => Promise<QueryResult<{ user: User | null }>>>().mockResolvedValue({
+		data: {
+			user: options.user,
+		},
+		error: null,
+	});
+
+	const cardMaybeSingleMock = vi
+		.fn<() => Promise<QueryResult<CardRow | null>>>()
+		.mockResolvedValue({
+			data: options.card,
+			error: null,
+		});
+	const cardEqOwnerMock = vi
+		.fn<(column: "owner_user_id", value: string) => { maybeSingle: typeof cardMaybeSingleMock }>()
+		.mockReturnValue({ maybeSingle: cardMaybeSingleMock });
+	const cardEqIdMock = vi
+		.fn<(column: "id", value: string) => { eq: typeof cardEqOwnerMock }>()
+		.mockReturnValue({ eq: cardEqOwnerMock });
+	const cardSelectMock = vi
+		.fn<(columns: string) => { eq: typeof cardEqIdMock }>()
+		.mockReturnValue({ eq: cardEqIdMock });
+
+	const illustrationMaybeSingleMock = vi
+		.fn<() => Promise<QueryResult<IllustrationRow | null>>>()
+		.mockResolvedValue({
+			data: options.existingIllustration,
+			error: null,
+		});
+	const illustrationLimitMock = vi
+		.fn<(count: number) => { maybeSingle: typeof illustrationMaybeSingleMock }>()
+		.mockReturnValue({ maybeSingle: illustrationMaybeSingleMock });
+	const illustrationOrderIdMock = vi
+		.fn<
+			(column: "id", options?: { ascending: boolean }) => { limit: typeof illustrationLimitMock }
+		>()
+		.mockReturnValue({ limit: illustrationLimitMock });
+	const illustrationOrderUpdatedAtMock = vi
+		.fn<
+			(
+				column: "updated_at",
+				options?: { ascending: boolean }
+			) => { order: typeof illustrationOrderIdMock }
+		>()
+		.mockReturnValue({ order: illustrationOrderIdMock });
+	const illustrationEqKeyMock = vi
+		.fn<
+			(
+				column: "illustration_key",
+				value: string
+			) => { order: typeof illustrationOrderUpdatedAtMock }
+		>()
+		.mockReturnValue({ order: illustrationOrderUpdatedAtMock });
+	const illustrationEqOwnerMock = vi
+		.fn<(column: "owner_user_id", value: string) => { eq: typeof illustrationEqKeyMock }>()
+		.mockReturnValue({ eq: illustrationEqKeyMock });
+	const illustrationSelectMock = vi
+		.fn<(columns: string) => { eq: typeof illustrationEqOwnerMock }>()
+		.mockReturnValue({ eq: illustrationEqOwnerMock });
+
+	const updateSingleMock = vi
+		.fn<() => Promise<QueryResult<IdRow>>>()
+		.mockResolvedValue(options.updateResult);
+	const updateSelectMock = vi
+		.fn<(columns: "id") => { single: typeof updateSingleMock }>()
+		.mockReturnValue({ single: updateSingleMock });
+	const updateEqOwnerMock = vi
+		.fn<(column: "owner_user_id", value: string) => { select: typeof updateSelectMock }>()
+		.mockReturnValue({ select: updateSelectMock });
+	const updateEqIdMock = vi
+		.fn<(column: "id", value: string) => { eq: typeof updateEqOwnerMock }>()
+		.mockReturnValue({ eq: updateEqOwnerMock });
+	const updateMock = vi
+		.fn<(values: { status: "pending" }) => { eq: typeof updateEqIdMock }>()
+		.mockReturnValue({ eq: updateEqIdMock });
+
+	const insertSingleMock = vi
+		.fn<() => Promise<QueryResult<IdRow>>>()
+		.mockResolvedValue(options.insertResult);
+	const insertSelectMock = vi
+		.fn<(columns: "id") => { single: typeof insertSingleMock }>()
+		.mockReturnValue({ single: insertSingleMock });
+	const insertMock = vi
+		.fn<
+			(values: {
+				owner_user_id: string;
+				illustration_key: string;
+				status: "pending";
+			}) => { select: typeof insertSelectMock }
+		>()
+		.mockReturnValue({ select: insertSelectMock });
+
+	const fromMock = vi
+		.fn<
+			(table: "cards" | "illustrations") =>
+				| { select: typeof cardSelectMock }
+				| {
+						select: typeof illustrationSelectMock;
+						update: typeof updateMock;
+						insert: typeof insertMock;
+				  }
+		>()
+		.mockImplementation((table) => {
+			if (table === "cards") {
+				return {
+					select: cardSelectMock,
+				};
+			}
+
+			return {
+				select: illustrationSelectMock,
+				update: updateMock,
+				insert: insertMock,
+			};
+		});
+
+	createServerClientMock.mockReturnValue({
+		auth: {
+			getUser: getUserMock,
+		},
+		from: fromMock,
+	});
+
+	return {
+		getUserMock,
+		fromMock,
+		cardEqOwnerMock,
+		illustrationEqOwnerMock,
+		updateMock,
+		updateEqIdMock,
+		insertMock,
+	};
+};
+
+const withTimeout = async <TValue>(promise: Promise<TValue>, timeoutMs: number) =>
+	new Promise<TValue>((resolve, reject) => {
+		const timeoutId = setTimeout(() => {
+			reject(new Error(`timed out after ${timeoutMs}ms`));
+		}, timeoutMs);
+
+		promise.then(
+			(value) => {
+				clearTimeout(timeoutId);
+				resolve(value);
+			},
+			(error: unknown) => {
+				clearTimeout(timeoutId);
+				reject(error);
+			}
+		);
+	});
 
 describe("frontend/src/actions/illustration-actions.ts", () => {
-	it("UT-SETUP-SUPABASE-BOUNDARY: Server Action用と非同期処理用のSupabase境界を提供する", () => {
-		expect(typeof createServerClient).toBe("function");
-		expect(typeof createServiceRoleClient).toBe("function");
+	beforeEach(() => {
+		createServerClientMock.mockReset();
+		__resetProcessIllustrationGenerationImplementationForTest();
+	});
+
+	it("UT-AC-03-UNAUTH-NO-SIDE-EFFECT: 未認証では認証エラーを返し DB副作用0件で終了する", async () => {
+		const spies = createSupabaseDouble({ user: null });
+		const processMock = vi.fn<(args: unknown) => Promise<void>>().mockResolvedValue(undefined);
+		__setProcessIllustrationGenerationImplementationForTest(processMock);
+
+		const result = await triggerIllustrationGeneration("card-1");
+
+		expect(result).toEqual({
+			ok: false,
+			code: "unauthorized",
+		});
+		expect(spies.fromMock).not.toHaveBeenCalled();
+		expect(processMock).not.toHaveBeenCalled();
+	});
+
+	it.each(["ready", "pending"])(
+		"UT-AC-04-READY-PENDING-NOOP: status=%s の既存レコードでは再生成を開始しない",
+		async (status) => {
+			const spies = createSupabaseDouble({
+				existingIllustration: {
+					id: `illustration-${status}`,
+					status,
+				},
+			});
+			const processMock = vi.fn<(args: unknown) => Promise<void>>().mockResolvedValue(undefined);
+			__setProcessIllustrationGenerationImplementationForTest(processMock);
+
+			const result = await triggerIllustrationGeneration("card-1");
+
+			expect(result).toEqual({
+				ok: true,
+				started: false,
+				illustrationId: `illustration-${status}`,
+			});
+			expect(spies.updateMock).not.toHaveBeenCalled();
+			expect(spies.insertMock).not.toHaveBeenCalled();
+			expect(processMock).not.toHaveBeenCalled();
+		}
+	);
+
+	it("UT-AC-05-FAILED-RETRY-PENDING: failed レコードを pending に戻して再生成を開始する", async () => {
+		const spies = createSupabaseDouble({
+			existingIllustration: {
+				id: "illustration-failed",
+				status: "failed",
+			},
+			updateResult: {
+				data: { id: "illustration-retried" },
+				error: null,
+			},
+		});
+		const processMock = vi.fn<(args: unknown) => Promise<void>>().mockResolvedValue(undefined);
+		__setProcessIllustrationGenerationImplementationForTest(processMock);
+
+		const result = await triggerIllustrationGeneration("card-1");
+
+		expect(spies.updateMock).toHaveBeenCalledWith({ status: "pending" });
+		expect(spies.updateEqIdMock).toHaveBeenCalledWith("id", "illustration-failed");
+		expect(result).toEqual({
+			ok: true,
+			started: true,
+			illustrationId: "illustration-retried",
+		});
+		expect(processMock).toHaveBeenCalledWith({
+			illustrationId: "illustration-retried",
+			illustrationKey: "kanji-key-1",
+			backText: "example back text",
+			skill: "reading",
+			ownerUserId: "user-1",
+		});
+	});
+
+	it("UT-AC-06-MISSING-INSERT-PENDING: レコード未存在では pending をINSERTして生成開始する", async () => {
+		const spies = createSupabaseDouble({
+			existingIllustration: null,
+			insertResult: {
+				data: { id: "illustration-inserted" },
+				error: null,
+			},
+		});
+		const processMock = vi.fn<(args: unknown) => Promise<void>>().mockResolvedValue(undefined);
+		__setProcessIllustrationGenerationImplementationForTest(processMock);
+
+		const result = await triggerIllustrationGeneration("card-1");
+
+		expect(spies.insertMock).toHaveBeenCalledWith({
+			owner_user_id: "user-1",
+			illustration_key: "kanji-key-1",
+			status: "pending",
+		});
+		expect(result).toEqual({
+			ok: true,
+			started: true,
+			illustrationId: "illustration-inserted",
+		});
+		expect(processMock).toHaveBeenCalledWith({
+			illustrationId: "illustration-inserted",
+			illustrationKey: "kanji-key-1",
+			backText: "example back text",
+			skill: "reading",
+			ownerUserId: "user-1",
+		});
+	});
+
+	it("UT-AC-07-FIRE-AND-FORGET: trigger は process 完了を待たずに応答する", async () => {
+		createSupabaseDouble({ existingIllustration: null });
+		const processMock = vi.fn<(args: unknown) => Promise<void>>().mockImplementation(
+			() =>
+				new Promise<void>(() => {
+					return;
+				})
+		);
+		__setProcessIllustrationGenerationImplementationForTest(processMock);
+
+		const result = await withTimeout(triggerIllustrationGeneration("card-1"), 50);
+
+		expect(result).toEqual({
+			ok: true,
+			started: true,
+			illustrationId: "illustration-new",
+		});
+		expect(processMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("UT-AC-01-OWNER-SCOPED-QUERY: cards/illustrations の検索条件に owner_user_id を必ず含める", async () => {
+		const spies = createSupabaseDouble({
+			existingIllustration: {
+				id: "illustration-ready",
+				status: "ready",
+			},
+		});
+		const processMock = vi.fn<(args: unknown) => Promise<void>>().mockResolvedValue(undefined);
+		__setProcessIllustrationGenerationImplementationForTest(processMock);
+
+		await triggerIllustrationGeneration("card-1");
+
+		expect(spies.cardEqOwnerMock).toHaveBeenCalledWith("owner_user_id", "user-1");
+		expect(spies.illustrationEqOwnerMock).toHaveBeenCalledWith("owner_user_id", "user-1");
 	});
 });
