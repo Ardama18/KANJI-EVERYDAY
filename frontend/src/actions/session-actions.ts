@@ -65,7 +65,7 @@ type DeckRow = Pick<
 
 type CardRow = Pick<
 	Database["public"]["Tables"]["cards"]["Row"],
-	"id" | "skill" | "pattern" | "front_text" | "back_text"
+	"id" | "skill" | "pattern" | "front_text" | "back_text" | "illustration_key"
 >;
 
 type StudySessionRow = Pick<
@@ -438,7 +438,7 @@ const fetchReviewStateForCard = async (
 const fetchCardById = async (supabase: SupabaseClient, cardId: string): Promise<CardRow> => {
 	const { data, error } = await supabase
 		.from("cards")
-		.select("id, skill, pattern, front_text, back_text")
+		.select("id, skill, pattern, front_text, back_text, illustration_key")
 		.eq("id", cardId)
 		.maybeSingle();
 
@@ -451,6 +451,28 @@ const fetchCardById = async (supabase: SupabaseClient, cardId: string): Promise<
 	}
 
 	return data as CardRow;
+};
+
+const fetchLatestIllustrationByKey = async (
+	supabase: SupabaseClient,
+	userId: string,
+	illustrationKey: string
+): Promise<IllustrationRow | null> => {
+	const { data, error } = await supabase
+		.from("illustrations")
+		.select("status, storage_path")
+		.eq("owner_user_id", userId)
+		.eq("illustration_key", illustrationKey)
+		.order("updated_at", { ascending: false })
+		.order("id", { ascending: false })
+		.limit(1)
+		.maybeSingle();
+
+	if (error) {
+		throw new Error(`Failed to fetch illustration: ${error.message}`);
+	}
+
+	return (data as IllustrationRow | null) ?? null;
 };
 
 const countRemainingUniqueCards = (queue: SessionQueue): number => {
@@ -545,17 +567,45 @@ const toCardFrontData = (
 	};
 };
 
-const toCardBackData = (card: CardRow, intervalPreview: IntervalPreview): CardBackData => {
+const toCardBackData = (
+	card: CardRow,
+	intervalPreview: IntervalPreview,
+	illustrationState: NormalizedIllustrationState
+): CardBackData => {
 	return {
 		cardId: card.id,
 		skill: toSkill(card.skill),
 		pattern: toPattern(card.pattern),
 		frontText: card.front_text,
 		backText: card.back_text,
-		illustrationUrl: null,
-		illustrationStatus: "none",
+		illustrationUrl: illustrationState.illustrationUrl,
+		illustrationStatus: illustrationState.illustrationStatus,
 		intervalPreview,
 	};
+};
+
+type BuildCardBackDataParams = {
+	supabase: SupabaseClient;
+	userId: string;
+	card: CardRow;
+	reviewState: ReviewState | null;
+	allowTrigger?: boolean;
+};
+
+const buildCardBackData = async (params: BuildCardBackDataParams): Promise<CardBackData> => {
+	const { supabase, userId, card, reviewState, allowTrigger = true } = params;
+	const illustration =
+		card.illustration_key === null
+			? null
+			: await fetchLatestIllustrationByKey(supabase, userId, card.illustration_key);
+	const illustrationState = await normalizeIllustrationState({
+		cardId: card.id,
+		illustrationKey: card.illustration_key,
+		illustration,
+		allowTrigger,
+	});
+
+	return toCardBackData(card, getIntervalPreview(reviewState), illustrationState);
 };
 
 const removeCardFromQueue = (
@@ -784,7 +834,13 @@ export async function revealCard(sessionId: string): Promise<CardBackData> {
 	const card = await fetchCardById(supabase, session.current_card_id);
 	const reviewState = await fetchReviewStateForCard(supabase, userId, card.id);
 
-	return toCardBackData(card, getIntervalPreview(reviewState));
+	return buildCardBackData({
+		supabase,
+		userId,
+		card,
+		reviewState,
+		allowTrigger: true,
+	});
 }
 
 export async function rateCard(sessionId: string, rating: Rating): Promise<RateResult> {
@@ -904,12 +960,19 @@ export async function getStudySessionState(sessionId: string): Promise<StudySess
 	}
 
 	const reviewState = await fetchReviewStateForCard(supabase, userId, card.id);
+	const backData = await buildCardBackData({
+		supabase,
+		userId,
+		card,
+		reviewState,
+		allowTrigger: true,
+	});
 
 	return {
 		deckId: deck.id,
 		deckName: deck.name,
 		phase: "back",
 		card: frontCard,
-		backData: toCardBackData(card, getIntervalPreview(reviewState)),
+		backData,
 	};
 }

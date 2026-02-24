@@ -29,6 +29,8 @@ export default defineConfig({
 			"../specs/stories/S-05-srs-engine/tests/*.test.tsx",
 			"../specs/stories/S-08-illustration-generation-backend/tests/*.test.ts",
 			"../specs/stories/S-08-illustration-generation-backend/tests/*.test.tsx",
+			"../specs/stories/S-09-illustration-display-integration/tests/*.test.ts",
+			"../specs/stories/S-09-illustration-display-integration/tests/*.test.tsx",
 		],
 	},
 });
