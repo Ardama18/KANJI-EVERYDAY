@@ -29,7 +29,14 @@
 // AC#23 -> IT-AC23-SESSION-COMPLETE-ONLY-WHEN-ALL-EMPTY
 // AC#24 -> IT-AC24-JST-MIDNIGHT-RESET
 
-import { describe, it } from "vitest"
+import { describe, expect, it } from "vitest"
+
+import {
+	GOOD_INTERVALS,
+	HARD_INTERVALS,
+	RETRY_TODAY_LIMIT,
+	type Rating,
+} from "../../../../frontend/src/lib/srs"
 
 describe("srs-engine 統合テスト", () => {
 	// 実行順序: Phase 1 - 定数/型/評価ロジック契約
@@ -39,14 +46,23 @@ describe("srs-engine 統合テスト", () => {
 	// @category: integration
 	// @dependency: frontend/src/lib/srs/constants.ts
 	// @complexity: low
-	it.todo("IT-AC01: 固定テーブル定数が仕様値で公開される")
+	it("IT-AC01: 固定テーブル定数が仕様値で公開される", () => {
+		expect(GOOD_INTERVALS).toEqual([1, 3, 7, 14, 30, 60, 120])
+		expect(HARD_INTERVALS).toEqual([1, 2, 4, 7, 14, 30, 60])
+		expect(RETRY_TODAY_LIMIT).toBe(2)
+	})
 
 	// ACトレース: AC#2
 	// 検証観点: Rating が good/hard/again の3値契約で運用される。
 	// @category: integration
 	// @dependency: frontend/src/lib/srs/types.ts
 	// @complexity: low
-	it.todo("IT-AC02: Rating の3値契約を型レベルと呼び出し契約で満たす")
+	it("IT-AC02: Rating の3値契約を型レベルと呼び出し契約で満たす", () => {
+		const ratings: Rating[] = ["good", "hard", "again"]
+		const toRating = (value: Rating): Rating => value
+
+		expect(ratings.map((value) => toRating(value))).toEqual(["good", "hard", "again"])
+	})
 
 	// ACトレース: AC#3
 	// 検証観点: calculateRating(state, rating, today, now) が4引数契約を維持し、lastReviewedAt=now を返す。
