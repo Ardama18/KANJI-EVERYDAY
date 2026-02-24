@@ -15,6 +15,7 @@
 // EARS-07(不測型) / AC-11 -> IT-AC09-TRIGGER-EXCEPTION-PENDING
 // Design Policy(getStudySessionState phase=back) -> IT-AC10-BACK-RESTORE-USES-SAME-NORMALIZATION
 // AC-20 -> IT-AC11-NO-EXTRA-API-AFTER-REVEAL
+// AC-18 -> IT-AC18-NEXT-CONFIG-REMOTE-PATTERNS
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
@@ -232,6 +233,8 @@ const createFrontCardData = (): CardFrontData => ({
 
 const countByTestId = (html: string, testId: string): number =>
 	html.match(new RegExp(`data-testid="${testId}"`, "g"))?.length ?? 0;
+
+const NEXT_CONFIG_MODULE_URL = new URL("../../../../frontend/next.config.mjs", import.meta.url);
 
 const createRevealCardClient = (options: {
 	illustrationKey: string | null;
@@ -551,5 +554,30 @@ describe("S-09 illustration-display-integration integration", () => {
 		expect(createServerClientMock).toHaveBeenCalledTimes(1);
 		expect(triggerIllustrationGenerationMock).not.toHaveBeenCalled();
 		expect(getSignedUrlMock).not.toHaveBeenCalled();
+	});
+
+	it("IT-AC18: next.config.mjs は Supabase Signed URL 向け remotePatterns 契約を保持する", async () => {
+		const module = (await import(NEXT_CONFIG_MODULE_URL.href)) as {
+			default?: {
+				images?: {
+					remotePatterns?: Array<{
+						protocol?: string;
+						hostname?: string;
+						pathname?: string;
+					}>;
+				};
+			};
+		};
+		const remotePatterns = module.default?.images?.remotePatterns;
+
+		expect(remotePatterns).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					protocol: "https",
+					hostname: "*.supabase.co",
+					pathname: "/storage/v1/object/sign/**",
+				}),
+			])
+		);
 	});
 });

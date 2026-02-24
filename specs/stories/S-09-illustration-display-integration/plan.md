@@ -162,22 +162,22 @@ flowchart TD
 **目的**: Next.js 画像許可設定と `<Image>` 契約を固定し、本番相当環境での表示失敗リスクを除去する。
 
 #### タスク
-- [ ] `frontend/next.config.mjs` を新規作成し `images.remotePatterns` を設定する
+- [x] `frontend/next.config.mjs` を新規作成し `images.remotePatterns` を設定する
   - 実装: `frontend/next.config.mjs`
   - 対象契約: `https://*.supabase.co/storage/v1/object/sign/**`
-- [ ] `next.config.ts` 非対象ルールを維持する（既存があっても変更しない）
+- [x] `next.config.ts` 非対象ルールを維持する（既存があっても変更しない）
   - 実装: `frontend/next.config.mjs`
-- [ ] Story配下テストを実行対象に含めるため `vitest` 設定を必要最小限更新する
+- [x] Story配下テストを実行対象に含めるため `vitest` 設定を必要最小限更新する
   - 実装: `frontend/vitest.config.ts`
-- [ ] AC-18/19 の静的契約検証を追加する（remotePatterns / Image props）
+- [x] AC-18/19 の静的契約検証を追加する（remotePatterns / Image props）
   - テスト: `frontend/src/components/study/IllustrationDisplay.test.tsx` または同等の静的検証テスト
-- [ ] 統合テストを全件再実行し退行がないことを確認する
+- [x] 統合テストを全件再実行し退行がないことを確認する
   - テスト: `specs/stories/S-09-illustration-display-integration/tests/illustration-display-integration.int.test.ts`
 
 #### フェーズ完了条件（Design AC由来）
-- [ ] AC-18: `frontend/next.config.mjs` に `remotePatterns` が定義されている
-- [ ] AC-19: `<Image>` で `priority` 未使用、`width/height/sizes` 明記、遅延読込維持
-- [ ] Phase 1〜3 の統合テストが全PASS
+- [x] AC-18: `frontend/next.config.mjs` に `remotePatterns` が定義されている
+- [x] AC-19: `<Image>` で `priority` 未使用、`width/height/sizes` 明記、遅延読込維持
+- [x] Phase 1〜3 の統合テストが全PASS
 
 #### 動作確認手順
 1. `next.config.mjs` を静的検査し、`*.supabase.co` と `/storage/v1/object/sign/**` を許可していることを確認する。
@@ -185,7 +185,7 @@ flowchart TD
 3. 統合テストを全件実行し、Phase 1/2 の退行がないことを確認する。
 
 #### 停止ポイント（品質固定）
-- [ ] Phase 1〜3 の統合テスト再実行がPASSした状態を保存する
+- [x] Phase 1〜3 の統合テスト再実行がPASSした状態を保存する
 
 ---
 
@@ -237,8 +237,8 @@ flowchart TD
 - [ ] AC-15: ready画像表示
 - [ ] AC-16: 画像失敗時フォールバック + 評価操作継続
 - [ ] AC-17: frontでイラスト要素非表示
-- [ ] AC-18: `next.config.mjs` remotePatterns 設定
-- [ ] AC-19: `<Image>` props契約
+- [x] AC-18: `next.config.mjs` remotePatterns 設定
+- [x] AC-19: `<Image>` props契約
 - [ ] AC-20: reveal後の追加API呼び出し0回
 
 ## リスクと対策
