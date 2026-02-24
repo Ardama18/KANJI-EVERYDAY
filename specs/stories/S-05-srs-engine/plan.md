@@ -114,31 +114,31 @@ flowchart TD
 **目的**: `calculateRating(state, rating, today, now)` と `getIntervalPreview` の契約を AC#3〜#11/#24 で固定する。
 
 #### タスク（1コミット粒度）
-- [ ] T-S05-02: `calculateRating` の基本遷移（good/hard/again, 初回state=null, level clamp）を実装する
+- [x] T-S05-02: `calculateRating` の基本遷移（good/hard/again, 初回state=null, level clamp）を実装する
   - 実装: `frontend/src/lib/srs/calculate.ts`
-- [ ] T-S05-03: JST日次リセットと 00:00 跨ぎ判定（retryTodayCount 再計算）を実装する
+- [x] T-S05-03: JST日次リセットと 00:00 跨ぎ判定（retryTodayCount 再計算）を実装する
   - 実装: `frontend/src/lib/srs/calculate.ts`
-- [ ] T-S05-04: `getIntervalPreview` の仕様文言を実装する
+- [x] T-S05-04: `getIntervalPreview` の仕様文言を実装する
   - 実装: `frontend/src/lib/srs/calculate.ts`
-- [ ] T-S05-08: calculate 系 unit test を実装する
+- [x] T-S05-08: calculate 系 unit test を実装する
   - テスト: `frontend/src/lib/srs/calculate.test.ts`
   - 対象AC: AC#3〜#11, AC#24
-- [ ] T-S05-10-P1-IT: 統合テストの Phase 1 対象ケースを実装・実行する
+- [x] T-S05-10-P1-IT: 統合テストの Phase 1 対象ケースを実装・実行する
   - テスト: `specs/stories/S-05-srs-engine/tests/srs-engine.int.test.ts`
   - 対象: `IT-AC03`〜`IT-AC11`, `IT-AC24`
 
 #### フェーズ完了条件（Design AC由来）
-- [ ] AC#3: 4引数契約と `lastReviewedAt=now` を満たし、内部時刻生成を行わない
-- [ ] AC#4〜#7: `good/hard/again` 遷移と retry 上限判定が仕様通り
-- [ ] AC#8: `retryTodayCount` が JST 日付単位でリセットされる
-- [ ] AC#9〜#10: `state=null` 初回処理と level clamp を満たす
-- [ ] AC#11: `getIntervalPreview` 文言が仕様通り
-- [ ] AC#24: JST 00:00 跨ぎで retry 日次リセットが成立する
+- [x] AC#3: 4引数契約と `lastReviewedAt=now` を満たし、内部時刻生成を行わない
+- [x] AC#4〜#7: `good/hard/again` 遷移と retry 上限判定が仕様通り
+- [x] AC#8: `retryTodayCount` が JST 日付単位でリセットされる
+- [x] AC#9〜#10: `state=null` 初回処理と level clamp を満たす
+- [x] AC#11: `getIntervalPreview` 文言が仕様通り
+- [x] AC#24: JST 00:00 跨ぎで retry 日次リセットが成立する
 
 #### 品質ゲート
-- [ ] `npm run test --prefix frontend -- src/lib/srs/calculate.test.ts ../specs/stories/S-05-srs-engine/tests/srs-engine.int.test.ts` が成功する
-- [ ] `npm run typecheck --prefix frontend` が成功する
-- [ ] `calculate.ts` が入力オブジェクトを破壊していないことをテストで確認できる
+- [x] `npm run test --prefix frontend -- src/lib/srs/calculate.test.ts ../specs/stories/S-05-srs-engine/tests/srs-engine.int.test.ts` が成功する
+- [x] `npm run typecheck --prefix frontend` が成功する
+- [x] `calculate.ts` が入力オブジェクトを破壊していないことをテストで確認できる
 
 #### 動作確認手順
 1. `calculate.test.ts` で境界値（level範囲外、state=null、retry上限、JST境界）を検証する。
@@ -146,7 +146,7 @@ flowchart TD
 3. `calculateRating(state, rating, today, now)` の4引数契約が呼び出し側から破壊されていないことを確認する。
 
 #### 停止ポイント（品質固定）
-- [ ] Phase 1 対象統合テストがPASSした状態を保存する
+- [x] Phase 1 対象統合テストがPASSした状態を保存する
 
 ### Phase 2: 分類とキュー構築（想定コミット数: 2）
 **目的**: `classifyCard` / `countByCategory` / `buildSessionQueue` の分類・集計・順序契約を固定する。

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { addDaysJST, getTomorrowJST } from "../date";
+import { calculateRating, getIntervalPreview } from "./calculate";
 import { RETRY_TODAY_LIMIT } from "./constants";
-import { calculateRating } from "./calculate";
 import type { ReviewState } from "./types";
 
 const TODAY = "2026-02-24";
@@ -92,6 +92,18 @@ describe("calculateRating", () => {
 		expect(result.addToRetryQueue).toBe(false);
 	});
 
+	it("UT-AC08-AGAIN-DAILY-RESET: 前回レビューが別JST日ならretryを0から再計算する", () => {
+		const state = createState({
+			level: 1,
+			retryTodayCount: 2,
+			lastReviewedAt: "2026-02-23T14:59:59.000Z",
+		});
+		const result = calculateRating(state, "again", TODAY, NOW);
+
+		expect(result.newState.retryTodayCount).toBe(1);
+		expect(result.addToRetryQueue).toBe(true);
+	});
+
 	it("UT-AC09-INITIAL-STATE-NULL: state=null を初回レビューとして扱う", () => {
 		const result = calculateRating(null, "good", TODAY, NOW);
 
@@ -115,6 +127,35 @@ describe("calculateRating", () => {
 		expect(overMaxResult.newState.dueDate).toBe(addDaysJST(TODAY, 120));
 		expect(underMinResult.newState.level).toBe(0);
 		expect(underMinResult.newState.dueDate).toBe(addDaysJST(TODAY, 1));
+	});
+
+	it("UT-AC11-INTERVAL-PREVIEW: level2 のpreview文言が仕様どおりである", () => {
+		const preview = getIntervalPreview(createState({ level: 2 }));
+
+		expect(preview).toEqual({
+			good: { interval: 7, label: "7日後" },
+			hard: { interval: 4, label: "4日後" },
+			again: { label: "今日さいご + 明日" },
+		});
+	});
+
+	it("UT-AC24-JST-MIDNIGHT-BOUNDARY: JST 00:00 境界の前後でretryリセット判定が変わる", () => {
+		const midnightPreviousDayState = createState({
+			retryTodayCount: 1,
+			lastReviewedAt: "2026-02-24T14:59:59.000Z",
+		});
+		const midnightCurrentDayState = createState({
+			retryTodayCount: 1,
+			lastReviewedAt: "2026-02-24T15:00:00.000Z",
+		});
+		const nextDay = "2026-02-25";
+		const nextDayNow = "2026-02-25T01:00:00.000Z";
+
+		const resetResult = calculateRating(midnightPreviousDayState, "again", nextDay, nextDayNow);
+		const carryOverResult = calculateRating(midnightCurrentDayState, "again", nextDay, nextDayNow);
+
+		expect(resetResult.newState.retryTodayCount).toBe(1);
+		expect(carryOverResult.newState.retryTodayCount).toBe(2);
 	});
 
 	it("UT-IMMUTABLE-INPUT: 入力stateを破壊せず新規参照を返す", () => {

@@ -37,6 +37,7 @@ import {
 	HARD_INTERVALS,
 	RETRY_TODAY_LIMIT,
 	calculateRating,
+	getIntervalPreview,
 	type Rating,
 	type ReviewState,
 } from "../../../../frontend/src/lib/srs"
@@ -180,7 +181,21 @@ describe("srs-engine 統合テスト", () => {
 	// @category: integration
 	// @dependency: frontend/src/lib/srs/calculate.ts, frontend/src/lib/date.ts
 	// @complexity: high
-	it.todo("IT-AC08: JST 日次境界で again の retryTodayCount をリセットして再計算する")
+	it("IT-AC08: JST 日次境界で again の retryTodayCount をリセットして再計算する", () => {
+		const result = calculateRating(
+			createState({
+				level: 2,
+				retryTodayCount: 2,
+				lastReviewedAt: "2026-02-23T14:59:59.000Z",
+			}),
+			"again",
+			today,
+			now,
+		)
+
+		expect(result.newState.retryTodayCount).toBe(1)
+		expect(result.addToRetryQueue).toBe(true)
+	})
 
 	// ACトレース: AC#9
 	// 検証観点: state=null を初回レビューとして level0 基準で計算する。
@@ -222,7 +237,15 @@ describe("srs-engine 統合テスト", () => {
 	// @category: integration
 	// @dependency: frontend/src/lib/srs/calculate.ts
 	// @complexity: low
-	it.todo("IT-AC11: getIntervalPreview が仕様文言を返す")
+	it("IT-AC11: getIntervalPreview が仕様文言を返す", () => {
+		const preview = getIntervalPreview(createState({ level: 2 }))
+
+		expect(preview).toEqual({
+			good: { interval: 7, label: "7日後" },
+			hard: { interval: 4, label: "4日後" },
+			again: { label: "今日さいご + 明日" },
+		})
+	})
 
 	// 実行順序: Phase 2 - 分類/集計契約
 
@@ -319,5 +342,22 @@ describe("srs-engine 統合テスト", () => {
 	// @category: integration
 	// @dependency: frontend/src/lib/srs/calculate.ts, frontend/src/lib/date.ts
 	// @complexity: high
-	it.todo("IT-AC24: JST 00:00 境界を跨ぐ again で retryTodayCount を日次リセットする")
+	it("IT-AC24: JST 00:00 境界を跨ぐ again で retryTodayCount を日次リセットする", () => {
+		const nextDay = "2026-02-25"
+		const nextDayNow = "2026-02-25T01:00:00.000Z"
+		const beforeMidnightJst = createState({
+			retryTodayCount: 1,
+			lastReviewedAt: "2026-02-24T14:59:59.000Z",
+		})
+		const midnightJst = createState({
+			retryTodayCount: 1,
+			lastReviewedAt: "2026-02-24T15:00:00.000Z",
+		})
+
+		const resetResult = calculateRating(beforeMidnightJst, "again", nextDay, nextDayNow)
+		const carryOverResult = calculateRating(midnightJst, "again", nextDay, nextDayNow)
+
+		expect(resetResult.newState.retryTodayCount).toBe(1)
+		expect(carryOverResult.newState.retryTodayCount).toBe(2)
+	})
 })
