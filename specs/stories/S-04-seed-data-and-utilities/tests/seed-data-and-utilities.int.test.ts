@@ -20,10 +20,59 @@
 import { describe, expect, it } from "vitest";
 
 import * as dateUtils from "../../../../frontend/src/lib/date";
+import { queryRows, sqlLiteral } from "../../S-02-database-schema-rls/tests/helpers/s02-db-testkit";
+
+interface CountRow {
+	count: number;
+}
+
+interface SeedPatternCountRow {
+	pattern: string;
+	count: number;
+}
+
+interface SeedPairCountRow {
+	pair_count: number;
+}
+
+interface SeedCardContractViolationRow {
+	violation_count: number;
+}
+
+interface SeedOwnerRow {
+	id: string;
+	instance_id: string;
+	aud: string;
+	role: string;
+	email: string;
+	encrypted_password: string;
+	email_confirmed: boolean;
+	created_present: boolean;
+	updated_present: boolean;
+	app_meta_provider: string;
+	app_meta_has_email_provider: boolean;
+	display_name_meta: string;
+}
+
+interface SeedProfileRow {
+	user_id: string;
+	display_name: string;
+	timezone: string;
+	parent_mode_enabled: boolean;
+}
+
+interface SeedDeckRow {
+	id: string;
+	owner_user_id: string;
+	name: string;
+	new_limit_per_day: number;
+}
 
 describe("seed-data-and-utilities 統合テスト", () => {
 	const { addDaysJST, getTodayJST, getTomorrowJST, isBeforeOrEqualJST } = dateUtils;
 	const INVALID_DATE_ERROR_MESSAGE = "Invalid JST date format: expected YYYY-MM-DD";
+	const SEED_OWNER_USER_ID = "00000000-0000-4000-8000-000000000001";
+	const SEED_DECK_ID = "00000000-0000-4000-8000-0000000000d4";
 
 	// 実行順序: Phase 1 - Date utility contract
 
@@ -116,7 +165,47 @@ describe("seed-data-and-utilities 統合テスト", () => {
 	// @category: integration
 	// @dependency: supabase/seed.sql, public.cards
 	// @complexity: medium
-	it.todo("IT-AC07: Seed 実行で 50 字 x R1/W1 の 100 cards が投入される");
+	it("IT-AC07: Seed 実行で 50 字 x R1/W1 の 100 cards が投入される", () => {
+		const totalCards = queryRows<CountRow>(`
+      SELECT COUNT(*)::int AS count
+      FROM public.cards
+    `)[0];
+		expect(totalCards?.count).toBe(100);
+
+		const patternCounts = queryRows<SeedPatternCountRow>(`
+      SELECT pattern, COUNT(*)::int AS count
+      FROM public.cards
+      WHERE pattern IN ('R1', 'W1')
+      GROUP BY pattern
+      ORDER BY pattern
+    `);
+		expect(patternCounts).toEqual([
+			{ pattern: "R1", count: 50 },
+			{ pattern: "W1", count: 50 },
+		]);
+
+		const pairCount = queryRows<SeedPairCountRow>(`
+      WITH normalized AS (
+        SELECT
+          CASE WHEN pattern = 'R1' THEN front_text ELSE back_text END AS vocab,
+          CASE WHEN pattern = 'R1' THEN back_text ELSE front_text END AS reading,
+          pattern
+        FROM public.cards
+        WHERE pattern IN ('R1', 'W1')
+      ),
+      paired AS (
+        SELECT vocab, reading
+        FROM normalized
+        GROUP BY vocab, reading
+        HAVING COUNT(*) = 2
+          AND bool_or(pattern = 'R1')
+          AND bool_or(pattern = 'W1')
+      )
+      SELECT COUNT(*)::int AS pair_count
+      FROM paired
+    `)[0];
+		expect(pairCount?.pair_count).toBe(50);
+	});
 
 	// AC原文 (AC-08): システムは Seed カードの `visibility='public'`、`owner_user_id IS NULL`、`card_key='{pattern}:{front_text}:{back_text}'` を満たすこと。
 	// AC解釈: public カード契約と card_key 生成規則が全 Seed レコードで一貫する必要がある。
@@ -126,7 +215,23 @@ describe("seed-data-and-utilities 統合テスト", () => {
 	// @category: integration
 	// @dependency: supabase/seed.sql, public.cards
 	// @complexity: high
-	it.todo("IT-AC08: Seed cards が visibility/public-owner-null/card_key 形式契約を満たす");
+	it("IT-AC08: Seed cards が visibility/public-owner-null/card_key 形式契約を満たす", () => {
+		const violationCount = queryRows<SeedCardContractViolationRow>(`
+      SELECT COUNT(*)::int AS violation_count
+      FROM public.cards
+      WHERE visibility <> 'public'
+        OR owner_user_id IS NOT NULL
+        OR card_key <> (pattern || ':' || front_text || ':' || back_text)
+    `)[0];
+		expect(violationCount?.violation_count).toBe(0);
+
+		const unexpectedPatternCount = queryRows<CountRow>(`
+      SELECT COUNT(*)::int AS count
+      FROM public.cards
+      WHERE pattern NOT IN ('R1', 'W1')
+    `)[0];
+		expect(unexpectedPatternCount?.count).toBe(0);
+	});
 
 	// AC原文 (AC-09): Seed 実行イベントが発生したとき、システムは Seed owner（固定 UUID）と `users_profile` を upsert し、固定 `SEED_DECK_ID` の `decks` 行（`name='小学3年生の漢字'`, `new_limit_per_day=10`）を 1 件保持すること。
 	// AC解釈: owner/profile/deck の親子関係を固定 ID で再作成可能に保ち、再実行時も 1 行を維持する必要がある。
@@ -136,7 +241,83 @@ describe("seed-data-and-utilities 統合テスト", () => {
 	// @category: integration
 	// @dependency: supabase/seed.sql, auth.users, public.users_profile, public.decks
 	// @complexity: high
-	it.todo("IT-AC09: Seed owner と users_profile を upsert し固定 deck 行を 1 件保持する");
+	it("IT-AC09: Seed owner と users_profile を upsert し固定 deck 行を 1 件保持する", () => {
+		const ownerRows = queryRows<SeedOwnerRow>(`
+      SELECT
+        id::text AS id,
+        instance_id::text AS instance_id,
+        aud,
+        role,
+        email,
+        encrypted_password,
+        (email_confirmed_at IS NOT NULL) AS email_confirmed,
+        (created_at IS NOT NULL) AS created_present,
+        (updated_at IS NOT NULL) AS updated_present,
+        raw_app_meta_data ->> 'provider' AS app_meta_provider,
+        (raw_app_meta_data -> 'providers' ? 'email') AS app_meta_has_email_provider,
+        raw_user_meta_data ->> 'display_name' AS display_name_meta
+      FROM auth.users
+      WHERE id = ${sqlLiteral(SEED_OWNER_USER_ID)}::uuid
+    `);
+		expect(ownerRows).toHaveLength(1);
+		expect(ownerRows[0]).toMatchObject({
+			id: SEED_OWNER_USER_ID,
+			instance_id: "00000000-0000-0000-0000-000000000000",
+			aud: "authenticated",
+			role: "authenticated",
+			email: "seed-owner@example.local",
+			encrypted_password: "seed-owner-not-for-login",
+			email_confirmed: true,
+			created_present: true,
+			updated_present: true,
+			app_meta_provider: "email",
+			app_meta_has_email_provider: true,
+			display_name_meta: "Seed Owner",
+		});
+
+		const profileRows = queryRows<SeedProfileRow>(`
+      SELECT
+        user_id::text AS user_id,
+        display_name,
+        timezone,
+        parent_mode_enabled
+      FROM public.users_profile
+      WHERE user_id = ${sqlLiteral(SEED_OWNER_USER_ID)}::uuid
+    `);
+		expect(profileRows).toEqual([
+			{
+				user_id: SEED_OWNER_USER_ID,
+				display_name: "Seed Owner",
+				timezone: "Asia/Tokyo",
+				parent_mode_enabled: false,
+			},
+		]);
+
+		const deckRows = queryRows<SeedDeckRow>(`
+      SELECT
+        id::text AS id,
+        owner_user_id::text AS owner_user_id,
+        name,
+        new_limit_per_day
+      FROM public.decks
+      WHERE id = ${sqlLiteral(SEED_DECK_ID)}::uuid
+    `);
+		expect(deckRows).toEqual([
+			{
+				id: SEED_DECK_ID,
+				owner_user_id: SEED_OWNER_USER_ID,
+				name: "小学3年生の漢字",
+				new_limit_per_day: 10,
+			},
+		]);
+
+		const deckCount = queryRows<CountRow>(`
+      SELECT COUNT(*)::int AS count
+      FROM public.decks
+      WHERE id = ${sqlLiteral(SEED_DECK_ID)}::uuid
+    `)[0];
+		expect(deckCount?.count).toBe(1);
+	});
 
 	// AC原文 (AC-10): Seed 実行イベントが発生したとき、システムはデフォルトデッキと全 Seed カードを `deck_cards` で紐付け、件数を 100 件にすること。
 	// AC解釈: default deck から全 Seed cards へのリンクが欠損なく 100 件必要である。
