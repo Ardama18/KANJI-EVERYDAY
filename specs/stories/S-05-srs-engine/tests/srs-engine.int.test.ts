@@ -36,11 +36,15 @@ import {
 	GOOD_INTERVALS,
 	HARD_INTERVALS,
 	RETRY_TODAY_LIMIT,
+	addToRetryQueue,
 	buildSessionQueue,
 	calculateRating,
 	classifyCard,
 	countByCategory,
+	dequeueCard,
+	getNextCardId,
 	getIntervalPreview,
+	isSessionComplete,
 	type Rating,
 	type ReviewState,
 } from "../../../../frontend/src/lib/srs"
@@ -374,35 +378,174 @@ describe("srs-engine 統合テスト", () => {
 	// @category: integration
 	// @dependency: frontend/src/lib/srs/queue.ts
 	// @complexity: low
-	it.todo("IT-AC19: getNextCardId が優先順どおり先頭カードを返す")
+	it("IT-AC19: getNextCardId が優先順どおり先頭カードを返す", () => {
+		expect(
+			getNextCardId({
+				due: ["due-1"],
+				learn: ["learn-1"],
+				new: ["new-1"],
+				retry: ["retry-1"],
+			}),
+		).toEqual({ cardId: "due-1", source: "due" })
+
+		expect(
+			getNextCardId({
+				due: [],
+				learn: ["learn-1"],
+				new: ["new-1"],
+				retry: ["retry-1"],
+			}),
+		).toEqual({ cardId: "learn-1", source: "learn" })
+
+		expect(
+			getNextCardId({
+				due: [],
+				learn: [],
+				new: ["new-1"],
+				retry: ["retry-1"],
+			}),
+		).toEqual({ cardId: "new-1", source: "new" })
+
+		expect(
+			getNextCardId({
+				due: [],
+				learn: [],
+				new: [],
+				retry: ["retry-1"],
+			}),
+		).toEqual({ cardId: "retry-1", source: "retry" })
+
+		expect(
+			getNextCardId({
+				due: [],
+				learn: [],
+				new: [],
+				retry: [],
+			}),
+		).toEqual({ cardId: null, source: null })
+	})
 
 	// ACトレース: AC#20
 	// 検証観点: dequeueCard は指定 source 先頭のみを削除し入力キューを破壊しない。
 	// @category: integration
 	// @dependency: frontend/src/lib/srs/queue.ts
 	// @complexity: medium
-	it.todo("IT-AC20: dequeueCard は指定キューの先頭1件のみ削除して不変性を維持する")
+	it("IT-AC20: dequeueCard は指定キューの先頭1件のみ削除して不変性を維持する", () => {
+		const input = {
+			due: ["due-1", "due-2"],
+			learn: ["learn-1"],
+			new: ["new-1"],
+			retry: ["retry-1"],
+		}
+
+		const result = dequeueCard(input, "due")
+
+		expect(result).toEqual({
+			due: ["due-2"],
+			learn: ["learn-1"],
+			new: ["new-1"],
+			retry: ["retry-1"],
+		})
+		expect(result).not.toBe(input)
+		expect(input).toEqual({
+			due: ["due-1", "due-2"],
+			learn: ["learn-1"],
+			new: ["new-1"],
+			retry: ["retry-1"],
+		})
+	})
 
 	// ACトレース: AC#21
 	// 検証観点: dequeueCard 対象キューが空なら内容 no-op かつ新規オブジェクト参照を返す。
 	// @category: integration
 	// @dependency: frontend/src/lib/srs/queue.ts
 	// @complexity: medium
-	it.todo("IT-AC21: dequeueCard は空キュー指定で no-op だが新規 SessionQueue を返す")
+	it("IT-AC21: dequeueCard は空キュー指定で no-op だが新規 SessionQueue を返す", () => {
+		const input = {
+			due: ["due-1"],
+			learn: ["learn-1"],
+			new: ["new-1"],
+			retry: [],
+		}
+
+		const result = dequeueCard(input, "retry")
+
+		expect(result).toEqual(input)
+		expect(result).not.toBe(input)
+	})
 
 	// ACトレース: AC#22
 	// 検証観点: addToRetryQueue は重複 cardId を許可し末尾追加する。
 	// @category: integration
 	// @dependency: frontend/src/lib/srs/queue.ts
 	// @complexity: low
-	it.todo("IT-AC22: addToRetryQueue は重複IDを拒否せず末尾へ追加する")
+	it("IT-AC22: addToRetryQueue は重複IDを拒否せず末尾へ追加する", () => {
+		const input = {
+			due: ["due-1"],
+			learn: [],
+			new: [],
+			retry: ["retry-1"],
+		}
+
+		const result = addToRetryQueue(input, "retry-1")
+
+		expect(result).toEqual({
+			due: ["due-1"],
+			learn: [],
+			new: [],
+			retry: ["retry-1", "retry-1"],
+		})
+		expect(result).not.toBe(input)
+		expect(input.retry).toEqual(["retry-1"])
+	})
 
 	// ACトレース: AC#23
 	// 検証観点: 4キュー全空時のみ isSessionComplete=true。
 	// @category: integration
 	// @dependency: frontend/src/lib/srs/queue.ts
 	// @complexity: low
-	it.todo("IT-AC23: isSessionComplete は4キュー全空のときだけ true を返す")
+	it("IT-AC23: isSessionComplete は4キュー全空のときだけ true を返す", () => {
+		expect(
+			isSessionComplete({
+				due: [],
+				learn: [],
+				new: [],
+				retry: [],
+			}),
+		).toBe(true)
+		expect(
+			isSessionComplete({
+				due: ["due-1"],
+				learn: [],
+				new: [],
+				retry: [],
+			}),
+		).toBe(false)
+		expect(
+			isSessionComplete({
+				due: [],
+				learn: ["learn-1"],
+				new: [],
+				retry: [],
+			}),
+		).toBe(false)
+		expect(
+			isSessionComplete({
+				due: [],
+				learn: [],
+				new: ["new-1"],
+				retry: [],
+			}),
+		).toBe(false)
+		expect(
+			isSessionComplete({
+				due: [],
+				learn: [],
+				new: [],
+				retry: ["retry-1"],
+			}),
+		).toBe(false)
+	})
 
 	// 実行順序: Phase 4 - 日付境界の複合統合
 

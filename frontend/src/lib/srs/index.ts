@@ -8,7 +8,13 @@ export {
 
 export { calculateRating, getIntervalPreview } from "./calculate";
 export { classifyCard, countByCategory } from "./classify";
-export { buildSessionQueue } from "./queue";
+export {
+	addToRetryQueue,
+	buildSessionQueue,
+	dequeueCard,
+	getNextCardId,
+	isSessionComplete,
+} from "./queue";
 
 export type {
 	CardCategory,

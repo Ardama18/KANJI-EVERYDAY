@@ -188,28 +188,28 @@ flowchart TD
 **目的**: セッション進行API（`getNextCardId` / `dequeueCard` / `addToRetryQueue` / `isSessionComplete`）を immutable 契約で完成させる。
 
 #### タスク（1コミット粒度）
-- [ ] T-S05-07: キュー消化・完了判定関数を実装する
+- [x] T-S05-07: キュー消化・完了判定関数を実装する
   - 実装: `frontend/src/lib/srs/queue.ts`
-- [ ] T-S05-09-P3: queue 操作系 unit test を追加実装する
+- [x] T-S05-09-P3: queue 操作系 unit test を追加実装する
   - テスト: `frontend/src/lib/srs/queue.test.ts`
   - 対象AC: AC#19〜#23
-- [ ] T-S05-10-P3-IT: 統合テストの Phase 3 対象ケースを実装・実行する
+- [x] T-S05-10-P3-IT: 統合テストの Phase 3 対象ケースを実装・実行する
   - テスト: `specs/stories/S-05-srs-engine/tests/srs-engine.int.test.ts`
   - 対象: `IT-AC19`〜`IT-AC23`
-- [ ] T-S05-10-P3-REG: 統合テストを全件再実行して回帰がないことを確認する
+- [x] T-S05-10-P3-REG: 統合テストを全件再実行して回帰がないことを確認する
   - テスト: `specs/stories/S-05-srs-engine/tests/srs-engine.int.test.ts`
 
 #### フェーズ完了条件（Design AC由来）
-- [ ] AC#19: `due -> learn -> new -> retry` 優先順で次カード取得できる
-- [ ] AC#20: `dequeueCard` が指定 source 先頭のみ削除し入力を破壊しない
-- [ ] AC#21: 空キュー `dequeueCard` が no-op かつ新規参照を返す
-- [ ] AC#22: `addToRetryQueue` が重複IDを許容して末尾追加する
-- [ ] AC#23: `isSessionComplete` が4キュー全空時のみ `true` を返す
+- [x] AC#19: `due -> learn -> new -> retry` 優先順で次カード取得できる
+- [x] AC#20: `dequeueCard` が指定 source 先頭のみ削除し入力を破壊しない
+- [x] AC#21: 空キュー `dequeueCard` が no-op かつ新規参照を返す
+- [x] AC#22: `addToRetryQueue` が重複IDを許容して末尾追加する
+- [x] AC#23: `isSessionComplete` が4キュー全空時のみ `true` を返す
 
 #### 品質ゲート
-- [ ] `npm run test --prefix frontend -- src/lib/srs/*.test.ts ../specs/stories/S-05-srs-engine/tests/srs-engine.int.test.ts` が成功する
-- [ ] `npm run typecheck --prefix frontend` が成功する
-- [ ] queue 操作がすべて新規オブジェクト返却であることをテストで確認できる
+- [x] `npm run test --prefix frontend -- src/lib/srs/*.test.ts ../specs/stories/S-05-srs-engine/tests/srs-engine.int.test.ts` が成功する
+- [x] `npm run typecheck --prefix frontend` が成功する
+- [x] queue 操作がすべて新規オブジェクト返却であることをテストで確認できる
 
 #### 動作確認手順
 1. `queue.test.ts` で優先順・重複retry・空キューno-op新規参照を確認する。
@@ -217,7 +217,7 @@ flowchart TD
 3. `srs-engine.int.test.ts` 全件実行で `IT-AC01`〜`IT-AC24` の回帰がないことを確認する。
 
 #### 停止ポイント（品質固定）
-- [ ] Phase 3 対象統合テスト + 統合テスト全件がPASSした状態を保存する
+- [x] Phase 3 対象統合テスト + 統合テスト全件がPASSした状態を保存する
 
 ---
 
@@ -269,11 +269,11 @@ flowchart TD
 - [x] AC#16: `buildSessionQueue` 初期構築（Phase 2 / Unit + Integration）
 - [x] AC#17: `newLimit` 正規化（Phase 2 / Unit + Integration）
 - [x] AC#18: カテゴリ内順序維持（Phase 2 / Unit + Integration）
-- [ ] AC#19: 次カード優先順（Phase 3 / Unit + Integration）
-- [ ] AC#20: `dequeueCard` 先頭1件削除 + immutable（Phase 3 / Unit + Integration）
-- [ ] AC#21: 空キュー no-op + 新規参照（Phase 3 / Unit + Integration）
-- [ ] AC#22: retry 重複許容末尾追加（Phase 3 / Unit + Integration）
-- [ ] AC#23: 全キュー空のみ完了（Phase 3 / Unit + Integration）
+- [x] AC#19: 次カード優先順（Phase 3 / Unit + Integration）
+- [x] AC#20: `dequeueCard` 先頭1件削除 + immutable（Phase 3 / Unit + Integration）
+- [x] AC#21: 空キュー no-op + 新規参照（Phase 3 / Unit + Integration）
+- [x] AC#22: retry 重複許容末尾追加（Phase 3 / Unit + Integration）
+- [x] AC#23: 全キュー空のみ完了（Phase 3 / Unit + Integration）
 - [ ] AC#24: JST 00:00 境界で retry リセット（Phase 1 / Unit + Integration）
 
 ## リスクと対策

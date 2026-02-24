@@ -15,9 +15,9 @@
 セッション進行API（`getNextCardId` / `dequeueCard` / `addToRetryQueue` / `isSessionComplete`）を実装する。優先順 `due -> learn -> new -> retry`、no-op時の新規参照返却、retry重複許容、全キュー空判定を immutable 契約で固定する。
 
 ## 対象ファイル
-- [ ] `frontend/src/lib/srs/queue.ts`
-- [ ] `frontend/src/lib/srs/queue.test.ts`
-- [ ] `specs/stories/S-05-srs-engine/tests/srs-engine.int.test.ts`
+- [x] `frontend/src/lib/srs/queue.ts`
+- [x] `frontend/src/lib/srs/queue.test.ts`
+- [x] `specs/stories/S-05-srs-engine/tests/srs-engine.int.test.ts`
 
 ## テスト観点
 - Unit:
@@ -32,9 +32,9 @@
 
 ## 実装手順（TDD: Red-Green-Refactor）
 ### 1. Red Phase
-- [ ] `queue.test.ts` に AC#19〜#23 の失敗テストを追加する。
-- [ ] `srs-engine.int.test.ts` の `IT-AC19`〜`IT-AC23` を失敗テストへ変更する。
-- [ ] 失敗を確認する。
+- [x] `queue.test.ts` に AC#19〜#23 の失敗テストを追加する。
+- [x] `srs-engine.int.test.ts` の `IT-AC19`〜`IT-AC23` を失敗テストへ変更する。
+- [x] 失敗を確認する。
 
 ```bash
 npm run test --prefix frontend -- src/lib/srs/queue.test.ts
@@ -42,9 +42,9 @@ npm run test --prefix frontend -- ../specs/stories/S-05-srs-engine/tests/srs-eng
 ```
 
 ### 2. Green Phase
-- [ ] `queue.ts` に4つのキュー操作関数を最小実装する。
-- [ ] 各操作で新規オブジェクト返却（immutable）を保証する。
-- [ ] `IT-AC19`〜`IT-AC23` がPASSするまで実装を調整する。
+- [x] `queue.ts` に4つのキュー操作関数を最小実装する。
+- [x] 各操作で新規オブジェクト返却（immutable）を保証する。
+- [x] `IT-AC19`〜`IT-AC23` がPASSするまで実装を調整する。
 
 ```bash
 npm run test --prefix frontend -- src/lib/srs/queue.test.ts
@@ -52,9 +52,9 @@ npm run test --prefix frontend -- ../specs/stories/S-05-srs-engine/tests/srs-eng
 ```
 
 ### 3. Refactor Phase
-- [ ] キュー選択優先順ロジックを読みやすい小関数へ整理する。
-- [ ] Phase 3完了条件として統合テスト全件（`IT-AC01`〜`IT-AC24`）を再実行する。
-- [ ] queue系Unitテストを再実行し、参照不変性の回帰がないことを確認する。
+- [x] キュー選択優先順ロジックを読みやすい小関数へ整理する。
+- [x] Phase 3完了条件として統合テスト全件（`IT-AC01`〜`IT-AC24`）を再実行する。
+- [x] queue系Unitテストを再実行し、参照不変性の回帰がないことを確認する。
 
 ```bash
 npm run test --prefix frontend -- src/lib/srs/queue.test.ts
@@ -62,12 +62,12 @@ npm run test --prefix frontend -- ../specs/stories/S-05-srs-engine/tests/srs-eng
 ```
 
 ## 品質チェック
-- [ ] `npm run test --prefix frontend -- src/lib/srs/queue.test.ts`
-- [ ] `npm run test --prefix frontend -- ../specs/stories/S-05-srs-engine/tests/srs-engine.int.test.ts`
-- [ ] `npm run typecheck --prefix frontend`
+- [x] `npm run test --prefix frontend -- src/lib/srs/queue.test.ts`
+- [x] `npm run test --prefix frontend -- ../specs/stories/S-05-srs-engine/tests/srs-engine.int.test.ts`
+- [x] `npm run typecheck --prefix frontend`
 
 ## 完了条件
-- [ ] AC#19〜#23 が Unit + Integration でPASSしている。
-- [ ] `IT-AC01`〜`IT-AC24` の統合テスト全件がPASSしている。
-- [ ] キュー操作が入力非破壊・新規参照返却であることをテストで担保できる。
-- [ ] 動作確認レベル L2（対象Unit + Integration + 型チェック）を満たす。
+- [x] AC#19〜#23 が Unit + Integration でPASSしている。
+- [x] `IT-AC01`〜`IT-AC24` の統合テスト全件がPASSしている。
+- [x] キュー操作が入力非破壊・新規参照返却であることをテストで担保できる。
+- [x] 動作確認レベル L2（対象Unit + Integration + 型チェック）を満たす。
