@@ -2,11 +2,13 @@ type RequiredEnvKey =
 	| "NEXT_PUBLIC_SUPABASE_URL"
 	| "NEXT_PUBLIC_SUPABASE_ANON_KEY"
 	| "SUPABASE_SERVICE_ROLE_KEY";
+type OptionalEnvKey = "GEMINI_API_KEY";
 
 export type EnvConfig = {
 	supabaseUrl: string;
 	supabaseAnonKey: string;
 	supabaseServiceRoleKey: string;
+	geminiApiKey: string | undefined;
 	nodeEnv: string | undefined;
 };
 
@@ -18,6 +20,18 @@ const REQUIRED_ENV_KEYS: RequiredEnvKey[] = [
 
 const formatMissingEnvError = (missingKeys: readonly RequiredEnvKey[]) =>
 	`Missing required environment variables: ${missingKeys.join(", ")}`;
+
+const getOptionalEnv = (key: OptionalEnvKey): string | undefined => {
+	const value = process.env[key];
+
+	if (value === undefined) {
+		return undefined;
+	}
+
+	const trimmedValue = value.trim();
+
+	return trimmedValue.length > 0 ? trimmedValue : undefined;
+};
 
 export function requireEnv(keys: readonly RequiredEnvKey[]): void {
 	const missingKeys = keys.filter((key) => {
@@ -37,6 +51,7 @@ export function getEnvConfig(): EnvConfig {
 		supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL || "",
 		supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
 		supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || "",
+		geminiApiKey: getOptionalEnv("GEMINI_API_KEY"),
 		nodeEnv: process.env.NODE_ENV,
 	};
 }
