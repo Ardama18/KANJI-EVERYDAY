@@ -162,23 +162,23 @@ flowchart TD
 **目的**: `getIllustrationUrl(illustrationKey)` の決定規則（owner + key + latest ready 1件）と `null` 返却契約を確定する。
 
 #### タスク
-- [ ] `getIllustrationUrl(illustrationKey)` を実装する（`updated_at DESC, id DESC`, `expiresIn=3600`）
+- [x] `getIllustrationUrl(illustrationKey)` を実装する（`updated_at DESC, id DESC`, `expiresIn=3600`）
   - 実装: `frontend/src/actions/illustration-actions.ts`
   - テスト: `frontend/src/actions/illustration-actions.test.ts`
-- [ ] 同一 `illustration_key` 複数行の tie-break 条件を unit で固定する
+- [x] 同一 `illustration_key` 複数行の tie-break 条件を unit で固定する
   - 実装: `frontend/src/actions/illustration-actions.test.ts`
   - テスト: `frontend/src/actions/illustration-actions.test.ts`
-- [ ] ACトレーサビリティファイルを更新する
+- [x] ACトレーサビリティファイルを更新する
   - 実装: `specs/stories/S-08-illustration-generation-backend/tests/s08-traceability.md`
-- [ ] 統合テスト（Phase 3対象）を同時実装・実行する
+- [x] 統合テスト（Phase 3対象）を同時実装・実行する
   - テスト: `specs/stories/S-08-illustration-generation-backend/tests/illustration-generation-backend.int.test.ts`
   - 対象: `IT-AC12`, `IT-AC13`
-- [ ] 統合テストを全件再実行して退行がないことを確認する
+- [x] 統合テストを全件再実行して退行がないことを確認する
   - テスト: `specs/stories/S-08-illustration-generation-backend/tests/illustration-generation-backend.int.test.ts`
 
 #### フェーズ完了条件（Design AC由来）
-- [ ] AC-12: owner + key 条件で `ready` 最新1件のみを採用し Signed URL（3600秒）を返す
-- [ ] AC-13: 条件一致0件で `null` を返す
+- [x] AC-12: owner + key 条件で `ready` 最新1件のみを採用し Signed URL（3600秒）を返す
+- [x] AC-13: 条件一致0件で `null` を返す
 
 #### 動作確認手順
 1. 同一 `illustration_key` で `updated_at` 同値ケースを含む fixture を投入し、`id DESC` タイブレークを確認する。
@@ -186,7 +186,7 @@ flowchart TD
 3. `IT-AC12/13` を実装した統合テストと統合テスト全件を実行し、合格を確認する。
 
 #### 停止ポイント（品質固定）
-- [ ] Phase 3 対象統合テストが PASS した状態を保存する
+- [x] Phase 3 対象統合テストが PASS した状態を保存する
 
 ---
 
@@ -226,8 +226,8 @@ flowchart TD
 - [ ] AC-09: Gemini `fetch` 連携（SDK依存追加なし）
 - [ ] AC-10: 成功時 `ready` + `storage_path/prompt/model_info` 更新
 - [ ] AC-11: 失敗時 `failed` + `model_info` 失敗理由記録
-- [ ] AC-12: latest-ready 1件採用（`updated_at DESC, id DESC`）で Signed URL 返却
-- [ ] AC-13: 条件一致なしで `null` 返却
+- [x] AC-12: latest-ready 1件採用（`updated_at DESC, id DESC`）で Signed URL 返却
+- [x] AC-13: 条件一致なしで `null` 返却
 - [ ] AC-14: `sanitizePromptInput` の制御文字除去 + 100文字上限
 
 ## リスクと対策

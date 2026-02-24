@@ -1,5 +1,6 @@
 "use server";
 
+import { getSignedUrl } from "@/lib/illustration/storage";
 import { createServerClient } from "@/lib/supabase/server";
 
 type TriggerErrorCode = "unauthorized" | "card_not_found" | "card_missing_illustration_key";
@@ -21,6 +22,11 @@ type IllustrationLookupRow = {
 
 type MutationIdRow = {
 	id: string;
+};
+
+type ReadyIllustrationLookupRow = {
+	id: string;
+	storage_path: string | null;
 };
 
 type QueryError = {
@@ -104,6 +110,50 @@ type TriggerSupabaseClient = {
 	};
 };
 
+type UrlLookupSupabaseClient = {
+	auth: {
+		getUser: () => Promise<QueryResult<{ user: { id: string } | null }>>;
+	};
+	from(table: "illustrations"): {
+		select: (columns: string) => {
+			eq: (
+				column: "owner_user_id",
+				value: string
+			) => {
+				eq: (
+					column: "illustration_key",
+					value: string
+				) => {
+					eq: (
+						column: "status",
+						value: "ready"
+					) => {
+						not: (
+							column: "storage_path",
+							operator: "is",
+							value: null
+						) => {
+							order: (
+								column: "updated_at",
+								options?: { ascending: boolean }
+							) => {
+								order: (
+									column: "id",
+									options?: { ascending: boolean }
+								) => {
+									limit: (count: number) => {
+										maybeSingle: () => Promise<QueryResult<ReadyIllustrationLookupRow | null>>;
+									};
+								};
+							};
+						};
+					};
+				};
+			};
+		};
+	};
+};
+
 export type TriggerIllustrationGenerationResult =
 	| {
 			ok: true;
@@ -135,9 +185,20 @@ const defaultProcessIllustrationGenerationImplementation: ProcessIllustrationGen
 let processIllustrationGenerationImplementation =
 	defaultProcessIllustrationGenerationImplementation;
 
+const READY_ILLUSTRATION_STATUS_FOR_URL_LOOKUP = "ready";
+const SIGNED_URL_EXPIRES_IN_SECONDS = 3600;
+const ILLUSTRATION_URL_LOOKUP_SORT = {
+	updatedAt: "updated_at",
+	id: "id",
+} as const;
+
 const asTriggerSupabaseClient = (
 	client: ReturnType<typeof createServerClient>
 ): TriggerSupabaseClient => client as unknown as TriggerSupabaseClient;
+
+const asUrlLookupSupabaseClient = (
+	client: ReturnType<typeof createServerClient>
+): UrlLookupSupabaseClient => client as unknown as UrlLookupSupabaseClient;
 
 const isIllustrationStatus = (status: string): status is IllustrationStatus =>
 	status === "pending" || status === "ready" || status === "failed";
@@ -261,6 +322,28 @@ const insertPendingIllustration = async (params: {
 	return assertData("illustrations insert failed", data);
 };
 
+const findLatestReadyIllustrationForOwner = async (params: {
+	supabase: UrlLookupSupabaseClient;
+	illustrationKey: string;
+	ownerUserId: string;
+}) => {
+	const { data, error } = await params.supabase
+		.from("illustrations")
+		.select("id, storage_path")
+		.eq("owner_user_id", params.ownerUserId)
+		.eq("illustration_key", params.illustrationKey)
+		.eq("status", READY_ILLUSTRATION_STATUS_FOR_URL_LOOKUP)
+		.not("storage_path", "is", null)
+		.order(ILLUSTRATION_URL_LOOKUP_SORT.updatedAt, { ascending: false })
+		.order(ILLUSTRATION_URL_LOOKUP_SORT.id, { ascending: false })
+		.limit(1)
+		.maybeSingle();
+
+	assertNoQueryError("illustrations ready lookup failed", error);
+
+	return data;
+};
+
 export async function processIllustrationGeneration(
 	args: ProcessIllustrationGenerationArgs
 ): Promise<void> {
@@ -368,6 +451,24 @@ export async function triggerIllustrationGeneration(
 	};
 }
 
-export async function getIllustrationUrl(_illustrationKey: string): Promise<string | null> {
-	return null;
+export async function getIllustrationUrl(illustrationKey: string): Promise<string | null> {
+	const supabase = asUrlLookupSupabaseClient(createServerClient());
+	const { data: authData, error: authError } = await supabase.auth.getUser();
+
+	assertNoQueryError("auth lookup failed", authError);
+
+	if (!authData.user) {
+		return null;
+	}
+
+	const latestReadyIllustration = await findLatestReadyIllustrationForOwner({
+		supabase,
+		illustrationKey,
+		ownerUserId: authData.user.id,
+	});
+	if (!latestReadyIllustration?.storage_path) {
+		return null;
+	}
+
+	return getSignedUrl(latestReadyIllustration.storage_path, SIGNED_URL_EXPIRES_IN_SECONDS);
 }

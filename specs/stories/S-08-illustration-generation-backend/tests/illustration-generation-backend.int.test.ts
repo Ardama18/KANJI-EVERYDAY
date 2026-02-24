@@ -23,15 +23,27 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const createServerClientMock = vi.hoisted(() => vi.fn());
 const createServiceRoleClientMock = vi.hoisted(() => vi.fn());
+const getSignedUrlMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/supabase/server", () => ({
 	createServerClient: createServerClientMock,
 	createServiceRoleClient: createServiceRoleClientMock,
 }));
+vi.mock("@/lib/illustration/storage", async () => {
+	const actual = await vi.importActual<typeof import("../../../../frontend/src/lib/illustration/storage")>(
+		"@/lib/illustration/storage"
+	);
+
+	return {
+		...actual,
+		getSignedUrl: getSignedUrlMock,
+	};
+});
 
 import {
 	__resetProcessIllustrationGenerationImplementationForTest,
 	__setProcessIllustrationGenerationImplementationForTest,
+	getIllustrationUrl,
 	triggerIllustrationGeneration,
 } from "../../../../frontend/src/actions/illustration-actions";
 import { processIllustrationGeneration } from "../../../../frontend/src/lib/illustration/generator";
@@ -64,6 +76,7 @@ type CardRow = {
 type IllustrationRow = {
 	id: string;
 	status: string;
+	storage_path?: string | null;
 };
 
 type IdRow = {
@@ -145,9 +158,34 @@ const createSupabaseDouble = (overrides?: Partial<TriggerTestOptions>) => {
 			) => { order: typeof illustrationOrderIdMock }
 		>()
 		.mockReturnValue({ order: illustrationOrderIdMock });
-	const illustrationEqKeyMock = vi
-		.fn<(column: "illustration_key", value: string) => { order: typeof illustrationOrderUpdatedAtMock }>()
+	const illustrationNotStoragePathMock = vi
+		.fn<
+			(
+				column: "storage_path",
+				operator: "is",
+				value: null
+			) => { order: typeof illustrationOrderUpdatedAtMock }
+		>()
 		.mockReturnValue({ order: illustrationOrderUpdatedAtMock });
+	const illustrationEqReadyStatusMock = vi
+		.fn<
+			(
+				column: "status",
+				value: "ready"
+			) => { not: typeof illustrationNotStoragePathMock }
+		>()
+		.mockReturnValue({ not: illustrationNotStoragePathMock });
+	const illustrationEqKeyMock = vi
+		.fn<
+			(column: "illustration_key", value: string) => {
+				order: typeof illustrationOrderUpdatedAtMock;
+				eq: typeof illustrationEqReadyStatusMock;
+			}
+		>()
+		.mockReturnValue({
+			order: illustrationOrderUpdatedAtMock,
+			eq: illustrationEqReadyStatusMock,
+		});
 	const illustrationEqOwnerMock = vi
 		.fn<(column: "owner_user_id", value: string) => { eq: typeof illustrationEqKeyMock }>()
 		.mockReturnValue({ eq: illustrationEqKeyMock });
@@ -222,6 +260,10 @@ const createSupabaseDouble = (overrides?: Partial<TriggerTestOptions>) => {
 		fromMock,
 		cardEqOwnerMock,
 		illustrationEqOwnerMock,
+		illustrationEqReadyStatusMock,
+		illustrationNotStoragePathMock,
+		illustrationOrderUpdatedAtMock,
+		illustrationOrderIdMock,
 		updateMock,
 		insertMock,
 	};
@@ -296,6 +338,7 @@ describe("illustration-generation-backend 統合テスト", () => {
 	beforeEach(() => {
 		createServerClientMock.mockReset();
 		createServiceRoleClientMock.mockReset();
+		getSignedUrlMock.mockReset();
 		__resetProcessIllustrationGenerationImplementationForTest();
 	});
 
@@ -663,6 +706,37 @@ describe("illustration-generation-backend 統合テスト", () => {
 	});
 
 	// Phase 3: URL 取得
-	it.todo("IT-AC12: getIllustrationUrl が owner_user_id + illustration_key で ready最新1件を選び expiresIn=3600 の Signed URL を返す")
-	it.todo("IT-AC13: AC-12 条件一致が0件のとき getIllustrationUrl が null を返す")
+	it("IT-AC12: getIllustrationUrl が owner_user_id + illustration_key で ready最新1件を選び expiresIn=3600 の Signed URL を返す", async () => {
+		const spies = createSupabaseDouble({
+			existingIllustration: {
+				id: "illustration-ready-latest",
+				status: "ready",
+				storage_path: "user-1/illustration-ready-latest.png",
+			},
+		});
+		getSignedUrlMock.mockResolvedValue("https://signed.example/latest");
+
+		const result = await getIllustrationUrl("kanji-key-1");
+
+		expect(result).toBe("https://signed.example/latest");
+		expect(spies.illustrationEqOwnerMock).toHaveBeenCalledWith("owner_user_id", "user-1");
+		expect(spies.illustrationEqReadyStatusMock).toHaveBeenCalledWith("status", "ready");
+		expect(spies.illustrationNotStoragePathMock).toHaveBeenCalledWith("storage_path", "is", null);
+		expect(spies.illustrationOrderUpdatedAtMock).toHaveBeenCalledWith("updated_at", {
+			ascending: false,
+		});
+		expect(spies.illustrationOrderIdMock).toHaveBeenCalledWith("id", {
+			ascending: false,
+		});
+		expect(getSignedUrlMock).toHaveBeenCalledWith("user-1/illustration-ready-latest.png", 3600);
+	});
+
+	it("IT-AC13: AC-12 条件一致が0件のとき getIllustrationUrl が null を返す", async () => {
+		createSupabaseDouble({ existingIllustration: null });
+
+		const result = await getIllustrationUrl("kanji-key-1");
+
+		expect(result).toBeNull();
+		expect(getSignedUrlMock).not.toHaveBeenCalled();
+	});
 });
