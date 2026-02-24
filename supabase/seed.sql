@@ -1,5 +1,7 @@
 -- S-04 Phase 1 seed: fixed owner/profile/deck + 50 kanji source (R1/W1 100 cards)
 
+BEGIN;
+
 INSERT INTO auth.users (
 	id,
 	instance_id,
@@ -203,3 +205,5 @@ SELECT
 	resolved_seed_cards.id AS card_id
 FROM resolved_seed_cards
 ON CONFLICT (deck_id, card_id) DO NOTHING;
+
+COMMIT;

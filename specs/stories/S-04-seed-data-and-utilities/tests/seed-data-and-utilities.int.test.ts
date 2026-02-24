@@ -17,10 +17,13 @@
 // AC-11 -> IT-AC11-SEED-IDEMPOTENCY
 // AC-12 -> IT-AC12-SEED-TRANSACTION-ROLLBACK
 
+import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import * as dateUtils from "../../../../frontend/src/lib/date";
-import { queryRows, sqlLiteral } from "../../S-02-database-schema-rls/tests/helpers/s02-db-testkit";
+import { queryRows, runSql, sqlLiteral } from "../../S-02-database-schema-rls/tests/helpers/s02-db-testkit";
 
 interface CountRow {
 	count: number;
@@ -66,6 +69,91 @@ interface SeedDeckRow {
 	owner_user_id: string;
 	name: string;
 	new_limit_per_day: number;
+}
+
+interface SeedTableCounts {
+	cards: number;
+	decks: number;
+	deck_cards: number;
+	users_profile: number;
+}
+
+const SEED_SQL_PATH = fileURLToPath(new URL("../../../../supabase/seed.sql", import.meta.url));
+
+function loadSeedSql(): string {
+	return readFileSync(SEED_SQL_PATH, "utf8");
+}
+
+function collectSeedTableCounts(seedDeckId: string, seedOwnerUserId: string): SeedTableCounts {
+	const cards = queryRows<CountRow>(`
+    SELECT COUNT(*)::int AS count
+    FROM public.cards
+  `)[0]?.count;
+	const decks = queryRows<CountRow>(`
+    SELECT COUNT(*)::int AS count
+    FROM public.decks
+    WHERE id = ${sqlLiteral(seedDeckId)}::uuid
+  `)[0]?.count;
+	const deckCards = queryRows<CountRow>(`
+    SELECT COUNT(*)::int AS count
+    FROM public.deck_cards
+    WHERE deck_id = ${sqlLiteral(seedDeckId)}::uuid
+  `)[0]?.count;
+	const usersProfile = queryRows<CountRow>(`
+    SELECT COUNT(*)::int AS count
+    FROM public.users_profile
+    WHERE user_id = ${sqlLiteral(seedOwnerUserId)}::uuid
+  `)[0]?.count;
+
+	return {
+		cards: cards ?? 0,
+		decks: decks ?? 0,
+		deck_cards: deckCards ?? 0,
+		users_profile: usersProfile ?? 0,
+	};
+}
+
+function buildFailingSeedSql(seedSql: string, rollbackProbeCardKey: string): string {
+	const probeInsert = `
+INSERT INTO public.cards (
+	owner_user_id,
+	visibility,
+	skill,
+	pattern,
+	front_text,
+	back_text,
+	illustration_key,
+	card_key
+)
+VALUES (
+	NULL,
+	'public',
+	'reading',
+	'R1',
+	'ROLLBACK_PROBE_FRONT',
+	'ROLLBACK_PROBE_BACK',
+	'ROLLBACK_PROBE',
+	${sqlLiteral(rollbackProbeCardKey)}
+);
+`.trim();
+
+	const probeInjectedSql = seedSql.replace(
+		"INSERT INTO auth.users (",
+		`${probeInsert}\n\nINSERT INTO auth.users (`
+	);
+	if (probeInjectedSql === seedSql) {
+		throw new Error("Failed to inject rollback probe insert into seed.sql");
+	}
+
+	const failureInjectedSql = probeInjectedSql.replace(
+		"ON CONFLICT (deck_id, card_id) DO NOTHING;",
+		"ON CONFLICT (deck_id, card_id) DO NOTHING;\n\nSELECT 1 / 0;"
+	);
+	if (failureInjectedSql === probeInjectedSql) {
+		throw new Error("Failed to inject forced failure into seed.sql");
+	}
+
+	return failureInjectedSql;
 }
 
 describe("seed-data-and-utilities 統合テスト", () => {
@@ -361,7 +449,14 @@ describe("seed-data-and-utilities 統合テスト", () => {
 	// @category: integration
 	// @dependency: supabase/seed.sql, public.cards, public.decks, public.deck_cards
 	// @complexity: high
-	it.todo("IT-AC11: Seed 再実行でも cards/decks/deck_cards の件数が増えない");
+	it("IT-AC11: Seed 再実行でも cards/decks/deck_cards の件数が増えない", () => {
+		const before = collectSeedTableCounts(SEED_DECK_ID, SEED_OWNER_USER_ID);
+
+		runSql(loadSeedSql());
+
+		const after = collectSeedTableCounts(SEED_DECK_ID, SEED_OWNER_USER_ID);
+		expect(after).toEqual(before);
+	});
 
 	// AC原文 (AC-12): もし S-02 マイグレーション未適用または Seed 途中ステートメント失敗が発生した場合、システムは不足テーブル/制約エラーを返し、単一トランザクションをロールバックして部分成功状態を残さないこと。
 	// AC解釈: 失敗時はエラー可視化と全ロールバックを両立し、部分データを残さない必要がある。
@@ -371,5 +466,21 @@ describe("seed-data-and-utilities 統合テスト", () => {
 	// @category: edge-case
 	// @dependency: supabase/seed.sql, full transaction
 	// @complexity: high
-	it.todo("IT-AC12: migration 未適用または Seed 失敗時に全ロールバックされ部分成功を残さない");
+	it("IT-AC12: migration 未適用または Seed 失敗時に全ロールバックされ部分成功を残さない", () => {
+		const before = collectSeedTableCounts(SEED_DECK_ID, SEED_OWNER_USER_ID);
+		const rollbackProbeCardKey = `rollback-probe-${randomUUID()}`;
+		const failingSeedSql = buildFailingSeedSql(loadSeedSql(), rollbackProbeCardKey);
+
+		expect(() => runSql(failingSeedSql)).toThrowError(/division by zero/u);
+
+		const after = collectSeedTableCounts(SEED_DECK_ID, SEED_OWNER_USER_ID);
+		expect(after).toEqual(before);
+
+		const rollbackProbeCards = queryRows<CountRow>(`
+      SELECT COUNT(*)::int AS count
+      FROM public.cards
+      WHERE card_key = ${sqlLiteral(rollbackProbeCardKey)}
+    `)[0];
+		expect(rollbackProbeCards?.count).toBe(0);
+	});
 });
