@@ -1,11 +1,18 @@
-export const LOGIN_STUB_TITLE = "ログイン";
-export const LOGIN_STUB_MESSAGE = "ログイン実装予定";
+import { LoginForm } from "@/components/auth/login-form";
+
+export const LOGIN_PAGE_TITLE = "ログイン";
+export const LOGIN_PAGE_DESCRIPTION = "メールアドレスとパスワードでログインできます";
 
 export default function LoginPage() {
 	return (
-		<main className="app-page">
-			<h1>{LOGIN_STUB_TITLE}</h1>
-			<p>{LOGIN_STUB_MESSAGE}</p>
+		<main className="mx-auto flex min-h-screen w-full max-w-[28rem] flex-col justify-center px-4 py-8">
+			<section className="flex flex-col gap-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+				<header className="space-y-1">
+					<h1 className="text-2xl font-bold text-slate-900">{LOGIN_PAGE_TITLE}</h1>
+					<p className="text-sm text-slate-600">{LOGIN_PAGE_DESCRIPTION}</p>
+				</header>
+				<LoginForm />
+			</section>
 		</main>
 	);
 }
