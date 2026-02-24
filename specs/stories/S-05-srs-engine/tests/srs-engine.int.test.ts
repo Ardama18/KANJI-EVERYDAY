@@ -37,6 +37,8 @@ import {
 	HARD_INTERVALS,
 	RETRY_TODAY_LIMIT,
 	calculateRating,
+	classifyCard,
+	countByCategory,
 	getIntervalPreview,
 	type Rating,
 	type ReviewState,
@@ -254,28 +256,49 @@ describe("srs-engine 統合テスト", () => {
 	// @category: integration
 	// @dependency: frontend/src/lib/srs/classify.ts
 	// @complexity: low
-	it.todo("IT-AC12: classifyCard は null state を new と分類する")
+	it("IT-AC12: classifyCard は null state を new と分類する", () => {
+		expect(classifyCard(null, today)).toBe("new")
+	})
 
 	// ACトレース: AC#13
 	// 検証観点: level<=1 && due<=today は learn、level>=2 && due<=today は due。
 	// @category: integration
 	// @dependency: frontend/src/lib/srs/classify.ts
 	// @complexity: medium
-	it.todo("IT-AC13: classifyCard が learn/due の分岐条件を満たす")
+	it("IT-AC13: classifyCard が learn/due の分岐条件を満たす", () => {
+		expect(classifyCard(createState({ level: 0, dueDate: today }), today)).toBe("learn")
+		expect(classifyCard(createState({ level: 1, dueDate: today }), today)).toBe("learn")
+		expect(classifyCard(createState({ level: 2, dueDate: today }), today)).toBe("due")
+	})
 
 	// ACトレース: AC#14
 	// 検証観点: dueDate > today なら null を返す。
 	// @category: integration
 	// @dependency: frontend/src/lib/srs/classify.ts
 	// @complexity: low
-	it.todo("IT-AC14: classifyCard は future due を null で返す")
+	it("IT-AC14: classifyCard は future due を null で返す", () => {
+		expect(classifyCard(createState({ level: 2, dueDate: "2026-02-25" }), today)).toBeNull()
+	})
 
 	// ACトレース: AC#15
 	// 検証観点: countByCategory は null 分類をカウント対象に含めない。
 	// @category: integration
 	// @dependency: frontend/src/lib/srs/classify.ts
 	// @complexity: medium
-	it.todo("IT-AC15: countByCategory は null 分類カードを除外して集計する")
+	it("IT-AC15: countByCategory は null 分類カードを除外して集計する", () => {
+		const cards = [
+			{ cardId: "new-card", reviewState: null },
+			{ cardId: "learn-card", reviewState: createState({ level: 1, dueDate: today }) },
+			{ cardId: "due-card", reviewState: createState({ level: 2, dueDate: today }) },
+			{ cardId: "future-card", reviewState: createState({ level: 3, dueDate: "2026-02-26" }) },
+		]
+
+		expect(countByCategory(cards, today)).toEqual({
+			new: 1,
+			learn: 1,
+			due: 1,
+		})
+	})
 
 	// 実行順序: Phase 3 - キュー構築/消化契約
 

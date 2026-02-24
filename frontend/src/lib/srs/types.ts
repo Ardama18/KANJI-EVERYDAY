@@ -26,3 +26,16 @@ export interface IntervalPreview {
 		label: string;
 	};
 }
+
+export type CardCategory = "new" | "learn" | "due";
+
+export interface CardWithState {
+	cardId: string;
+	reviewState: ReviewState | null;
+}
+
+export interface CategoryCounts {
+	new: number;
+	learn: number;
+	due: number;
+}

@@ -7,5 +7,14 @@ export {
 } from "./constants";
 
 export { calculateRating, getIntervalPreview } from "./calculate";
+export { classifyCard, countByCategory } from "./classify";
 
-export type { IntervalPreview, Rating, RatingResult, ReviewState } from "./types";
+export type {
+	CardCategory,
+	CardWithState,
+	CategoryCounts,
+	IntervalPreview,
+	Rating,
+	RatingResult,
+	ReviewState,
+} from "./types";
