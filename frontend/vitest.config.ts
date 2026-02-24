@@ -23,6 +23,8 @@ export default defineConfig({
 			"../specs/stories/S-01-project-scaffolding/tests/*.test.tsx",
 			"../specs/stories/S-03-authentication-flow/tests/*.test.ts",
 			"../specs/stories/S-03-authentication-flow/tests/*.test.tsx",
+			"../specs/stories/S-04-seed-data-and-utilities/tests/*.test.ts",
+			"../specs/stories/S-04-seed-data-and-utilities/tests/*.test.tsx",
 		],
 	},
 });
