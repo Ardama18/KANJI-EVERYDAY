@@ -152,29 +152,29 @@ flowchart TD
 **目的**: `classifyCard` / `countByCategory` / `buildSessionQueue` の分類・集計・順序契約を固定する。
 
 #### タスク（1コミット粒度）
-- [ ] T-S05-05: `classifyCard` / `countByCategory` を実装する
+- [x] T-S05-05: `classifyCard` / `countByCategory` を実装する
   - 実装: `frontend/src/lib/srs/classify.ts`
-- [ ] T-S05-06: `buildSessionQueue(cards, today, newLimit)` を実装する
+- [x] T-S05-06: `buildSessionQueue(cards, today, newLimit)` を実装する
   - 実装: `frontend/src/lib/srs/queue.ts`
   - 実装観点: `newLimit` 正規化、カテゴリ内入力順維持、`retry=[]` 初期化
-- [ ] T-S05-09-P2: classify/buildQueue の unit test を実装する
+- [x] T-S05-09-P2: classify/buildQueue の unit test を実装する
   - テスト: `frontend/src/lib/srs/classify.test.ts`, `frontend/src/lib/srs/queue.test.ts`
   - 対象AC: AC#12〜#18
-- [ ] T-S05-10-P2-IT: 統合テストの Phase 2 対象ケースを実装・実行する
+- [x] T-S05-10-P2-IT: 統合テストの Phase 2 対象ケースを実装・実行する
   - テスト: `specs/stories/S-05-srs-engine/tests/srs-engine.int.test.ts`
   - 対象: `IT-AC12`〜`IT-AC18`
 
 #### フェーズ完了条件（Design AC由来）
-- [ ] AC#12〜#14: `classifyCard` が `new/learn/due/null` を仕様どおり返す
-- [ ] AC#15: `countByCategory` が `null` 分類を除外して集計する
-- [ ] AC#16: `buildSessionQueue` が `due/learn/new/retry` 初期構築を行う
-- [ ] AC#17: `newLimit` 正規化（`1.9->1`, `-1->0`, `NaN->0`）が成立する
-- [ ] AC#18: カテゴリ内部順序が入力順のまま維持される
+- [x] AC#12〜#14: `classifyCard` が `new/learn/due/null` を仕様どおり返す
+- [x] AC#15: `countByCategory` が `null` 分類を除外して集計する
+- [x] AC#16: `buildSessionQueue` が `due/learn/new/retry` 初期構築を行う
+- [x] AC#17: `newLimit` 正規化（`1.9->1`, `-1->0`, `NaN->0`）が成立する
+- [x] AC#18: カテゴリ内部順序が入力順のまま維持される
 
 #### 品質ゲート
-- [ ] `npm run test --prefix frontend -- src/lib/srs/classify.test.ts src/lib/srs/queue.test.ts ../specs/stories/S-05-srs-engine/tests/srs-engine.int.test.ts` が成功する
-- [ ] `npm run typecheck --prefix frontend` が成功する
-- [ ] `buildSessionQueue` が O(n) で処理できる実装になっている
+- [x] `npm run test --prefix frontend -- src/lib/srs/classify.test.ts src/lib/srs/queue.test.ts ../specs/stories/S-05-srs-engine/tests/srs-engine.int.test.ts` が成功する
+- [x] `npm run typecheck --prefix frontend` が成功する
+- [x] `buildSessionQueue` が O(n) で処理できる実装になっている
 
 #### 動作確認手順
 1. `classify.test.ts` で `dueDate > today -> null` と `state=null -> new` を確認する。
@@ -182,7 +182,7 @@ flowchart TD
 3. `srs-engine.int.test.ts` の `IT-AC12`〜`IT-AC18` を同Phase内でPASSさせる。
 
 #### 停止ポイント（品質固定）
-- [ ] Phase 2 対象統合テストがPASSした状態を保存する
+- [x] Phase 2 対象統合テストがPASSした状態を保存する
 
 ### Phase 3: キュー消化と完了判定（想定コミット数: 1-2）
 **目的**: セッション進行API（`getNextCardId` / `dequeueCard` / `addToRetryQueue` / `isSessionComplete`）を immutable 契約で完成させる。
@@ -262,13 +262,13 @@ flowchart TD
 - [ ] AC#9: `state=null` 初回処理（Phase 1 / Unit + Integration）
 - [ ] AC#10: level clamp（Phase 1 / Unit + Integration）
 - [ ] AC#11: interval preview 文言（Phase 1 / Unit + Integration）
-- [ ] AC#12: `classifyCard(null)=new`（Phase 2 / Unit + Integration）
-- [ ] AC#13: learn/due 分岐（Phase 2 / Unit + Integration）
-- [ ] AC#14: future due を `null`（Phase 2 / Unit + Integration）
-- [ ] AC#15: `countByCategory` で `null` 除外（Phase 2 / Unit + Integration）
-- [ ] AC#16: `buildSessionQueue` 初期構築（Phase 2 / Unit + Integration）
-- [ ] AC#17: `newLimit` 正規化（Phase 2 / Unit + Integration）
-- [ ] AC#18: カテゴリ内順序維持（Phase 2 / Unit + Integration）
+- [x] AC#12: `classifyCard(null)=new`（Phase 2 / Unit + Integration）
+- [x] AC#13: learn/due 分岐（Phase 2 / Unit + Integration）
+- [x] AC#14: future due を `null`（Phase 2 / Unit + Integration）
+- [x] AC#15: `countByCategory` で `null` 除外（Phase 2 / Unit + Integration）
+- [x] AC#16: `buildSessionQueue` 初期構築（Phase 2 / Unit + Integration）
+- [x] AC#17: `newLimit` 正規化（Phase 2 / Unit + Integration）
+- [x] AC#18: カテゴリ内順序維持（Phase 2 / Unit + Integration）
 - [ ] AC#19: 次カード優先順（Phase 3 / Unit + Integration）
 - [ ] AC#20: `dequeueCard` 先頭1件削除 + immutable（Phase 3 / Unit + Integration）
 - [ ] AC#21: 空キュー no-op + 新規参照（Phase 3 / Unit + Integration）

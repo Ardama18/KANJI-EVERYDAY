@@ -8,6 +8,7 @@ export {
 
 export { calculateRating, getIntervalPreview } from "./calculate";
 export { classifyCard, countByCategory } from "./classify";
+export { buildSessionQueue } from "./queue";
 
 export type {
 	CardCategory,
@@ -17,4 +18,5 @@ export type {
 	Rating,
 	RatingResult,
 	ReviewState,
+	SessionQueue,
 } from "./types";

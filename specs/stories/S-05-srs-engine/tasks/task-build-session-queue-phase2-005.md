@@ -15,9 +15,9 @@
 `buildSessionQueue(cards, today, newLimit)` を実装し、`due -> learn -> new -> retry` の初期構築、`newLimit` 正規化、カテゴリ内入力順維持、`retry=[]` 初期化を固定する。
 
 ## 対象ファイル
-- [ ] `frontend/src/lib/srs/queue.ts`
-- [ ] `frontend/src/lib/srs/queue.test.ts`
-- [ ] `specs/stories/S-05-srs-engine/tests/srs-engine.int.test.ts`
+- [x] `frontend/src/lib/srs/queue.ts`
+- [x] `frontend/src/lib/srs/queue.test.ts`
+- [x] `specs/stories/S-05-srs-engine/tests/srs-engine.int.test.ts`
 
 ## テスト観点
 - Unit:
@@ -30,9 +30,9 @@
 
 ## 実装手順（TDD: Red-Green-Refactor）
 ### 1. Red Phase
-- [ ] `queue.test.ts` に AC#16〜#18 の失敗テストを追加する。
-- [ ] `srs-engine.int.test.ts` の `IT-AC16`〜`IT-AC18` を失敗テストへ変更する。
-- [ ] 失敗を確認する。
+- [x] `queue.test.ts` に AC#16〜#18 の失敗テストを追加する。
+- [x] `srs-engine.int.test.ts` の `IT-AC16`〜`IT-AC18` を失敗テストへ変更する。
+- [x] 失敗を確認する。
 
 ```bash
 npm run test --prefix frontend -- src/lib/srs/queue.test.ts
@@ -40,9 +40,9 @@ npm run test --prefix frontend -- ../specs/stories/S-05-srs-engine/tests/srs-eng
 ```
 
 ### 2. Green Phase
-- [ ] `queue.ts` に `buildSessionQueue` を最小実装する。
-- [ ] `newLimit` 正規化とカテゴリ順序維持を明示実装する。
-- [ ] 対象テストがPASSするまで実装を調整する。
+- [x] `queue.ts` に `buildSessionQueue` を最小実装する。
+- [x] `newLimit` 正規化とカテゴリ順序維持を明示実装する。
+- [x] 対象テストがPASSするまで実装を調整する。
 
 ```bash
 npm run test --prefix frontend -- src/lib/srs/queue.test.ts
@@ -50,9 +50,9 @@ npm run test --prefix frontend -- ../specs/stories/S-05-srs-engine/tests/srs-eng
 ```
 
 ### 3. Refactor Phase
-- [ ] O(n) で処理できるようループ構造を整理する（余計な再走査を避ける）。
-- [ ] Phase 2統合テスト全件（`IT-AC12`〜`IT-AC18`）を再実行する。
-- [ ] Unitテストを再実行し回帰がないことを確認する。
+- [x] O(n) で処理できるようループ構造を整理する（余計な再走査を避ける）。
+- [x] Phase 2統合テスト全件（`IT-AC12`〜`IT-AC18`）を再実行する。
+- [x] Unitテストを再実行し回帰がないことを確認する。
 
 ```bash
 npm run test --prefix frontend -- src/lib/srs/queue.test.ts
@@ -60,12 +60,12 @@ npm run test --prefix frontend -- ../specs/stories/S-05-srs-engine/tests/srs-eng
 ```
 
 ## 品質チェック
-- [ ] `npm run test --prefix frontend -- src/lib/srs/queue.test.ts`
-- [ ] `npm run test --prefix frontend -- ../specs/stories/S-05-srs-engine/tests/srs-engine.int.test.ts -t "IT-AC12|IT-AC13|IT-AC14|IT-AC15|IT-AC16|IT-AC17|IT-AC18"`
-- [ ] `npm run typecheck --prefix frontend`
+- [x] `npm run test --prefix frontend -- src/lib/srs/queue.test.ts`
+- [x] `npm run test --prefix frontend -- ../specs/stories/S-05-srs-engine/tests/srs-engine.int.test.ts -t "IT-AC12|IT-AC13|IT-AC14|IT-AC15|IT-AC16|IT-AC17|IT-AC18"`
+- [x] `npm run typecheck --prefix frontend`
 
 ## 完了条件
-- [ ] AC#16〜#18 が Unit + Integration でPASSしている。
-- [ ] `buildSessionQueue` の `newLimit` 正規化と順序契約が固定されている。
-- [ ] 実装が O(n) 方針で説明可能である。
-- [ ] 動作確認レベル L2（対象Unit + Integration + 型チェック）を満たす。
+- [x] AC#16〜#18 が Unit + Integration でPASSしている。
+- [x] `buildSessionQueue` の `newLimit` 正規化と順序契約が固定されている。
+- [x] 実装が O(n) 方針で説明可能である。
+- [x] 動作確認レベル L2（対象Unit + Integration + 型チェック）を満たす。

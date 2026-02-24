@@ -39,3 +39,10 @@ export interface CategoryCounts {
 	learn: number;
 	due: number;
 }
+
+export interface SessionQueue {
+	due: string[];
+	learn: string[];
+	new: string[];
+	retry: string[];
+}

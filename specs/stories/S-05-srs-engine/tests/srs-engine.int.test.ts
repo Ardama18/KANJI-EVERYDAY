@@ -36,6 +36,7 @@ import {
 	GOOD_INTERVALS,
 	HARD_INTERVALS,
 	RETRY_TODAY_LIMIT,
+	buildSessionQueue,
 	calculateRating,
 	classifyCard,
 	countByCategory,
@@ -300,28 +301,73 @@ describe("srs-engine 統合テスト", () => {
 		})
 	})
 
-	// 実行順序: Phase 3 - キュー構築/消化契約
+	// 実行順序: Phase 2/3 - キュー構築/消化契約
 
 	// ACトレース: AC#16
 	// 検証観点: buildSessionQueue が due/learn/new を分類し retry=[] 初期化、newLimit 正規化を適用する。
 	// @category: integration
 	// @dependency: frontend/src/lib/srs/queue.ts, frontend/src/lib/srs/classify.ts
 	// @complexity: medium
-	it.todo("IT-AC16: buildSessionQueue が分類と retry 初期化を正しく行う")
+	it("IT-AC16: buildSessionQueue が分類と retry 初期化を正しく行う", () => {
+		const cards = [
+			{ cardId: "new-card-1", reviewState: null },
+			{ cardId: "learn-card-1", reviewState: createState({ level: 1, dueDate: today }) },
+			{ cardId: "due-card-1", reviewState: createState({ level: 3, dueDate: today }) },
+			{ cardId: "future-card", reviewState: createState({ level: 4, dueDate: "2026-02-25" }) },
+			{ cardId: "new-card-2", reviewState: null },
+		]
+
+		expect(buildSessionQueue(cards, today, 10)).toEqual({
+			due: ["due-card-1"],
+			learn: ["learn-card-1"],
+			new: ["new-card-1", "new-card-2"],
+			retry: [],
+		})
+	})
 
 	// ACトレース: AC#17
 	// 検証観点: newLimit 正規化で 1.9->1, -1->0, NaN->0 を満たす。
 	// @category: integration
 	// @dependency: frontend/src/lib/srs/queue.ts
 	// @complexity: medium
-	it.todo("IT-AC17: buildSessionQueue の newLimit 正規化ルールを満たす")
+	it.each([
+		{ newLimit: 1.9, expectedLength: 1 },
+		{ newLimit: -1, expectedLength: 0 },
+		{ newLimit: Number.NaN, expectedLength: 0 },
+	])(
+		"IT-AC17: buildSessionQueue は newLimit=$newLimit を正規化して new.length=$expectedLength にする",
+		({ newLimit, expectedLength }) => {
+			const cards = [
+				{ cardId: "new-card-1", reviewState: null },
+				{ cardId: "new-card-2", reviewState: null },
+			]
+
+			expect(buildSessionQueue(cards, today, newLimit).new).toHaveLength(expectedLength)
+		},
+	)
 
 	// ACトレース: AC#18
 	// 検証観点: buildSessionQueue の各カテゴリ内部順序を入力順で維持する。
 	// @category: integration
 	// @dependency: frontend/src/lib/srs/queue.ts
 	// @complexity: medium
-	it.todo("IT-AC18: buildSessionQueue がカテゴリ内の入力順を保持する")
+	it("IT-AC18: buildSessionQueue がカテゴリ内の入力順を保持する", () => {
+		const cards = [
+			{ cardId: "due-card-1", reviewState: createState({ level: 2, dueDate: today }) },
+			{ cardId: "learn-card-1", reviewState: createState({ level: 1, dueDate: today }) },
+			{ cardId: "due-card-2", reviewState: createState({ level: 5, dueDate: today }) },
+			{ cardId: "new-card-1", reviewState: null },
+			{ cardId: "learn-card-2", reviewState: createState({ level: 0, dueDate: today }) },
+			{ cardId: "new-card-2", reviewState: null },
+		]
+
+		expect(buildSessionQueue(cards, today, 10)).toEqual({
+			due: ["due-card-1", "due-card-2"],
+			learn: ["learn-card-1", "learn-card-2"],
+			new: ["new-card-1", "new-card-2"],
+			retry: [],
+		})
+	})
 
 	// ACトレース: AC#19
 	// 検証観点: getNextCardId は due->learn->new->retry 優先順を守る。
