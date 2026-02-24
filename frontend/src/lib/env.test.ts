@@ -7,7 +7,8 @@ const REQUIRED_KEYS = [
 	"NEXT_PUBLIC_SUPABASE_ANON_KEY",
 	"SUPABASE_SERVICE_ROLE_KEY",
 ] as const;
-const TEST_KEYS = REQUIRED_KEYS;
+const OPTIONAL_KEYS = ["GEMINI_API_KEY"] as const;
+const TEST_KEYS = [...REQUIRED_KEYS, ...OPTIONAL_KEYS] as const;
 
 const SNAPSHOT: Partial<Record<(typeof TEST_KEYS)[number], string>> = {};
 let nodeEnvSnapshot: string | undefined;
@@ -97,7 +98,17 @@ describe("getEnvConfig", () => {
 			supabaseUrl: BASELINE_ENV.NEXT_PUBLIC_SUPABASE_URL,
 			supabaseAnonKey: BASELINE_ENV.NEXT_PUBLIC_SUPABASE_ANON_KEY,
 			supabaseServiceRoleKey: BASELINE_ENV.SUPABASE_SERVICE_ROLE_KEY,
+			geminiApiKey: undefined,
 			nodeEnv: process.env.NODE_ENV,
 		});
+	});
+
+	it("GEMINI_API_KEY が未設定でも例外を投げずに undefined を返す", () => {
+		Object.assign(process.env, BASELINE_ENV);
+
+		const config = getEnvConfig();
+
+		expect(Object.hasOwn(config, "geminiApiKey")).toBe(true);
+		expect(config.geminiApiKey).toBeUndefined();
 	});
 });

@@ -1,10 +1,13 @@
 import { readFileSync } from "node:fs";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createServerClient as createServerClientUnderTest } from "./server";
+import {
+	createServerClient as createServerClientUnderTest,
+	createServiceRoleClient as createServiceRoleClientUnderTest,
+} from "./server";
 
 const createServerClientMock = vi.hoisted(() => vi.fn());
-const createBrowserClientMock = vi.hoisted(() => vi.fn());
+const createClientMock = vi.hoisted(() => vi.fn());
 const getEnvConfigMock = vi.hoisted(() => vi.fn());
 
 const cookieGetMock = vi.hoisted(() => vi.fn());
@@ -23,7 +26,10 @@ vi.mock("next/headers", () => ({
 
 vi.mock("@supabase/ssr", () => ({
 	createServerClient: createServerClientMock,
-	createBrowserClient: createBrowserClientMock,
+}));
+
+vi.mock("@supabase/supabase-js", () => ({
+	createClient: createClientMock,
 }));
 
 vi.mock("../env", () => ({
@@ -41,14 +47,10 @@ describe("frontend/src/lib/supabase/server.ts", () => {
 	beforeEach(() => {
 		getEnvConfigMock.mockReset().mockReturnValue(envConfig);
 		createServerClientMock.mockReset();
-		createBrowserClientMock.mockReset();
+		createClientMock.mockReset();
 		cookieGetMock.mockReset();
 		cookieSetMock.mockReset();
 		cookiesMock.mockClear();
-	});
-
-	afterEach(() => {
-		expect(createBrowserClientMock).not.toHaveBeenCalled();
 	});
 
 	it("createServerClient は @supabase/ssr の createServerClient を使って初期化する", () => {
@@ -79,6 +81,7 @@ describe("frontend/src/lib/supabase/server.ts", () => {
 
 		expect(source).toContain('import type { Database } from "@/types/database";');
 		expect(source).toContain("createSupabaseServerClient<Database>(");
+		expect(source).toContain("createSupabaseClient<Database>(");
 	});
 
 	it("cookieStore を createServerClient へ透過的に転送する", () => {
@@ -107,5 +110,27 @@ describe("frontend/src/lib/supabase/server.ts", () => {
 			value: "",
 			path: "/",
 		});
+	});
+
+	it("createServiceRoleClient は service role key で Supabase client を初期化する", () => {
+		const fakeClient = { id: "service-role-client" };
+		createClientMock.mockReturnValue(fakeClient);
+
+		const actual = createServiceRoleClientUnderTest();
+
+		expect(actual).toBe(fakeClient);
+		expect(createClientMock).toHaveBeenCalledTimes(1);
+		expect(cookiesMock).not.toHaveBeenCalled();
+		expect(createServerClientMock).not.toHaveBeenCalled();
+		expect(createClientMock).toHaveBeenCalledWith(
+			envConfig.supabaseUrl,
+			envConfig.supabaseServiceRoleKey,
+			{
+				auth: {
+					persistSession: false,
+					autoRefreshToken: false,
+				},
+			}
+		);
 	});
 });
