@@ -2,7 +2,7 @@
   "story_id": "S-09",
   "epic_id": "E-03",
   "parent_story_id": "",
-  "status": "design_review",
-  "github_pr_url": "",
-  "github_branch": ""
+  "status": "implementation_review",
+  "github_pr_url": "pending",
+  "github_branch": "story/S-09-illustration-display-integration"
 }

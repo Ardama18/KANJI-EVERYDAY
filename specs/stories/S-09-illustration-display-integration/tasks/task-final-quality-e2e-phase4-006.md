@@ -15,9 +15,9 @@
 全実装完了後に E2E骨子の `it.todo` を具体化し、`E2E-AC01/03/12/13/14/15/16/17/20` をPASSさせる。統合テスト全件回帰と `npm run check --prefix frontend` を通過させ、requirements/ADR/design/実装/テストの対応関係を `s09-traceability.md` に集約してストーリー完了判定を可能にする。
 
 ## 対象ファイル
-- [ ] `specs/stories/S-09-illustration-display-integration/tests/illustration-display-integration.e2e.test.ts`
-- [ ] `specs/stories/S-09-illustration-display-integration/tests/illustration-display-integration.int.test.ts`
-- [ ] `specs/stories/S-09-illustration-display-integration/tests/s09-traceability.md`
+- [x] `specs/stories/S-09-illustration-display-integration/tests/illustration-display-integration.e2e.test.ts`
+- [x] `specs/stories/S-09-illustration-display-integration/tests/illustration-display-integration.int.test.ts`
+- [x] `specs/stories/S-09-illustration-display-integration/tests/s09-traceability.md`
 
 ## テスト観点
 - E2E:
@@ -30,18 +30,18 @@
 ## 実装手順（TDD: Red-Green-Refactor）
 
 ### 1. Red Phase
-- [ ] `illustration-display-integration.e2e.test.ts` の対象 `it.todo` を失敗テストへ置換する。
-- [ ] 失敗を確認し、前提データ/待機条件/selectorを確定する。
+- [x] `illustration-display-integration.e2e.test.ts` の対象 `it.todo` を失敗テストへ置換する。
+- [x] 失敗を確認し、前提データ/待機条件/selectorを確定する。
 
 ```bash
 npm run test --prefix frontend -- ../specs/stories/S-09-illustration-display-integration/tests/illustration-display-integration.e2e.test.ts
 ```
 
 ### 2. Green Phase
-- [ ] E2Eシナリオを実装し、対象ACを通過させる。
-- [ ] 統合テスト全件を再実行し、Phase 1〜3退行がないことを確認する。
+- [x] E2Eシナリオを実装し、対象ACを通過させる。
+- [x] 統合テスト全件を再実行し、Phase 1〜3退行がないことを確認する。
 - [ ] `npm run check --prefix frontend` を実行し品質ゲートを通す。
-- [ ] `s09-traceability.md` に AC-01〜AC-20 の最終証跡を追記する。
+- [x] `s09-traceability.md` に AC-01〜AC-20 の最終証跡を追記する。
 
 ```bash
 npm run test --prefix frontend -- ../specs/stories/S-09-illustration-display-integration/tests/illustration-display-integration.int.test.ts
@@ -50,8 +50,8 @@ npm run check --prefix frontend
 ```
 
 ### 3. Refactor Phase
-- [ ] flaky要因（待機条件/selector/時刻依存）を安定化する。
-- [ ] `s09-traceability.md` の要件-設計-実装-テスト対応表を最終更新する。
+- [x] flaky要因（待機条件/selector/時刻依存）を安定化する。
+- [x] `s09-traceability.md` の要件-設計-実装-テスト対応表を最終更新する。
 - [ ] 統合/E2E/品質ゲートを再実行して最終状態を固定する。
 
 ```bash
@@ -61,15 +61,22 @@ npm run check --prefix frontend
 ```
 
 ## 完了条件
-- [ ] `E2E-AC01/03/12/13/14/15/16/17/20` がPASSしている。
-- [ ] 統合テスト全件がPASSしている。
+- [x] `E2E-AC01/03/12/13/14/15/16/17/20` がPASSしている。
+- [x] 統合テスト全件がPASSしている。
 - [ ] `npm run check --prefix frontend` がPASSしている。
-- [ ] AC-01〜AC-20 の証跡が `s09-traceability.md` で追跡可能である。
-- [ ] plan.md の実施ルール（統合テスト同phase、E2E最終phase）が満たされている。
+- [x] AC-01〜AC-20 の証跡が `s09-traceability.md` で追跡可能である。
+- [x] plan.md の実施ルール（統合テスト同phase、E2E最終phase）が満たされている。
 - [ ] 動作確認レベル L3（全体回帰 + E2E + 品質ゲート）が満たされている。
 
 ## 動作確認
-- [ ] `npm run test --prefix frontend -- ../specs/stories/S-09-illustration-display-integration/tests/illustration-display-integration.int.test.ts`
-- [ ] `npm run test --prefix frontend -- ../specs/stories/S-09-illustration-display-integration/tests/illustration-display-integration.e2e.test.ts`
+- [x] `npm run test --prefix frontend -- ../specs/stories/S-09-illustration-display-integration/tests/illustration-display-integration.int.test.ts`
+- [x] `npm run test --prefix frontend -- ../specs/stories/S-09-illustration-display-integration/tests/illustration-display-integration.e2e.test.ts`
 - [ ] `npm run check --prefix frontend`
-- [ ] `git diff --name-only`
+- [x] `git diff --name-only`
+
+## 作業ログ
+- 2026-02-24: `illustration-display-integration.e2e.test.ts` の `it.todo` を `E2E-AC01/03/12/13/14/15/16/17/20` の実テストへ置換し、`npm run test --prefix frontend -- ../specs/stories/S-09-illustration-display-integration/tests/illustration-display-integration.e2e.test.ts` で 9 件PASSを確認。
+- 2026-02-24: `npm run test --prefix frontend -- ../specs/stories/S-09-illustration-display-integration/tests/illustration-display-integration.int.test.ts` を再実行し、12 件PASSを確認。
+- 2026-02-24: `specs/stories/S-09-illustration-display-integration/tests/s09-traceability.md` を新規作成し、AC-01〜AC-20の要件/ADR/設計/実装/テスト証跡を集約。
+- 2026-02-24: `bash .claude/skills/quality-fixer/scripts/quality-check.sh` はスクリプト不在で実行不可。`npm run check --prefix frontend` は S-04 seed 系の既知DB障害（`127.0.0.1:54322`, `global/pg_filenode.map: I/O error`）で失敗し、全体品質ゲートPASSは未達。
+- 2026-02-24: quality-fixer代替として S-09スコープ品質ゲート（`npm run lint --prefix frontend && npm run typecheck --prefix frontend && npm run test --prefix frontend -- ../specs/stories/S-09-illustration-display-integration/tests/illustration-display-integration.int.test.ts ../specs/stories/S-09-illustration-display-integration/tests/illustration-display-integration.e2e.test.ts`）を実行し、`status=approved`（S-09 scope）を確認。

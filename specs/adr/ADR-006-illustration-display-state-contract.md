@@ -4,7 +4,7 @@ feature: illustration-display-integration
 type: adr
 version: 1.0.0
 created: 2026-02-24
-status: Proposed
+status: Accepted
 based_on: specs/stories/S-09-illustration-display-integration/requirements.md
 related_epic: specs/epics/E-03-illustration-generation/epic.md
 ---
@@ -13,7 +13,7 @@ related_epic: specs/epics/E-03-illustration-generation/epic.md
 
 ## ステータス
 
-Proposed
+Accepted
 
 ## コンテキスト
 
