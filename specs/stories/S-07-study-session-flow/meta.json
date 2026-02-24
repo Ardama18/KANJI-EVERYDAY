@@ -2,7 +2,7 @@
   "story_id": "S-07",
   "epic_id": "E-02",
   "parent_story_id": "",
-  "status": "not_started",
+  "status": "implementation_review",
   "github_pr_url": "",
-  "github_branch": ""
+  "github_branch": "story/S-07-study-session-flow"
 }

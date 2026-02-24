@@ -1,27 +1,67 @@
-import Link from "next/link";
+import {
+	STUDY_SESSION_EMPTY_MESSAGE,
+	getStudySessionState,
+	startStudySession,
+} from "@/actions/session-actions";
+import { StudyClient } from "@/components/study/StudyClient";
+import { notFound } from "next/navigation";
 
-export const STUDY_PLACEHOLDER_TITLE = "学習セッション準備中";
-export const STUDY_PLACEHOLDER_MESSAGE =
-	"この画面の実装は S-07（study-session-flow）で有効化されます。";
+export const STUDY_PAGE_TITLE = "学習セッション";
+export const STUDY_COMPLETE_FROM_START_MESSAGE = STUDY_SESSION_EMPTY_MESSAGE;
 
 type StudyPlaceholderPageProps = {
 	params: {
 		deckId: string;
 	};
+	searchParams?: {
+		session?: string;
+	};
 };
 
-export default function StudyPlaceholderPage({ params }: StudyPlaceholderPageProps) {
+export default async function StudyPage({ params, searchParams }: StudyPlaceholderPageProps) {
+	const sessionId = typeof searchParams?.session === "string" ? searchParams.session : null;
+
+	if (!sessionId) {
+		const startResult = await startStudySession(params.deckId);
+		if (startResult.status === "completed") {
+			return (
+				<StudyClient
+					deckId={startResult.deckId}
+					deckName={startResult.deckName}
+					initialState={{
+						deckId: startResult.deckId,
+						deckName: startResult.deckName,
+						phase: "complete",
+						summary: startResult.summary,
+					}}
+				/>
+			);
+		}
+
+		const startedState = await getStudySessionState(startResult.sessionId);
+		if (startedState.deckId !== params.deckId) {
+			notFound();
+		}
+
+		return (
+			<StudyClient
+				deckId={startedState.deckId}
+				deckName={startedState.deckName}
+				initialState={startedState}
+			/>
+		);
+	}
+
+	const sessionState = await getStudySessionState(sessionId);
+	if (sessionState.deckId !== params.deckId) {
+		notFound();
+	}
+
 	return (
-		<main className="mx-auto w-full max-w-lg px-4 py-8">
-			<h1 className="text-2xl font-bold text-slate-900">{STUDY_PLACEHOLDER_TITLE}</h1>
-			<p className="mt-3 text-sm text-slate-600">{STUDY_PLACEHOLDER_MESSAGE}</p>
-			<p className="mt-2 text-sm text-slate-500">対象デッキID: {params.deckId}</p>
-			<Link
-				href={`/decks/${params.deckId}`}
-				className="mt-6 inline-flex text-sm font-medium text-blue-600 hover:text-blue-800"
-			>
-				← デッキ概要へ戻る
-			</Link>
-		</main>
+		<StudyClient
+			deckId={sessionState.deckId}
+			deckName={sessionState.deckName}
+			initialState={sessionState}
+		/>
 	);
 }
