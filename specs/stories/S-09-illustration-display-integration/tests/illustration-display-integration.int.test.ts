@@ -17,6 +17,8 @@
 // AC-20 -> IT-AC11-NO-EXTRA-API-AFTER-REVEAL
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 const createServerClientMock = vi.hoisted(() => vi.fn());
 const redirectMock = vi.hoisted(() => vi.fn<(location: string) => never>());
@@ -41,9 +43,11 @@ vi.mock("next/navigation", () => ({
 
 import {
 	ILLUSTRATION_DISPLAY_STATUSES,
+	type CardFrontData,
 	getStudySessionState,
 	revealCard,
 } from "../../../../frontend/src/actions/session-actions";
+import { CardBack } from "../../../../frontend/src/components/study/CardBack";
 
 class RedirectSignal extends Error {
 	constructor(public readonly location: string) {
@@ -212,6 +216,22 @@ const createReviewStateRow = () => ({
 	retry_today_count: 0,
 	last_reviewed_at: "2026-02-24T00:00:00.000Z",
 });
+
+const createFrontCardData = (): CardFrontData => ({
+	sessionId: "session-2",
+	cardId: "card-1",
+	skill: "reading",
+	pattern: "R1",
+	frontText: "温かい",
+	progress: {
+		current: 1,
+		total: 10,
+		remaining: 9,
+	},
+});
+
+const countByTestId = (html: string, testId: string): number =>
+	html.match(new RegExp(`data-testid="${testId}"`, "g"))?.length ?? 0;
 
 const createRevealCardClient = (options: {
 	illustrationKey: string | null;
@@ -504,5 +524,32 @@ describe("S-09 illustration-display-integration integration", () => {
 		expect(triggerIllustrationGenerationMock).toHaveBeenNthCalledWith(2, "card-1");
 	});
 
-	it.todo("IT-AC11: revealCard のレスポンスだけで裏面イラスト分岐が決定でき追加API呼び出しが不要");
+	it("IT-AC11: revealCard のレスポンスだけで裏面イラスト分岐が決定でき追加API呼び出しが不要", async () => {
+		const reveal = createRevealCardClient({
+			illustrationKey: "key-1",
+			illustration: { status: "pending", storage_path: null },
+		});
+		createServerClientMock.mockReturnValue(reveal.client);
+
+		const backData = await revealCard("session-2");
+		const fromCallCountAfterReveal = reveal.client.from.mock.calls.length;
+		const html = renderToStaticMarkup(
+			createElement(CardBack, {
+				deckId: "deck-1",
+				deckName: "小学3年生の漢字",
+				card: createFrontCardData(),
+				backData,
+				onRate: vi.fn(),
+			})
+		);
+
+		expect(backData.illustrationStatus).toBe("pending");
+		expect(countByTestId(html, "illustration-region")).toBe(1);
+		expect(countByTestId(html, "illustration-loading")).toBe(1);
+		expect(countByTestId(html, "illustration-image")).toBe(0);
+		expect(reveal.client.from).toHaveBeenCalledTimes(fromCallCountAfterReveal);
+		expect(createServerClientMock).toHaveBeenCalledTimes(1);
+		expect(triggerIllustrationGenerationMock).not.toHaveBeenCalled();
+		expect(getSignedUrlMock).not.toHaveBeenCalled();
+	});
 });

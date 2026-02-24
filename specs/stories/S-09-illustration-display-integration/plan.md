@@ -75,8 +75,8 @@ flowchart TD
 ```
 
 ### フェーズ依存関係
-- [ ] Phase 2 着手条件: Phase 1 の統合テスト（`IT-AC01`〜`IT-AC10`）が合格
-- [ ] Phase 3 着手条件: Phase 2 の統合テスト（`IT-AC11` を含む）とUI単体テストが合格
+- [x] Phase 2 着手条件: Phase 1 の統合テスト（`IT-AC01`〜`IT-AC10`）が合格
+- [x] Phase 3 着手条件: Phase 2 の統合テスト（`IT-AC11` を含む）とUI単体テストが合格
 - [ ] 最終Phase 着手条件: Phase 1〜3 の実装・単体テスト・統合テストがすべて完了
 
 ### Phase 1: Server Action状態正規化
@@ -122,33 +122,33 @@ flowchart TD
 **目的**: `CardBack` から表示責務を分離し、`IllustrationDisplay` で状態別描画と画像エラー時フォールバックを成立させる。
 
 #### タスク
-- [ ] `IllustrationDisplay` を新規実装し、`none/pending/generating/failed/ready` の描画契約を実装する
+- [x] `IllustrationDisplay` を新規実装し、`none/pending/generating/failed/ready` の描画契約を実装する
   - 実装: `frontend/src/components/study/IllustrationDisplay.tsx`
   - テスト: `frontend/src/components/study/IllustrationDisplay.test.tsx`
-- [ ] `ready` 表示で `<Image>` を使用し、`onError` で `illustration-fallback` へ切り替える
+- [x] `ready` 表示で `<Image>` を使用し、`onError` で `illustration-fallback` へ切り替える
   - 実装: `frontend/src/components/study/IllustrationDisplay.tsx`
   - テスト: `frontend/src/components/study/IllustrationDisplay.test.tsx`
-- [ ] `CardBack` の固定プレースホルダを除去し `IllustrationDisplay` 呼び出しへ置換する
+- [x] `CardBack` の固定プレースホルダを除去し `IllustrationDisplay` 呼び出しへ置換する
   - 実装: `frontend/src/components/study/CardBack.tsx`
   - テスト: `frontend/src/components/study/CardBack.test.tsx`
-- [ ] `RatingButtons` 操作継続性テストを追加し、フォールバック時の評価導線を保証する
+- [x] `RatingButtons` 操作継続性テストを追加し、フォールバック時の評価導線を保証する
   - 実装: `frontend/src/components/study/RatingButtons.test.tsx`
   - テスト: `frontend/src/components/study/RatingButtons.test.tsx`
-- [ ] 統合テスト（Phase 2対象）を同時具体化し実行する
+- [x] 統合テスト（Phase 2対象）を同時具体化し実行する
   - テスト: `specs/stories/S-09-illustration-display-integration/tests/illustration-display-integration.int.test.ts`
   - 対象: `IT-AC11`（reveal応答のみで追加API呼び出しなしに裏面分岐可能）
-- [ ] UI手動確認（`ui_design: none` 対応）を実施する
+- [x] UI手動確認（`ui_design: none` 対応）を実施する
   - 確認内容: 表面非表示・裏面状態別表示・フォールバック時の評価導線
 
 #### フェーズ完了条件（Design AC由来）
-- [ ] AC-03: `none` で `illustration-region` が0件
-- [ ] AC-12: `pending` で `illustration-loading=1`, `illustration-image=0`
-- [ ] AC-13: `generating` が `pending` と同一ローディング表示
-- [ ] AC-14: `failed` で `illustration-failed=1` かつ再試行UIなし
-- [ ] AC-15: `ready` で `illustration-image=1`
-- [ ] AC-16: 画像ロード失敗で `illustration-fallback=1` + 評価操作継続
-- [ ] AC-17: front表示でイラスト関連DOMが常に0件
-- [ ] AC-20: 状態判定の追加API呼び出し0回
+- [x] AC-03: `none` で `illustration-region` が0件
+- [x] AC-12: `pending` で `illustration-loading=1`, `illustration-image=0`
+- [x] AC-13: `generating` が `pending` と同一ローディング表示
+- [x] AC-14: `failed` で `illustration-failed=1` かつ再試行UIなし
+- [x] AC-15: `ready` で `illustration-image=1`
+- [x] AC-16: 画像ロード失敗で `illustration-fallback=1` + 評価操作継続
+- [x] AC-17: front表示でイラスト関連DOMが常に0件
+- [x] AC-20: 状態判定の追加API呼び出し0回
 
 #### 動作確認手順
 1. `IllustrationDisplay` の5状態を unit で検証し、`data-testid` 件数を固定する。
@@ -156,7 +156,7 @@ flowchart TD
 3. `IT-AC11` を同Phase内で実装・実行し、PASSを確認する。
 
 #### 停止ポイント（品質固定）
-- [ ] UI単体テスト + Phase 2対象統合テストがPASSした状態を保存する
+- [x] UI単体テスト + Phase 2対象統合テストがPASSした状態を保存する
 
 ### Phase 3: 画像設定と契約固定
 **目的**: Next.js 画像許可設定と `<Image>` 契約を固定し、本番相当環境での表示失敗リスクを除去する。
