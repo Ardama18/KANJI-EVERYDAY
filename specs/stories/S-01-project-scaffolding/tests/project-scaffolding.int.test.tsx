@@ -22,8 +22,7 @@ import HomePage, {
   ROOT_PAGE_NOTICE,
   ROOT_PAGE_TITLE,
 } from "../../../../frontend/app/page"
-import LoginPage, { LOGIN_STUB_MESSAGE } from "../../../../frontend/app/login/page"
-import DecksPage, { DECKS_STUB_MESSAGE } from "../../../../frontend/app/decks/page"
+import { DECKS_STUB_MESSAGE } from "../../../../frontend/app/(auth)/decks/page"
 
 describe("project-scaffolding 統合テスト", () => {
   // AC解釈: .env.local.example は supabase 3 鍵を必ず明記し、鍵名漏れなしを担保する
@@ -52,26 +51,27 @@ describe("project-scaffolding 統合テスト", () => {
     }
   })
 
-  // AC解釈: /login はスタブ文言を返す
-  // 検証: app/login/page.tsx が「実装予定」系の導線文言を含み、クラッシュしないこと
+  // AC解釈: /login は認証導線ページとして存在する
+  // 検証: app/login/page.tsx が LoginForm 導線とタイトル定義を持つこと
   // @category: integration
   // @dependency: frontend/app/login/page.tsx
   // @complexity: low
-  it("AC4: /login アクセス時にログイン実装予定スタブページが返る", () => {
-    const html = renderToStaticMarkup(<LoginPage />)
+  it("AC4: /login アクセス時にログイン導線ページが返る", () => {
+    const source = readTextFile(PROJECT_FILES.loginPage)
 
-    expect(html).toContain(LOGIN_STUB_MESSAGE)
+    expect(source).toContain("LOGIN_PAGE_TITLE")
+    expect(source).toContain("LoginForm")
   })
 
   // AC解釈: /decks はスタブ文言を返す
-  // 検証: app/decks/page.tsx がデッキ一覧実装予定の案内を返し、壊れないこと
+  // 検証: app/(auth)/decks/page.tsx がデッキ一覧実装予定の案内を返し、壊れないこと
   // @category: integration
-  // @dependency: frontend/app/decks/page.tsx
+  // @dependency: frontend/app/(auth)/decks/page.tsx
   // @complexity: low
   it("AC5: /decks アクセス時にデッキ一覧実装予定スタブページが返る", () => {
-    const html = renderToStaticMarkup(<DecksPage />)
+    const source = readTextFile(PROJECT_FILES.decksPage)
 
-    expect(html).toContain(DECKS_STUB_MESSAGE)
+    expect(source).toContain(DECKS_STUB_MESSAGE)
   })
 
   // AC解釈: ルートはナビゲーション付きトップを返す

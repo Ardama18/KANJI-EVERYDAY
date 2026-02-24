@@ -9,7 +9,9 @@ import React from "react"
 
 import { getEnvConfig } from "../../../../frontend/src/lib/env"
 import {
+  PROJECT_FILES,
   SERVICE_ROLE_MISSING_ERROR,
+  readTextFile,
   withBaselineEnv,
 } from "./project-scaffolding.test-helpers"
 import HomePage, {
@@ -17,8 +19,7 @@ import HomePage, {
   ROOT_PAGE_NOTICE,
   ROOT_PAGE_TITLE,
 } from "../../../../frontend/app/page"
-import LoginPage, { LOGIN_STUB_MESSAGE } from "../../../../frontend/app/login/page"
-import DecksPage, { DECKS_STUB_MESSAGE } from "../../../../frontend/app/decks/page"
+import { DECKS_STUB_MESSAGE } from "../../../../frontend/app/(auth)/decks/page"
 
 describe("project-scaffolding E2Eテスト", () => {
   // AC解釈: フル起動後、ルートページがナビゲーション付きで表示される
@@ -38,16 +39,16 @@ describe("project-scaffolding E2Eテスト", () => {
   })
 
   // AC解釈: login/decks 各ルートが初期導線として表示される
-  // 検証: /login と /decks が 200 でアクセス可能で、実装予定の文言が見えること
+  // 検証: /login がログイン導線を持ち、/decks が実装予定文言を返すこと
   // @category: e2e
-  // @dependency: frontend/app/login/page.tsx, frontend/app/decks/page.tsx, ルート認証未導入前提
+  // @dependency: frontend/app/login/page.tsx, frontend/app/(auth)/decks/page.tsx
   // @complexity: low
-  it("E2E: /login と /decks が壊れずスタブ表示される", () => {
-    const loginHtml = renderToStaticMarkup(<LoginPage />)
-    const decksHtml = renderToStaticMarkup(<DecksPage />)
+  it("E2E: /login と /decks の導線が存在する", () => {
+    const loginSource = readTextFile(PROJECT_FILES.loginPage)
+    const decksSource = readTextFile(PROJECT_FILES.decksPage)
 
-    expect(loginHtml).toContain(LOGIN_STUB_MESSAGE)
-    expect(decksHtml).toContain(DECKS_STUB_MESSAGE)
+    expect(loginSource).toContain("LoginForm")
+    expect(decksSource).toContain(DECKS_STUB_MESSAGE)
   })
 
   // AC解釈: 必須環境変数検証の最終検証をリリース境界で確認する

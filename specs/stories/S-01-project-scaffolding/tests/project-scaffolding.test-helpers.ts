@@ -32,7 +32,7 @@ export const PROJECT_FILES = {
   browserClient: path.resolve(FRONTEND_ROOT, "src/lib/supabase/client.ts"),
   homePage: path.resolve(FRONTEND_ROOT, "app/page.tsx"),
   loginPage: path.resolve(FRONTEND_ROOT, "app/login/page.tsx"),
-  decksPage: path.resolve(FRONTEND_ROOT, "app/decks/page.tsx"),
+  decksPage: path.resolve(FRONTEND_ROOT, "app/(auth)/decks/page.tsx"),
 } as const
 
 export const SERVICE_ROLE_MISSING_ERROR =
