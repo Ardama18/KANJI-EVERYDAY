@@ -12,8 +12,10 @@ vi.mock("next/navigation", () => ({
 }));
 
 import {
+	ILLUSTRATION_DISPLAY_STATUSES,
 	STUDY_SESSION_EMPTY_MESSAGE,
 	getNextCard,
+	normalizeIllustrationState,
 	revealCard,
 	startStudySession,
 } from "./session-actions";
@@ -313,5 +315,120 @@ describe("frontend/src/actions/session-actions.ts", () => {
 			},
 		});
 		expect(sessionUpdateMock).toHaveBeenCalledWith({ revealed: true });
+	});
+
+	it("UT-S09-AC01-STATUS-ENUM-CONTRACT: normalizeIllustrationState は5状態のみを返す", async () => {
+		const readyGetSignedUrlMock = vi.fn().mockResolvedValue("https://signed.example/image.png");
+		const statuses = await Promise.all([
+			normalizeIllustrationState({
+				cardId: "card-none",
+				illustrationKey: null,
+				illustration: null,
+			}),
+			normalizeIllustrationState({
+				cardId: "card-ready",
+				illustrationKey: "key-ready",
+				illustration: { status: "ready", storage_path: "user-1/ready.png" },
+				getSignedUrlFn: readyGetSignedUrlMock,
+			}),
+			normalizeIllustrationState({
+				cardId: "card-pending",
+				illustrationKey: "key-pending",
+				illustration: { status: "pending", storage_path: null },
+			}),
+			normalizeIllustrationState({
+				cardId: "card-failed",
+				illustrationKey: "key-failed",
+				illustration: { status: "failed", storage_path: null },
+			}),
+			normalizeIllustrationState({
+				cardId: "card-unknown",
+				illustrationKey: "key-unknown",
+				illustration: { status: "unknown", storage_path: null },
+			}),
+		]);
+
+		for (const result of statuses) {
+			expect(ILLUSTRATION_DISPLAY_STATUSES).toContain(result.illustrationStatus);
+		}
+	});
+
+	it("UT-S09-AC02-NONE-KEY-NULL: illustration_key=null は none/null に正規化する", async () => {
+		const triggerMock = vi.fn();
+		const result = await normalizeIllustrationState({
+			cardId: "card-1",
+			illustrationKey: null,
+			illustration: null,
+			allowTrigger: true,
+			triggerIllustrationGenerationFn: triggerMock,
+		});
+
+		expect(result).toEqual({
+			illustrationStatus: "none",
+			illustrationUrl: null,
+		});
+		expect(triggerMock).not.toHaveBeenCalled();
+	});
+
+	it("UT-AC05-SIGNED-URL-EXPIRESIN-3600: ready + storage_path は Signed URL を3600秒契約で返す", async () => {
+		const getSignedUrlMock = vi.fn().mockResolvedValue("https://signed.example/ready.png");
+		const result = await normalizeIllustrationState({
+			cardId: "card-ready",
+			illustrationKey: "key-ready",
+			illustration: {
+				status: "ready",
+				storage_path: "user-1/illustration-ready.png",
+			},
+			getSignedUrlFn: getSignedUrlMock,
+		});
+
+		expect(result).toEqual({
+			illustrationStatus: "ready",
+			illustrationUrl: "https://signed.example/ready.png",
+		});
+		expect(getSignedUrlMock).toHaveBeenCalledWith("user-1/illustration-ready.png", 3600);
+	});
+
+	it("UT-S09-AC06-PENDING-NORMALIZATION: pending 行は pending/null を返す", async () => {
+		const getSignedUrlMock = vi.fn();
+		const result = await normalizeIllustrationState({
+			cardId: "card-pending",
+			illustrationKey: "key-pending",
+			illustration: {
+				status: "pending",
+				storage_path: null,
+			},
+			getSignedUrlFn: getSignedUrlMock,
+		});
+
+		expect(result).toEqual({
+			illustrationStatus: "pending",
+			illustrationUrl: null,
+		});
+		expect(getSignedUrlMock).not.toHaveBeenCalled();
+	});
+
+	it("UT-S09-AC07-FAILED-NO-TRIGGER: failed 行は failed/null を返し trigger を呼ばない", async () => {
+		const triggerMock = vi.fn().mockResolvedValue({
+			ok: true,
+			started: true,
+			illustrationId: "illustration-1",
+		});
+		const result = await normalizeIllustrationState({
+			cardId: "card-failed",
+			illustrationKey: "key-failed",
+			illustration: {
+				status: "failed",
+				storage_path: null,
+			},
+			allowTrigger: true,
+			triggerIllustrationGenerationFn: triggerMock,
+		});
+
+		expect(result).toEqual({
+			illustrationStatus: "failed",
+			illustrationUrl: null,
+		});
+		expect(triggerMock).not.toHaveBeenCalled();
 	});
 });

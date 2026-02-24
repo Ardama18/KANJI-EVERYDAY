@@ -28,6 +28,7 @@ describe("frontend/src/components/study/CardBack.tsx", () => {
 					frontText: "温かい",
 					backText: "あたたかい",
 					illustrationUrl: null,
+					illustrationStatus: "pending",
 					intervalPreview: {
 						again: { label: "今日さいご + 明日" },
 						hard: { interval: 2, label: "2日後" },

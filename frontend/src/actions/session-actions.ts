@@ -1,6 +1,11 @@
 "use server";
 
 import {
+	type TriggerIllustrationGenerationResult,
+	triggerIllustrationGeneration,
+} from "@/actions/illustration-actions";
+import { getSignedUrl } from "@/lib/illustration/storage";
+import {
 	addToRetryQueue,
 	buildSessionQueue,
 	calculateRating,
@@ -16,9 +21,19 @@ import { redirect } from "next/navigation";
 import { getTodayJST } from "../lib/date";
 
 const LOGIN_PATH = "/login";
+const ILLUSTRATION_SIGNED_URL_EXPIRES_IN_SECONDS = 3600;
 
 export const STUDY_SESSION_COMPLETE_MESSAGE = "今日の学習おわり！";
 export const STUDY_SESSION_EMPTY_MESSAGE = "今日の学習は完了しています";
+export const ILLUSTRATION_DISPLAY_STATUSES = [
+	"ready",
+	"pending",
+	"generating",
+	"failed",
+	"none",
+] as const;
+
+export type IllustrationDisplayStatus = (typeof ILLUSTRATION_DISPLAY_STATUSES)[number];
 
 type SupabaseClient = ReturnType<typeof createServerClient>;
 type MutationError = { message: string } | null;
@@ -84,6 +99,16 @@ type DeckCardWithReviewRows = {
 	review_states: ReviewStateRow[] | ReviewStateRow | null;
 };
 
+type IllustrationRow = Pick<
+	Database["public"]["Tables"]["illustrations"]["Row"],
+	"status" | "storage_path"
+>;
+
+type GetSignedUrlFn = (storagePath: string, expiresIn: number) => Promise<string | null>;
+type TriggerIllustrationGenerationFn = (
+	cardId: string
+) => Promise<TriggerIllustrationGenerationResult>;
+
 export interface CardFrontData {
 	sessionId: string;
 	cardId: string;
@@ -104,6 +129,7 @@ export interface CardBackData {
 	frontText: string;
 	backText: string;
 	illustrationUrl: string | null;
+	illustrationStatus: IllustrationDisplayStatus;
 	intervalPreview: IntervalPreview;
 }
 
@@ -170,6 +196,100 @@ const parseQueuePart = (value: Json): string[] => {
 	}
 
 	return value.filter((item): item is string => typeof item === "string");
+};
+
+type NormalizeIllustrationStateParams = {
+	cardId: string;
+	illustrationKey: string | null;
+	illustration: IllustrationRow | null;
+	allowTrigger?: boolean;
+	getSignedUrlFn?: GetSignedUrlFn;
+	triggerIllustrationGenerationFn?: TriggerIllustrationGenerationFn;
+};
+
+type NormalizedIllustrationState = Pick<CardBackData, "illustrationStatus" | "illustrationUrl">;
+
+const pendingIllustrationState = (): NormalizedIllustrationState => ({
+	illustrationStatus: "pending",
+	illustrationUrl: null,
+});
+
+const normalizeReadyIllustration = async (
+	illustration: IllustrationRow,
+	getSignedUrlFn: GetSignedUrlFn
+): Promise<NormalizedIllustrationState> => {
+	if (!illustration.storage_path) {
+		return pendingIllustrationState();
+	}
+
+	const signedUrl = await getSignedUrlFn(
+		illustration.storage_path,
+		ILLUSTRATION_SIGNED_URL_EXPIRES_IN_SECONDS
+	);
+	if (!signedUrl) {
+		return pendingIllustrationState();
+	}
+
+	return {
+		illustrationStatus: "ready",
+		illustrationUrl: signedUrl,
+	};
+};
+
+export const normalizeIllustrationState = async (
+	params: NormalizeIllustrationStateParams
+): Promise<NormalizedIllustrationState> => {
+	const {
+		cardId,
+		illustrationKey,
+		illustration,
+		allowTrigger = false,
+		getSignedUrlFn = getSignedUrl,
+		triggerIllustrationGenerationFn = triggerIllustrationGeneration,
+	} = params;
+	if (illustrationKey === null) {
+		return {
+			illustrationStatus: "none",
+			illustrationUrl: null,
+		};
+	}
+
+	if (illustration !== null) {
+		if (illustration.status === "ready") {
+			return normalizeReadyIllustration(illustration, getSignedUrlFn);
+		}
+
+		if (illustration.status === "pending") {
+			return pendingIllustrationState();
+		}
+
+		if (illustration.status === "failed") {
+			return {
+				illustrationStatus: "failed",
+				illustrationUrl: null,
+			};
+		}
+
+		return pendingIllustrationState();
+	}
+
+	if (!allowTrigger) {
+		return pendingIllustrationState();
+	}
+
+	try {
+		const triggerResult = await triggerIllustrationGenerationFn(cardId);
+		if (triggerResult.ok && triggerResult.started) {
+			return {
+				illustrationStatus: "generating",
+				illustrationUrl: null,
+			};
+		}
+	} catch (_error: unknown) {
+		return pendingIllustrationState();
+	}
+
+	return pendingIllustrationState();
 };
 
 const queueFromSession = (session: StudySessionRow): SessionQueue => ({
@@ -433,6 +553,7 @@ const toCardBackData = (card: CardRow, intervalPreview: IntervalPreview): CardBa
 		frontText: card.front_text,
 		backText: card.back_text,
 		illustrationUrl: null,
+		illustrationStatus: "none",
 		intervalPreview,
 	};
 };
