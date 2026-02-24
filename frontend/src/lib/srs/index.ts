@@ -6,4 +6,6 @@ export {
 	RETRY_TODAY_LIMIT,
 } from "./constants";
 
-export type { Rating } from "./types";
+export { calculateRating } from "./calculate";
+
+export type { Rating, RatingResult, ReviewState } from "./types";

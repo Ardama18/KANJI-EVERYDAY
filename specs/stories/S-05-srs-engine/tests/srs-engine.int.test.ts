@@ -31,14 +31,28 @@
 
 import { describe, expect, it } from "vitest"
 
+import { addDaysJST, getTomorrowJST } from "../../../../frontend/src/lib/date"
 import {
 	GOOD_INTERVALS,
 	HARD_INTERVALS,
 	RETRY_TODAY_LIMIT,
+	calculateRating,
 	type Rating,
+	type ReviewState,
 } from "../../../../frontend/src/lib/srs"
 
 describe("srs-engine 統合テスト", () => {
+	const today = "2026-02-24"
+	const now = "2026-02-24T10:00:00.000Z"
+	const createState = (overrides: Partial<ReviewState> = {}): ReviewState => ({
+		level: 0,
+		dueDate: "2026-02-20",
+		lastRating: null,
+		retryTodayCount: 0,
+		lastReviewedAt: "2026-02-24T00:00:00.000Z",
+		...overrides,
+	})
+
 	// 実行順序: Phase 1 - 定数/型/評価ロジック契約
 
 	// ACトレース: AC#1
@@ -69,35 +83,97 @@ describe("srs-engine 統合テスト", () => {
 	// @category: integration
 	// @dependency: frontend/src/lib/srs/calculate.ts
 	// @complexity: medium
-	it.todo("IT-AC03: calculateRating が now 注入をそのまま lastReviewedAt へ反映する")
+	it("IT-AC03: calculateRating が now 注入をそのまま lastReviewedAt へ反映する", () => {
+		const result = calculateRating(createState(), "good", today, now)
+
+		expect(calculateRating.length).toBe(4)
+		expect(result.newState.lastReviewedAt).toBe(now)
+	})
 
 	// ACトレース: AC#4
 	// 検証観点: level0 + good で dueDate=today+1, level=1, addToRetryQueue=false。
 	// @category: integration
 	// @dependency: frontend/src/lib/srs/calculate.ts
 	// @complexity: medium
-	it.todo("IT-AC04: level0 good 評価で翌日設定と level 上昇を行う")
+	it("IT-AC04: level0 good 評価で翌日設定と level 上昇を行う", () => {
+		const result = calculateRating(createState({ level: 0 }), "good", today, now)
+
+		expect(result).toEqual({
+			newState: {
+				level: 1,
+				dueDate: addDaysJST(today, 1),
+				lastRating: "good",
+				retryTodayCount: 0,
+				lastReviewedAt: now,
+			},
+			addToRetryQueue: false,
+		})
+	})
 
 	// ACトレース: AC#5
 	// 検証観点: level2 + hard で dueDate=today+4, level据え置き, retryTodayCount据え置き。
 	// @category: integration
 	// @dependency: frontend/src/lib/srs/calculate.ts
 	// @complexity: medium
-	it.todo("IT-AC05: level2 hard 評価で level と retryTodayCount を維持する")
+	it("IT-AC05: level2 hard 評価で level と retryTodayCount を維持する", () => {
+		const result = calculateRating(
+			createState({
+				level: 2,
+				retryTodayCount: 1,
+			}),
+			"hard",
+			today,
+			now,
+		)
+
+		expect(result).toEqual({
+			newState: {
+				level: 2,
+				dueDate: addDaysJST(today, 4),
+				lastRating: "hard",
+				retryTodayCount: 1,
+				lastReviewedAt: now,
+			},
+			addToRetryQueue: false,
+		})
+	})
 
 	// ACトレース: AC#6
 	// 検証観点: level3 + again で dueDate=tomorrow, level=0, retryTodayCount+1, addToRetryQueue=true。
 	// @category: integration
 	// @dependency: frontend/src/lib/srs/calculate.ts
 	// @complexity: medium
-	it.todo("IT-AC06: level3 again 評価で翌日再学習用のリセット遷移を行う")
+	it("IT-AC06: level3 again 評価で翌日再学習用のリセット遷移を行う", () => {
+		const result = calculateRating(createState({ level: 3 }), "again", today, now)
+
+		expect(result).toEqual({
+			newState: {
+				level: 0,
+				dueDate: getTomorrowJST(today),
+				lastRating: "again",
+				retryTodayCount: 1,
+				lastReviewedAt: now,
+			},
+			addToRetryQueue: true,
+		})
+	})
 
 	// ACトレース: AC#7
 	// 検証観点: again 後 retryTodayCount が上限超過なら addToRetryQueue=false。
 	// @category: integration
 	// @dependency: frontend/src/lib/srs/calculate.ts
 	// @complexity: medium
-	it.todo("IT-AC07: again の当日再提示上限超過時に retry 追加を停止する")
+	it("IT-AC07: again の当日再提示上限超過時に retry 追加を停止する", () => {
+		const result = calculateRating(
+			createState({ retryTodayCount: RETRY_TODAY_LIMIT }),
+			"again",
+			today,
+			now,
+		)
+
+		expect(result.newState.retryTodayCount).toBe(RETRY_TODAY_LIMIT + 1)
+		expect(result.addToRetryQueue).toBe(false)
+	})
 
 	// ACトレース: AC#8
 	// 検証観点: lastReviewedAt の JST 日付が today と異なる場合は retryTodayCount を 0 から再計算する。
@@ -111,14 +187,35 @@ describe("srs-engine 統合テスト", () => {
 	// @category: integration
 	// @dependency: frontend/src/lib/srs/calculate.ts
 	// @complexity: low
-	it.todo("IT-AC09: state=null 入力を初回レビューとして処理する")
+	it("IT-AC09: state=null 入力を初回レビューとして処理する", () => {
+		const result = calculateRating(null, "good", today, now)
+
+		expect(result).toEqual({
+			newState: {
+				level: 1,
+				dueDate: addDaysJST(today, 1),
+				lastRating: "good",
+				retryTodayCount: 0,
+				lastReviewedAt: now,
+			},
+			addToRetryQueue: false,
+		})
+	})
 
 	// ACトレース: AC#10
 	// 検証観点: level 範囲外入力を 0..MAX_GOOD_LEVEL に clamp して計算継続する。
 	// @category: integration
 	// @dependency: frontend/src/lib/srs/calculate.ts, frontend/src/lib/srs/constants.ts
 	// @complexity: medium
-	it.todo("IT-AC10: level 範囲外入力でも clamp 後に安全に計算する")
+	it("IT-AC10: level 範囲外入力でも clamp 後に安全に計算する", () => {
+		const overMaxResult = calculateRating(createState({ level: 99 }), "good", today, now)
+		const underMinResult = calculateRating(createState({ level: -5 }), "hard", today, now)
+
+		expect(overMaxResult.newState.level).toBe(6)
+		expect(overMaxResult.newState.dueDate).toBe(addDaysJST(today, 120))
+		expect(underMinResult.newState.level).toBe(0)
+		expect(underMinResult.newState.dueDate).toBe(addDaysJST(today, 1))
+	})
 
 	// ACトレース: AC#11
 	// 検証観点: getIntervalPreview(level=2) が good=7日後, hard=4日後, again=今日さいご + 明日 を返す。
