@@ -22,9 +22,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const createServerClientMock = vi.hoisted(() => vi.fn());
+const createServiceRoleClientMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/supabase/server", () => ({
 	createServerClient: createServerClientMock,
+	createServiceRoleClient: createServiceRoleClientMock,
 }));
 
 import {
@@ -32,6 +34,11 @@ import {
 	__setProcessIllustrationGenerationImplementationForTest,
 	triggerIllustrationGeneration,
 } from "../../../../frontend/src/actions/illustration-actions";
+import { processIllustrationGeneration } from "../../../../frontend/src/lib/illustration/generator";
+import { generateIllustration } from "../../../../frontend/src/lib/illustration/gemini-client";
+import { sanitizePromptInput } from "../../../../frontend/src/lib/illustration/prompt";
+import { buildIllustrationStoragePath } from "../../../../frontend/src/lib/illustration/storage";
+import { GEMINI_IMAGE_MODEL } from "../../../../frontend/src/lib/illustration/types";
 
 type QueryError = {
 	message: string;
@@ -220,6 +227,53 @@ const createSupabaseDouble = (overrides?: Partial<TriggerTestOptions>) => {
 	};
 };
 
+type UpdatePayload = {
+	status?: string;
+	storage_path?: string | null;
+	prompt?: string | null;
+	model_info?: string | null;
+};
+
+type GenerationSupabaseDouble = {
+	updateMock: ReturnType<typeof vi.fn<(values: UpdatePayload) => unknown>>;
+	client: {
+		from: ReturnType<
+			typeof vi.fn<(table: "illustrations") => { update: ReturnType<typeof vi.fn> }>
+		>;
+	};
+};
+
+const createGenerationSupabaseDouble = (): GenerationSupabaseDouble => {
+	const ownerEqMock = vi
+		.fn<(column: "owner_user_id", value: string) => Promise<QueryResult<null>>>()
+		.mockResolvedValue({ data: null, error: null });
+	const idEqMock = vi
+		.fn<(column: "id", value: string) => { eq: typeof ownerEqMock }>()
+		.mockReturnValue({ eq: ownerEqMock });
+	const updateMock = vi
+		.fn<(values: UpdatePayload) => { eq: typeof idEqMock }>()
+		.mockReturnValue({ eq: idEqMock });
+	const fromMock = vi
+		.fn<(table: "illustrations") => { update: typeof updateMock }>()
+		.mockReturnValue({ update: updateMock });
+
+	return {
+		updateMock,
+		client: {
+			from: fromMock,
+		},
+	};
+};
+
+const readLatestUpdatePayload = (updateMock: ReturnType<typeof vi.fn>) => {
+	const call = updateMock.mock.calls.at(-1);
+	if (!call) {
+		throw new Error("update has not been called");
+	}
+
+	return call[0] as UpdatePayload;
+};
+
 const withTimeout = async <TValue>(promise: Promise<TValue>, timeoutMs: number) =>
 	new Promise<TValue>((resolve, reject) => {
 		const timeoutId = setTimeout(() => {
@@ -241,6 +295,7 @@ const withTimeout = async <TValue>(promise: Promise<TValue>, timeoutMs: number) 
 describe("illustration-generation-backend 統合テスト", () => {
 	beforeEach(() => {
 		createServerClientMock.mockReset();
+		createServiceRoleClientMock.mockReset();
 		__resetProcessIllustrationGenerationImplementationForTest();
 	});
 
@@ -374,12 +429,238 @@ describe("illustration-generation-backend 統合テスト", () => {
 	});
 
 	// Phase 2: 生成パイプライン
-	it.todo("IT-AC02: Storage オブジェクト名が常に {user_id}/{illustration_id}.png 形式で生成される")
-	it.todo("IT-AC08: GEMINI_API_KEY 未設定時は Gemini API未呼び出しで status=failed と model_info.reason を記録する")
-	it.todo("IT-AC09: Gemini 連携が fetch ベースで実装され SDK 依存が追加されていないことを検証する")
-	it.todo("IT-AC10: 生成とアップロード成功時に status=ready, storage_path, prompt, model_info を更新する")
-	it.todo("IT-AC11: Gemini または Storage 失敗時に status=failed と model_info の失敗理由を記録する")
-	it.todo("IT-AC14: sanitizePromptInput が制御文字除去と100文字上限を適用した入力のみを Gemini に渡す")
+	it("IT-AC02: Storage オブジェクト名が常に {user_id}/{illustration_id}.png 形式で生成される", () => {
+		expect(buildIllustrationStoragePath("user-1", "illustration-1")).toBe(
+			"user-1/illustration-1.png"
+		);
+	});
+
+	it("IT-AC08: GEMINI_API_KEY 未設定時は Gemini API未呼び出しで status=failed と model_info.reason を記録する", async () => {
+		const supabase = createGenerationSupabaseDouble();
+		const generateIllustrationFn = vi.fn();
+
+		await processIllustrationGeneration(
+			{
+				illustrationId: "illustration-ac08",
+				illustrationKey: "kanji-key-1",
+				backText: "例文",
+				skill: "reading",
+				ownerUserId: "user-1",
+			},
+			{
+				createServiceRoleClientFn: () => supabase.client,
+				getEnvConfigFn: () => ({ geminiApiKey: undefined }),
+				generateIllustrationFn,
+				now: () => new Date("2026-02-24T12:34:56.000Z"),
+			}
+		);
+
+		expect(generateIllustrationFn).not.toHaveBeenCalled();
+		const payload = readLatestUpdatePayload(supabase.updateMock);
+		expect(payload.status).toBe("failed");
+		expect(payload.model_info).toBeTruthy();
+		expect(JSON.parse(payload.model_info ?? "{}")).toMatchObject({
+			outcome: "failed",
+			reason: "api_key_missing",
+		});
+	});
+
+	it("IT-AC09: Gemini 連携が fetch ベースで実装され SDK 依存が追加されていないことを検証する", async () => {
+		const imageBuffer = Buffer.from("integration-image");
+		const fetchMock = vi
+			.fn<(input: string, init?: RequestInit) => Promise<Response>>()
+			.mockResolvedValue(
+				new Response(
+					JSON.stringify({
+						candidates: [
+							{
+								content: {
+									parts: [
+										{
+											inlineData: {
+												mimeType: "image/png",
+												data: imageBuffer.toString("base64"),
+											},
+										},
+									],
+								},
+							},
+						],
+					}),
+					{ status: 200 }
+				)
+			);
+
+		const result = await generateIllustration(
+			{
+				prompt: "integration prompt",
+				apiKey: "integration-key",
+			},
+			{
+				fetchFn: fetchMock,
+				now: () => new Date("2026-02-24T12:34:56.000Z"),
+			}
+		);
+
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(fetchMock.mock.calls[0]?.[0]).toContain(
+			`${GEMINI_IMAGE_MODEL}:generateContent?key=integration-key`
+		);
+		expect(result.ok).toBe(true);
+	});
+
+	it("IT-AC10: 生成とアップロード成功時に status=ready, storage_path, prompt, model_info を更新する", async () => {
+		const supabase = createGenerationSupabaseDouble();
+		const imageBuffer = Buffer.from("integration-success");
+
+		await processIllustrationGeneration(
+			{
+				illustrationId: "illustration-ac10",
+				illustrationKey: "kanji-key-1",
+				backText: "雨",
+				skill: "reading",
+				ownerUserId: "user-10",
+			},
+			{
+				createServiceRoleClientFn: () => supabase.client,
+				getEnvConfigFn: () => ({ geminiApiKey: "integration-key" }),
+				generatePromptFn: () => "integration prompt",
+				generateIllustrationFn: async () => ({
+					ok: true,
+					imageBuffer,
+					modelInfo: {
+						provider: "gemini",
+						model: GEMINI_IMAGE_MODEL,
+						outcome: "ready",
+						reason: "success",
+						httpStatus: 200,
+						timestamp: "2026-02-24T12:34:56.000Z",
+					},
+				}),
+				uploadIllustrationFn: async () => true,
+				now: () => new Date("2026-02-24T12:34:56.000Z"),
+			}
+		);
+
+		const payload = readLatestUpdatePayload(supabase.updateMock);
+		expect(payload).toMatchObject({
+			status: "ready",
+			storage_path: "user-10/illustration-ac10.png",
+			prompt: "integration prompt",
+		});
+		expect(JSON.parse(payload.model_info ?? "{}")).toMatchObject({
+			outcome: "ready",
+			reason: "success",
+		});
+	});
+
+	it("IT-AC11: Gemini または Storage 失敗時に status=failed と model_info の失敗理由を記録する", async () => {
+		const geminiFailureSupabase = createGenerationSupabaseDouble();
+		await processIllustrationGeneration(
+			{
+				illustrationId: "illustration-ac11-gemini",
+				illustrationKey: "kanji-key-1",
+				backText: "雨",
+				skill: "reading",
+				ownerUserId: "user-11",
+			},
+			{
+				createServiceRoleClientFn: () => geminiFailureSupabase.client,
+				getEnvConfigFn: () => ({ geminiApiKey: "integration-key" }),
+				generateIllustrationFn: async () => ({
+					ok: false,
+					imageBuffer: null,
+					modelInfo: {
+						provider: "gemini",
+						model: GEMINI_IMAGE_MODEL,
+						outcome: "failed",
+						reason: "network",
+						timestamp: "2026-02-24T12:34:56.000Z",
+					},
+				}),
+				now: () => new Date("2026-02-24T12:34:56.000Z"),
+			}
+		);
+		expect(
+			JSON.parse(readLatestUpdatePayload(geminiFailureSupabase.updateMock).model_info ?? "{}")
+		).toMatchObject({
+			outcome: "failed",
+			reason: "network",
+		});
+
+		const storageFailureSupabase = createGenerationSupabaseDouble();
+		await processIllustrationGeneration(
+			{
+				illustrationId: "illustration-ac11-storage",
+				illustrationKey: "kanji-key-1",
+				backText: "雨",
+				skill: "reading",
+				ownerUserId: "user-11",
+			},
+			{
+				createServiceRoleClientFn: () => storageFailureSupabase.client,
+				getEnvConfigFn: () => ({ geminiApiKey: "integration-key" }),
+				generateIllustrationFn: async () => ({
+					ok: true,
+					imageBuffer: Buffer.from("integration"),
+					modelInfo: {
+						provider: "gemini",
+						model: GEMINI_IMAGE_MODEL,
+						outcome: "ready",
+						reason: "success",
+						timestamp: "2026-02-24T12:34:56.000Z",
+					},
+				}),
+				uploadIllustrationFn: async () => false,
+				now: () => new Date("2026-02-24T12:34:56.000Z"),
+			}
+		);
+		expect(
+			JSON.parse(readLatestUpdatePayload(storageFailureSupabase.updateMock).model_info ?? "{}")
+		).toMatchObject({
+			outcome: "failed",
+			reason: "storage_upload_failed",
+		});
+	});
+
+	it("IT-AC14: sanitizePromptInput が制御文字除去と100文字上限を適用した入力のみを Gemini に渡す", async () => {
+		const supabase = createGenerationSupabaseDouble();
+		const generateIllustrationFn = vi.fn().mockResolvedValue({
+			ok: false,
+			imageBuffer: null,
+			modelInfo: {
+				provider: "gemini",
+				model: GEMINI_IMAGE_MODEL,
+				outcome: "failed",
+				reason: "network",
+				timestamp: "2026-02-24T12:34:56.000Z",
+			},
+		});
+		const rawBackText = `\u0000${"あ".repeat(150)}\u001f`;
+		const sanitized = sanitizePromptInput(rawBackText).trim();
+
+		await processIllustrationGeneration(
+			{
+				illustrationId: "illustration-ac14",
+				illustrationKey: "kanji-key-1",
+				backText: rawBackText,
+				skill: "reading",
+				ownerUserId: "user-14",
+			},
+			{
+				createServiceRoleClientFn: () => supabase.client,
+				getEnvConfigFn: () => ({ geminiApiKey: "integration-key" }),
+				generateIllustrationFn,
+				now: () => new Date("2026-02-24T12:34:56.000Z"),
+			}
+		);
+
+		const prompt = generateIllustrationFn.mock.calls[0]?.[0]?.prompt ?? "";
+		expect(prompt).toContain(`「${sanitized}」`);
+		expect(prompt).not.toContain("\u0000");
+		expect(prompt).not.toContain("\u001f");
+		expect(sanitized.length).toBeLessThanOrEqual(100);
+	});
 
 	// Phase 3: URL 取得
 	it.todo("IT-AC12: getIllustrationUrl が owner_user_id + illustration_key で ready最新1件を選び expiresIn=3600 の Signed URL を返す")

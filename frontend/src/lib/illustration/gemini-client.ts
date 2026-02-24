@@ -5,157 +5,160 @@ import {
 	type GeminiModelInfoFailure,
 	type GeminiModelInfoSuccess,
 	type ModelInfoFailureReason,
-} from "./types"
+} from "./types";
 
-const GEMINI_API_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models"
+const GEMINI_API_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
 
-export type FetchFunction = (input: string, init?: RequestInit) => Promise<Response>
-type NowFunction = () => Date
+export type FetchFunction = (input: string, init?: RequestInit) => Promise<Response>;
+type NowFunction = () => Date;
 
 export type GenerateIllustrationInput = {
-	prompt: string
-	apiKey: string | undefined
-	model?: string
-}
+	prompt: string;
+	apiKey: string | undefined;
+	model?: string;
+};
 
 export type GenerateIllustrationDependencies = {
-	fetchFn?: FetchFunction
-	now?: NowFunction
-}
+	fetchFn?: FetchFunction;
+	now?: NowFunction;
+};
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
-	typeof value === "object" && value !== null
+	typeof value === "object" && value !== null;
 
-const defaultFetchFn: FetchFunction = (input, init) => fetch(input, init)
+const defaultFetchFn: FetchFunction = (input, init) => fetch(input, init);
 
 const readRequestId = (response: Response): string | undefined =>
-	response.headers.get("x-request-id") ?? response.headers.get("x-goog-request-id") ?? undefined
+	response.headers.get("x-request-id") ?? response.headers.get("x-goog-request-id") ?? undefined;
 
 const parseJsonResponse = async (response: Response): Promise<unknown> => {
 	try {
-		return await response.json()
+		return await response.json();
 	} catch {
-		return null
+		return null;
 	}
-}
+};
 
 const collectNestedStrings = (value: unknown, output: string[]): void => {
 	if (typeof value === "string") {
-		output.push(value.toLowerCase())
-		return
+		output.push(value.toLowerCase());
+		return;
 	}
 
 	if (Array.isArray(value)) {
 		for (const item of value) {
-			collectNestedStrings(item, output)
+			collectNestedStrings(item, output);
 		}
-		return
+		return;
 	}
 
 	if (!isRecord(value)) {
-		return
+		return;
 	}
 
 	for (const nestedValue of Object.values(value)) {
-		collectNestedStrings(nestedValue, output)
+		collectNestedStrings(nestedValue, output);
 	}
-}
+};
 
 const containsSafetySignal = (payload: unknown): boolean => {
-	const collectedStrings: string[] = []
-	collectNestedStrings(payload, collectedStrings)
-	const joined = collectedStrings.join(" ")
+	const collectedStrings: string[] = [];
+	collectNestedStrings(payload, collectedStrings);
+	const joined = collectedStrings.join(" ");
 
 	return (
 		joined.includes("safety") ||
 		joined.includes("blocked") ||
 		joined.includes("policy") ||
 		joined.includes("prohibited")
-	)
-}
+	);
+};
 
-const classifyFailureReason = (status: number | undefined, payload: unknown): ModelInfoFailureReason => {
+const classifyFailureReason = (
+	status: number | undefined,
+	payload: unknown
+): ModelInfoFailureReason => {
 	if (status === undefined) {
-		return "network"
+		return "network";
 	}
 
 	if (status === 429) {
-		return "rate_limit"
+		return "rate_limit";
 	}
 
 	if (containsSafetySignal(payload)) {
-		return "safety"
+		return "safety";
 	}
 
-	return "unknown"
-}
+	return "unknown";
+};
 
 const extractInlineDataRecord = (part: Record<string, unknown>): Record<string, unknown> | null => {
-	const inlineData = part.inlineData ?? part.inline_data
+	const inlineData = part.inlineData ?? part.inline_data;
 	if (!isRecord(inlineData)) {
-		return null
+		return null;
 	}
 
-	return inlineData
-}
+	return inlineData;
+};
 
 const extractImageBase64 = (payload: unknown): string | null => {
 	if (!isRecord(payload)) {
-		return null
+		return null;
 	}
 
-	const candidates = payload.candidates
+	const candidates = payload.candidates;
 	if (!Array.isArray(candidates)) {
-		return null
+		return null;
 	}
 
 	for (const candidate of candidates) {
 		if (!isRecord(candidate)) {
-			continue
+			continue;
 		}
 
-		const content = candidate.content
+		const content = candidate.content;
 		if (!isRecord(content)) {
-			continue
+			continue;
 		}
 
-		const parts = content.parts
+		const parts = content.parts;
 		if (!Array.isArray(parts)) {
-			continue
+			continue;
 		}
 
 		for (const part of parts) {
 			if (!isRecord(part)) {
-				continue
+				continue;
 			}
 
-			const inlineData = extractInlineDataRecord(part)
+			const inlineData = extractInlineDataRecord(part);
 			if (!inlineData) {
-				continue
+				continue;
 			}
 
-			const data = inlineData.data
+			const data = inlineData.data;
 			if (typeof data !== "string" || data.length === 0) {
-				continue
+				continue;
 			}
 
-			const mimeType = inlineData.mimeType ?? inlineData.mime_type
+			const mimeType = inlineData.mimeType ?? inlineData.mime_type;
 			if (typeof mimeType === "string" && !mimeType.startsWith("image/")) {
-				continue
+				continue;
 			}
 
-			return data
+			return data;
 		}
 	}
 
-	return null
-}
+	return null;
+};
 
 const createSuccessModelInfo = (params: {
-	model: string
-	httpStatus: number
-	requestId?: string
-	now: NowFunction
+	model: string;
+	httpStatus: number;
+	requestId?: string;
+	now: NowFunction;
 }): GeminiModelInfoSuccess => ({
 	provider: GEMINI_PROVIDER,
 	model: params.model,
@@ -164,14 +167,14 @@ const createSuccessModelInfo = (params: {
 	httpStatus: params.httpStatus,
 	requestId: params.requestId,
 	timestamp: params.now().toISOString(),
-})
+});
 
 const createFailureModelInfo = (params: {
-	model: string
-	reason: ModelInfoFailureReason
-	httpStatus?: number
-	requestId?: string
-	now: NowFunction
+	model: string;
+	reason: ModelInfoFailureReason;
+	httpStatus?: number;
+	requestId?: string;
+	now: NowFunction;
 }): GeminiModelInfoFailure => ({
 	provider: GEMINI_PROVIDER,
 	model: params.model,
@@ -180,7 +183,7 @@ const createFailureModelInfo = (params: {
 	httpStatus: params.httpStatus,
 	requestId: params.requestId,
 	timestamp: params.now().toISOString(),
-})
+});
 
 const createGeminiRequestBody = (prompt: string) => ({
 	contents: [
@@ -191,42 +194,42 @@ const createGeminiRequestBody = (prompt: string) => ({
 	generationConfig: {
 		responseModalities: ["IMAGE"],
 	},
-})
+});
 
 const createFailureResult = (params: {
-	model: string
-	reason: ModelInfoFailureReason
-	httpStatus?: number
-	requestId?: string
-	now: NowFunction
+	model: string;
+	reason: ModelInfoFailureReason;
+	httpStatus?: number;
+	requestId?: string;
+	now: NowFunction;
 }): GeminiGenerationResult => ({
 	ok: false,
 	imageBuffer: null,
 	modelInfo: createFailureModelInfo(params),
-})
+});
 
 const resolveEndpoint = (model: string, apiKey: string): string =>
-	`${GEMINI_API_ENDPOINT}/${model}:generateContent?key=${encodeURIComponent(apiKey)}`
+	`${GEMINI_API_ENDPOINT}/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
 export const generateIllustration = async (
 	input: GenerateIllustrationInput,
 	dependencies: GenerateIllustrationDependencies = {}
 ): Promise<GeminiGenerationResult> => {
-	const now = dependencies.now ?? (() => new Date())
-	const fetchFn = dependencies.fetchFn ?? defaultFetchFn
-	const model = input.model ?? GEMINI_IMAGE_MODEL
-	const apiKey = input.apiKey?.trim()
+	const now = dependencies.now ?? (() => new Date());
+	const fetchFn = dependencies.fetchFn ?? defaultFetchFn;
+	const model = input.model ?? GEMINI_IMAGE_MODEL;
+	const apiKey = input.apiKey?.trim();
 
 	if (!apiKey) {
 		return createFailureResult({
 			model,
 			reason: "api_key_missing",
 			now,
-		})
+		});
 	}
 
-	const endpoint = resolveEndpoint(model, apiKey)
-	let response: Response
+	const endpoint = resolveEndpoint(model, apiKey);
+	let response: Response;
 
 	try {
 		response = await fetchFn(endpoint, {
@@ -235,17 +238,17 @@ export const generateIllustration = async (
 				"Content-Type": "application/json",
 			},
 			body: JSON.stringify(createGeminiRequestBody(input.prompt)),
-		})
+		});
 	} catch {
 		return createFailureResult({
 			model,
 			reason: "network",
 			now,
-		})
+		});
 	}
 
-	const payload = await parseJsonResponse(response)
-	const requestId = readRequestId(response)
+	const payload = await parseJsonResponse(response);
+	const requestId = readRequestId(response);
 
 	if (!response.ok) {
 		return createFailureResult({
@@ -254,10 +257,10 @@ export const generateIllustration = async (
 			httpStatus: response.status,
 			requestId,
 			now,
-		})
+		});
 	}
 
-	const imageBase64 = extractImageBase64(payload)
+	const imageBase64 = extractImageBase64(payload);
 	if (!imageBase64) {
 		return createFailureResult({
 			model,
@@ -265,10 +268,10 @@ export const generateIllustration = async (
 			httpStatus: response.status,
 			requestId,
 			now,
-		})
+		});
 	}
 
-	const imageBuffer = Buffer.from(imageBase64, "base64")
+	const imageBuffer = Buffer.from(imageBase64, "base64");
 	if (imageBuffer.byteLength === 0) {
 		return createFailureResult({
 			model,
@@ -276,7 +279,7 @@ export const generateIllustration = async (
 			httpStatus: response.status,
 			requestId,
 			now,
-		})
+		});
 	}
 
 	return {
@@ -288,5 +291,5 @@ export const generateIllustration = async (
 			requestId,
 			now,
 		}),
-	}
-}
+	};
+};

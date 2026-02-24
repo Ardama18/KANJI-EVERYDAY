@@ -1,7 +1,7 @@
-export const GEMINI_PROVIDER = "gemini" as const
-export const GEMINI_IMAGE_MODEL = "gemini-2.0-flash-preview-image-generation" as const
+export const GEMINI_PROVIDER = "gemini" as const;
+export const GEMINI_IMAGE_MODEL = "gemini-2.0-flash-preview-image-generation" as const;
 
-export type IllustrationSkill = "reading" | "writing"
+export type IllustrationSkill = "reading" | "writing";
 
 export type ModelInfoReason =
 	| "success"
@@ -10,40 +10,40 @@ export type ModelInfoReason =
 	| "safety"
 	| "network"
 	| "storage_upload_failed"
-	| "unknown"
+	| "unknown";
 
-export type ModelInfoFailureReason = Exclude<ModelInfoReason, "success">
+export type ModelInfoFailureReason = Exclude<ModelInfoReason, "success">;
 
 type GeminiModelInfoBase = {
-	provider: typeof GEMINI_PROVIDER
-	model: string
-	httpStatus?: number
-	requestId?: string
-	timestamp: string
-}
+	provider: typeof GEMINI_PROVIDER;
+	model: string;
+	httpStatus?: number;
+	requestId?: string;
+	timestamp: string;
+};
 
 export type GeminiModelInfoSuccess = GeminiModelInfoBase & {
-	outcome: "ready"
-	reason: "success"
-}
+	outcome: "ready";
+	reason: "success";
+};
 
 export type GeminiModelInfoFailure = GeminiModelInfoBase & {
-	outcome: "failed"
-	reason: ModelInfoFailureReason
-}
+	outcome: "failed";
+	reason: ModelInfoFailureReason;
+};
 
-export type GeminiModelInfo = GeminiModelInfoSuccess | GeminiModelInfoFailure
+export type GeminiModelInfo = GeminiModelInfoSuccess | GeminiModelInfoFailure;
 
 export type GeminiGenerationSuccess = {
-	ok: true
-	imageBuffer: Buffer
-	modelInfo: GeminiModelInfoSuccess
-}
+	ok: true;
+	imageBuffer: Buffer;
+	modelInfo: GeminiModelInfoSuccess;
+};
 
 export type GeminiGenerationFailure = {
-	ok: false
-	imageBuffer: null
-	modelInfo: GeminiModelInfoFailure
-}
+	ok: false;
+	imageBuffer: null;
+	modelInfo: GeminiModelInfoFailure;
+};
 
-export type GeminiGenerationResult = GeminiGenerationSuccess | GeminiGenerationFailure
+export type GeminiGenerationResult = GeminiGenerationSuccess | GeminiGenerationFailure;
