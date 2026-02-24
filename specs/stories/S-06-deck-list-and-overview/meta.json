@@ -2,7 +2,7 @@
   "story_id": "S-06",
   "epic_id": "E-02",
   "parent_story_id": "",
-  "status": "not_started",
-  "github_pr_url": "",
-  "github_branch": ""
+  "status": "implementation_review",
+  "github_pr_url": "https://github.com/Ardama18/KANJI-EVERYDAY/pull/6",
+  "github_branch": "story/S-06-deck-list-and-overview"
 }

@@ -1,12 +1,46 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import DecksPage, { DECKS_STUB_MESSAGE } from "../../../app/(auth)/decks/page";
+const getDecksWithCountsMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@/actions/deck-actions", () => ({
+	getDecksWithCounts: getDecksWithCountsMock,
+}));
+
+import DecksPage, { DECKS_EMPTY_MESSAGE, DECKS_PAGE_TITLE } from "../../../app/(auth)/decks/page";
 
 describe("frontend/app/(auth)/decks/page.tsx", () => {
-	it("デッキ一覧実装予定のスタブページを返す", () => {
-		const html = renderToStaticMarkup(<DecksPage />);
+	beforeEach(() => {
+		getDecksWithCountsMock.mockReset();
+	});
 
-		expect(html).toContain(DECKS_STUB_MESSAGE);
+	it("一覧データが0件のとき空状態メッセージを表示する", async () => {
+		getDecksWithCountsMock.mockResolvedValue([]);
+
+		const html = renderToStaticMarkup(await DecksPage());
+
+		expect(html).toContain(DECKS_PAGE_TITLE);
+		expect(html).toContain(DECKS_EMPTY_MESSAGE);
+	});
+
+	it("一覧データがあるときデッキ行リンクとカウントを表示する", async () => {
+		getDecksWithCountsMock.mockResolvedValue([
+			{
+				id: "deck-1",
+				name: "小学3年生の漢字",
+				counts: { new: 10, learn: 3, due: 5 },
+			},
+		]);
+
+		const html = renderToStaticMarkup(await DecksPage());
+
+		expect(html).toContain("小学3年生の漢字");
+		expect(html).toContain('href="/decks/deck-1"');
+		expect(html).toContain("New");
+		expect(html).toContain("Learn");
+		expect(html).toContain("Due");
+		expect(html).toContain(">10<");
+		expect(html).toContain(">3<");
+		expect(html).toContain(">5<");
 	});
 });
