@@ -26,8 +26,8 @@ ui_design: none
 Gemini 画像生成と Supabase Storage キャッシュを非同期で統合し、`triggerIllustrationGeneration` の応答をブロックしないまま `illustrations` の状態遷移（`pending/ready/failed`）と owner scoped private 境界を成立させる。
 
 ## 計画ルール（前工程テスト情報の反映）
-- [ ] 統合テスト `specs/stories/S-08-illustration-generation-backend/tests/illustration-generation-backend.int.test.ts` は Phase 1〜3 の各実装と同時に `it.todo` を実装し、同じPhase内で実行・合格させる
-- [ ] E2Eテスト `specs/stories/S-08-illustration-generation-backend/tests/illustration-generation-backend.e2e.test.ts` は全実装完了後の最終Phaseでのみ実行する
+- [x] 統合テスト `specs/stories/S-08-illustration-generation-backend/tests/illustration-generation-backend.int.test.ts` は Phase 1〜3 の各実装と同時に `it.todo` を実装し、同じPhase内で実行・合格させる
+- [x] E2Eテスト `specs/stories/S-08-illustration-generation-backend/tests/illustration-generation-backend.e2e.test.ts` は全実装完了後の最終Phaseでのみ実行する
 
 ## 影響範囲
 ### 対象ファイル
@@ -194,20 +194,20 @@ flowchart TD
 **目的**: 全ACの受入証跡を確定し、S-08 を完了判定できる状態にする。
 
 #### タスク
-- [ ] E2Eテスト（`E2E-AC01`〜`E2E-AC14`）を実装する
+- [x] E2Eテスト（`E2E-AC01`〜`E2E-AC14`）を実装する
   - テスト: `specs/stories/S-08-illustration-generation-backend/tests/illustration-generation-backend.e2e.test.ts`
-- [ ] 全実装完了後にのみ E2E を実行する（計画ルール準拠）
+- [x] 全実装完了後にのみ E2E を実行する（計画ルール準拠）
   - テスト: `specs/stories/S-08-illustration-generation-backend/tests/illustration-generation-backend.e2e.test.ts`
-- [ ] 統合テストを全件実行し、Phase 1〜3 の退行がないことを確認する
+- [x] 統合テストを全件実行し、Phase 1〜3 の退行がないことを確認する
   - テスト: `specs/stories/S-08-illustration-generation-backend/tests/illustration-generation-backend.int.test.ts`
-- [ ] frontend 品質ゲートを実行する
+- [x] frontend 品質ゲートを実行する
   - コマンド: `npm run check --prefix frontend`
-- [ ] Story / Requirements / ADR / Design / 実装 / テストのトレーサビリティを整理する
+- [x] Story / Requirements / ADR / Design / 実装 / テストのトレーサビリティを整理する
 
 #### フェーズ完了条件
-- [ ] E2E-AC01〜E2E-AC14 が PASS する
-- [ ] AC-01〜AC-14 の検証結果がテストログと成果物で追跡可能である
-- [ ] 統合テスト同時実施・E2E最終実施のルールを満たしている
+- [x] E2E-AC01〜E2E-AC14 が PASS する
+- [x] AC-01〜AC-14 の検証結果がテストログと成果物で追跡可能である
+- [x] 統合テスト同時実施・E2E最終実施のルールを満たしている
 
 #### 動作確認手順
 1. `illustration-generation-backend.int.test.ts` をフル実行して全PASSを確認する。
@@ -215,20 +215,20 @@ flowchart TD
 3. `npm run check --prefix frontend` を実行し、lint/typecheck/test の通過を確認する。
 
 ## AC別完了チェックリスト
-- [ ] AC-01: owner scoped private 境界と `owner_user_id` 必須運用
-- [ ] AC-02: Storage パス `{user_id}/{illustration_id}.png` 固定
-- [ ] AC-03: 未認証 trigger は認証エラー + DB副作用0件 + 外部API 0回
-- [ ] AC-04: `ready/pending` 再トリガー no-op
-- [ ] AC-05: `failed` 再トリガーで `pending` へ戻して再生成
-- [ ] AC-06: レコードなし時の `pending` INSERT + 生成開始
-- [ ] AC-07: fire-and-forget（`void processIllustrationGeneration(...)`）で非ブロッキング応答
-- [ ] AC-08: APIキー未設定時に外部API未呼び出し + `failed` + 理由記録
-- [ ] AC-09: Gemini `fetch` 連携（SDK依存追加なし）
-- [ ] AC-10: 成功時 `ready` + `storage_path/prompt/model_info` 更新
-- [ ] AC-11: 失敗時 `failed` + `model_info` 失敗理由記録
+- [x] AC-01: owner scoped private 境界と `owner_user_id` 必須運用
+- [x] AC-02: Storage パス `{user_id}/{illustration_id}.png` 固定
+- [x] AC-03: 未認証 trigger は認証エラー + DB副作用0件 + 外部API 0回
+- [x] AC-04: `ready/pending` 再トリガー no-op
+- [x] AC-05: `failed` 再トリガーで `pending` へ戻して再生成
+- [x] AC-06: レコードなし時の `pending` INSERT + 生成開始
+- [x] AC-07: fire-and-forget（`void processIllustrationGeneration(...)`）で非ブロッキング応答
+- [x] AC-08: APIキー未設定時に外部API未呼び出し + `failed` + 理由記録
+- [x] AC-09: Gemini `fetch` 連携（SDK依存追加なし）
+- [x] AC-10: 成功時 `ready` + `storage_path/prompt/model_info` 更新
+- [x] AC-11: 失敗時 `failed` + `model_info` 失敗理由記録
 - [x] AC-12: latest-ready 1件採用（`updated_at DESC, id DESC`）で Signed URL 返却
 - [x] AC-13: 条件一致なしで `null` 返却
-- [ ] AC-14: `sanitizePromptInput` の制御文字除去 + 100文字上限
+- [x] AC-14: `sanitizePromptInput` の制御文字除去 + 100文字上限
 
 ## リスクと対策
 - [ ] リスク: fire-and-forget 中の例外が未処理で欠落する  
