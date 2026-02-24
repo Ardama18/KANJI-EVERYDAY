@@ -2,7 +2,7 @@
   "story_id": "S-08",
   "epic_id": "E-03",
   "parent_story_id": "",
-  "status": "design_review",
+  "status": "implementation_review",
   "github_pr_url": "",
-  "github_branch": ""
+  "github_branch": "story/S-08-illustration-generation-backend"
 }
