@@ -26,8 +26,8 @@ ui_design: none
 SRS評価ロジック（`good/hard/again`）とセッションキュー制御（`due -> learn -> new -> retry`）を pure / immutable 契約で実装し、AC#1〜#24 を統合テストと単体テストで段階的に固定する。
 
 ## 計画ルール（必須反映）
-- [ ] 統合テスト `specs/stories/S-05-srs-engine/tests/srs-engine.int.test.ts` は各Phaseの実装と同時に `it.todo` を実装し、同じPhase内で実行・合格させる（後回し禁止）
-- [ ] E2Eテスト `specs/stories/S-05-srs-engine/tests/srs-engine.e2e.test.ts` は全実装完了後の最終Phaseでのみ実行する（前倒し実行禁止）
+- [x] 統合テスト `specs/stories/S-05-srs-engine/tests/srs-engine.int.test.ts` は各Phaseの実装と同時に `it.todo` を実装し、同じPhase内で実行・合格させる（後回し禁止）
+- [x] E2Eテスト `specs/stories/S-05-srs-engine/tests/srs-engine.e2e.test.ts` は全実装完了後の最終Phaseでのみ実行する（前倒し実行禁止）
 
 ## 影響範囲
 ### 対象ファイル
@@ -225,25 +225,25 @@ flowchart TD
 **目的**: AC#1〜#24 の受入証跡を確定し、S-05 完了判定を行う。
 
 #### タスク
-- [ ] T-S05-11-E2E: `srs-engine.e2e.test.ts` の E2E-AC01〜E2E-AC24 を実装する
+- [x] T-S05-11-E2E: `srs-engine.e2e.test.ts` の E2E-AC01〜E2E-AC24 を実装する
   - テスト: `specs/stories/S-05-srs-engine/tests/srs-engine.e2e.test.ts`
-- [ ] 全実装完了後にのみ E2E を実行する（計画ルール準拠）
+- [x] 全実装完了後にのみ E2E を実行する（計画ルール準拠）
   - テスト: `specs/stories/S-05-srs-engine/tests/srs-engine.e2e.test.ts`
-- [ ] 統合テストを全件実行し、Phase 0〜3 の退行がないことを確認する
+- [x] 統合テストを全件実行し、Phase 0〜3 の退行がないことを確認する
   - テスト: `specs/stories/S-05-srs-engine/tests/srs-engine.int.test.ts`
-- [ ] frontend 品質ゲートを実行する
+- [x] frontend 品質ゲートを実行する
   - コマンド: `npm run check --prefix frontend`
-- [ ] 要件/ADR/Design/実装/テストのトレーサビリティを整理する
+- [x] 要件/ADR/Design/実装/テストのトレーサビリティを整理する
 
 #### フェーズ完了条件
-- [ ] E2E-AC01〜E2E-AC24 がPASSする
-- [ ] AC#1〜#24 の検証結果を unit / integration / E2E で追跡できる
-- [ ] 統合テスト同時実施・E2E最終実施の運用ルールを満たしている
+- [x] E2E-AC01〜E2E-AC24 がPASSする
+- [x] AC#1〜#24 の検証結果を unit / integration / E2E で追跡できる
+- [x] 統合テスト同時実施・E2E最終実施の運用ルールを満たしている
 
 #### 品質ゲート
-- [ ] `npm run test --prefix frontend -- ../specs/stories/S-05-srs-engine/tests/srs-engine.int.test.ts` が成功する
-- [ ] `npm run test --prefix frontend -- ../specs/stories/S-05-srs-engine/tests/srs-engine.e2e.test.ts` が成功する
-- [ ] `npm run check --prefix frontend` が成功する
+- [x] `npm run test --prefix frontend -- ../specs/stories/S-05-srs-engine/tests/srs-engine.int.test.ts` が成功する
+- [x] `npm run test --prefix frontend -- ../specs/stories/S-05-srs-engine/tests/srs-engine.e2e.test.ts` が成功する
+- [x] `npm run check --prefix frontend` が成功する
 
 #### 動作確認手順
 1. `srs-engine.int.test.ts` をフル実行し、`IT-AC01`〜`IT-AC24` の全PASSを確認する。
@@ -251,17 +251,17 @@ flowchart TD
 3. `npm run check --prefix frontend` を実行し、lint/typecheck/test の品質ゲート通過を確認する。
 
 ## AC別完了チェックリスト
-- [ ] AC#1: 固定テーブル値（Phase 0 / Integration）
-- [ ] AC#2: Rating 3値契約（Phase 0 / Integration）
-- [ ] AC#3: `calculateRating` 4引数 + `lastReviewedAt=now`（Phase 1 / Unit + Integration）
-- [ ] AC#4: level0 good 遷移（Phase 1 / Unit + Integration）
-- [ ] AC#5: level2 hard 遷移（Phase 1 / Unit + Integration）
-- [ ] AC#6: level3 again 基本遷移（Phase 1 / Unit + Integration）
-- [ ] AC#7: again retry 上限超過停止（Phase 1 / Unit + Integration）
-- [ ] AC#8: JST日次リセット（Phase 1 / Unit + Integration）
-- [ ] AC#9: `state=null` 初回処理（Phase 1 / Unit + Integration）
-- [ ] AC#10: level clamp（Phase 1 / Unit + Integration）
-- [ ] AC#11: interval preview 文言（Phase 1 / Unit + Integration）
+- [x] AC#1: 固定テーブル値（Phase 0 / Integration）
+- [x] AC#2: Rating 3値契約（Phase 0 / Integration）
+- [x] AC#3: `calculateRating` 4引数 + `lastReviewedAt=now`（Phase 1 / Unit + Integration）
+- [x] AC#4: level0 good 遷移（Phase 1 / Unit + Integration）
+- [x] AC#5: level2 hard 遷移（Phase 1 / Unit + Integration）
+- [x] AC#6: level3 again 基本遷移（Phase 1 / Unit + Integration）
+- [x] AC#7: again retry 上限超過停止（Phase 1 / Unit + Integration）
+- [x] AC#8: JST日次リセット（Phase 1 / Unit + Integration）
+- [x] AC#9: `state=null` 初回処理（Phase 1 / Unit + Integration）
+- [x] AC#10: level clamp（Phase 1 / Unit + Integration）
+- [x] AC#11: interval preview 文言（Phase 1 / Unit + Integration）
 - [x] AC#12: `classifyCard(null)=new`（Phase 2 / Unit + Integration）
 - [x] AC#13: learn/due 分岐（Phase 2 / Unit + Integration）
 - [x] AC#14: future due を `null`（Phase 2 / Unit + Integration）
@@ -274,7 +274,7 @@ flowchart TD
 - [x] AC#21: 空キュー no-op + 新規参照（Phase 3 / Unit + Integration）
 - [x] AC#22: retry 重複許容末尾追加（Phase 3 / Unit + Integration）
 - [x] AC#23: 全キュー空のみ完了（Phase 3 / Unit + Integration）
-- [ ] AC#24: JST 00:00 境界で retry リセット（Phase 1 / Unit + Integration）
+- [x] AC#24: JST 00:00 境界で retry リセット（Phase 1 / Unit + Integration）
 
 ## リスクと対策
 - [ ] リスク: `calculateRating` が `new Date()` 依存に回帰して決定性を失う  
