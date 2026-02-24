@@ -3,6 +3,6 @@
   "epic_id": "E-01",
   "parent_story_id": "",
   "status": "implementation_review",
-  "github_pr_url": "",
-  "github_branch": "main"
+  "github_pr_url": "https://github.com/Ardama18/KANJI-EVERYDAY/pull/3",
+  "github_branch": "story/S-04-seed-data-and-utilities"
 }
