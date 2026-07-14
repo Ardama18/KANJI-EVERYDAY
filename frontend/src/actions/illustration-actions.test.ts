@@ -10,12 +10,11 @@ vi.mock("@/lib/illustration/storage", () => ({
 	getSignedUrl: getSignedUrlMock,
 }));
 
+import { getIllustrationUrl, triggerIllustrationGeneration } from "./illustration-actions";
 import {
 	__resetProcessIllustrationGenerationImplementationForTest,
 	__setProcessIllustrationGenerationImplementationForTest,
-	getIllustrationUrl,
-	triggerIllustrationGeneration,
-} from "./illustration-actions";
+} from "./illustration-generation-runtime";
 
 type QueryError = {
 	message: string;

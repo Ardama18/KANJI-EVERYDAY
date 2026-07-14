@@ -41,11 +41,13 @@ vi.mock("@/lib/illustration/storage", async () => {
 });
 
 import {
-	__resetProcessIllustrationGenerationImplementationForTest,
-	__setProcessIllustrationGenerationImplementationForTest,
 	getIllustrationUrl,
 	triggerIllustrationGeneration,
 } from "../../../../frontend/src/actions/illustration-actions";
+import {
+	__resetProcessIllustrationGenerationImplementationForTest,
+	__setProcessIllustrationGenerationImplementationForTest,
+} from "../../../../frontend/src/actions/illustration-generation-runtime";
 import { processIllustrationGeneration } from "../../../../frontend/src/lib/illustration/generator";
 import { generateIllustration } from "../../../../frontend/src/lib/illustration/gemini-client";
 import { sanitizePromptInput } from "../../../../frontend/src/lib/illustration/prompt";

@@ -16,9 +16,12 @@ export default defineConfig({
 		},
 	},
 	test: {
+		// S-10 DB contract files intentionally share one isolated database and actor fixture.
+		fileParallelism: false,
 		include: [
 			"src/**/*.test.ts",
 			"src/**/*.test.tsx",
+			"../specs/stories/S-10-ai-card-import-foundation/tests/*.test.ts",
 			"../specs/stories/S-01-project-scaffolding/tests/*.test.ts",
 			"../specs/stories/S-01-project-scaffolding/tests/*.test.tsx",
 			"../specs/stories/S-03-authentication-flow/tests/*.test.ts",

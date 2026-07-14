@@ -155,7 +155,7 @@ seed_cards AS (
 		front_text,
 		back_text,
 		illustration_key,
-		pattern || ':' || front_text || ':' || back_text AS card_key
+		public.ai_compute_card_key(pattern, front_text, back_text) AS card_key
 	FROM seed_card_blueprints
 ),
 upserted_seed_cards AS (
@@ -179,7 +179,7 @@ upserted_seed_cards AS (
 		illustration_key,
 		card_key
 	FROM seed_cards
-	ON CONFLICT (card_key) DO NOTHING
+	ON CONFLICT (card_key) WHERE visibility = 'public' DO NOTHING
 	RETURNING
 		id,
 		card_key
@@ -195,6 +195,8 @@ resolved_seed_cards AS (
 		cards.card_key
 	FROM public.cards AS cards
 	INNER JOIN seed_cards ON seed_cards.card_key = cards.card_key
+	WHERE cards.visibility = 'public'
+		AND cards.owner_user_id IS NULL
 )
 INSERT INTO public.deck_cards (
 	deck_id,
