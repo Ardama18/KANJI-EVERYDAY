@@ -8,9 +8,17 @@
     "check": "npm run lint && npm run typecheck && npm run test",
     "lint": "biome check .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest"
-  },
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"test:s10:assert-db": "node -e \"if (!(process.env.S10_TEST_DATABASE_URL || '').trim()) { console.error('S10_TEST_DATABASE_URL is required for S-10 database tests'); process.exit(1) }\"",
+		"test:s10:unit": "vitest run ../specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.test.ts",
+		"test:s10:integration": "npm run test:s10:assert-db && vitest run ../specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.int.test.ts",
+		"test:s10:e2e": "npm run test:s10:assert-db && vitest run ../specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.e2e.test.ts",
+		"test:s10:fresh": "npm run test:s10:assert-db && vitest run ../specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.e2e.test.ts -t E2E-MIGRATION-01",
+		"test:s10:upgrade": "npm run test:s10:assert-db && vitest run ../specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.e2e.test.ts -t E2E-MIGRATION-02",
+		"test:s10:failure": "npm run test:s10:assert-db && vitest run ../specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.e2e.test.ts -t E2E-MIGRATION-03",
+		"test:s10:inventory": "vitest run ../specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.test.ts ../specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.int.test.ts ../specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.e2e.test.ts"
+	},
   "dependencies": {
     "@supabase/ssr": "^0.6.0",
     "@supabase/supabase-js": "^2.47.16",

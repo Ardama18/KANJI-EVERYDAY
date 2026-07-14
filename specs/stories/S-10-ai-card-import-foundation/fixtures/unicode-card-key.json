@@ -1,0 +1,89 @@
+{
+  "contractVersion": 1,
+  "whiteSpaceCodePoints": [
+    "0009",
+    "000A",
+    "000B",
+    "000C",
+    "000D",
+    "0020",
+    "0085",
+    "00A0",
+    "1680",
+    "2000",
+    "2001",
+    "2002",
+    "2003",
+    "2004",
+    "2005",
+    "2006",
+    "2007",
+    "2008",
+    "2009",
+    "200A",
+    "2028",
+    "2029",
+    "202F",
+    "205F",
+    "3000"
+  ],
+  "excludedWhiteSpaceCodePoints": ["FEFF"],
+  "displayNormalizationVectors": [
+    {
+      "id": "all-fixed-white-space",
+      "input": "\t\n\u000b\f\r \u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000漢\t\u3000字\u00a0",
+      "expected": "漢 字"
+    },
+    {
+      "id": "feff-is-not-white-space",
+      "input": " \ufeff \ufeff ",
+      "expected": "\ufeff \ufeff"
+    },
+    {
+      "id": "nfkc-and-case-preservation",
+      "input": "　ＡＢＣ　㍻　Ä　",
+      "expected": "ABC 平成 Ä"
+    },
+    {
+      "id": "astral-and-combining-mark",
+      "input": "　𠮷　が　🚀　",
+      "expected": "𠮷 が 🚀"
+    }
+  ],
+  "keyNormalizationVectors": [
+    {
+      "id": "unicode-lowercase-after-display-normalization",
+      "input": "　ＡＢＣ　Ä　",
+      "expectedDisplay": "ABC Ä",
+      "expected": "abc ä"
+    },
+    {
+      "id": "feff-preserved-for-key",
+      "input": " \ufeffＡ\ufeff ",
+      "expected": "\ufeffa\ufeff"
+    },
+    {
+      "id": "astral-and-combining-mark-for-key",
+      "input": "　𠮷　が　🚀　",
+      "expected": "𠮷 が 🚀"
+    }
+  ],
+  "cardKeyVectors": [
+    {
+      "id": "r1-basic",
+      "pattern": "R1",
+      "front": "　漢字　",
+      "back": " かんじ ",
+      "material": "R1\u001f漢字\u001fかんじ",
+      "expectedSha256Hex": "0b699c1cdeb4af9725f1d9f1d796a80e7728e096ab1d9a1aa92e3eaf9d55dc1c"
+    },
+    {
+      "id": "w1-separator-and-order",
+      "pattern": "W1",
+      "front": "かんじ",
+      "back": "漢字",
+      "material": "W1\u001fかんじ\u001f漢字",
+      "expectedSha256Hex": "3b7bbc148d1fbe6b33b697e3b9681801ee35957b2c85f0befb919d56479230f2"
+    }
+  ]
+}

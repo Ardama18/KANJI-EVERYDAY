@@ -7,7 +7,10 @@
 //       generation reservation hash / canonical import hash
 // 制約: production module未実装のため、後続task-executorがfixtureとimportを追加して完成させる。
 
-import { describe, it } from "vitest";
+import { describe, expect, it } from "vitest";
+
+import { normalizeDisplayText, normalizeForKey } from "@/lib/ai-import/normalize";
+import unicodeFixture from "../fixtures/unicode-card-key.json";
 
 describe("S-10 AIカード登録基盤 Unit契約", () => {
 	describe("Stage 1 schema", () => {
@@ -70,27 +73,70 @@ describe("S-10 AIカード登録基盤 Unit契約", () => {
 		// @category: core-functionality
 		// @dependency: normalize.ts, fixtures/unicode-card-key.json
 		// @complexity: high
-		it.todo("UT-NORM-01: 固定Unicode White_Space全コードポイントをASCII SPACEへ置換し、trimと連続圧縮を行う");
+		it("UT-NORM-01: 固定Unicode White_Space全コードポイントをASCII SPACEへ置換し、trimと連続圧縮を行う", () => {
+			const vector = unicodeFixture.displayNormalizationVectors.find(
+				(candidate) => candidate.id === "all-fixed-white-space"
+			);
+			expect(vector).toBeDefined();
+			for (const codePoint of unicodeFixture.whiteSpaceCodePoints) {
+				const whiteSpace = String.fromCodePoint(Number.parseInt(codePoint, 16));
+				expect(normalizeDisplayText(`${whiteSpace}漢${whiteSpace}${whiteSpace}字${whiteSpace}`)).toBe(
+					vector?.expected
+				);
+			}
+			expect(normalizeDisplayText(vector?.input ?? "")).toBe(vector?.expected);
+		});
 
 		// @category: edge-case
 		// @dependency: normalize.ts, unicode-card-key fixture
 		// @complexity: medium
-		it.todo("UT-NORM-02: U+FEFFをWhite_Spaceとして除去せず入力中に保持する");
+		it("UT-NORM-02: U+FEFFをWhite_Spaceとして除去せず入力中に保持する", () => {
+			const vector = unicodeFixture.displayNormalizationVectors.find(
+				(candidate) => candidate.id === "feff-is-not-white-space"
+			);
+			expect(unicodeFixture.excludedWhiteSpaceCodePoints).toContain("FEFF");
+			expect(vector).toBeDefined();
+			expect(normalizeDisplayText(vector?.input ?? "")).toBe(vector?.expected);
+		});
 
 		// @category: core-functionality
 		// @dependency: normalize.ts
 		// @complexity: medium
-		it.todo("UT-NORM-03: NFKCで全角英数字・互換文字を正規化し、表示値では大文字小文字を保持する");
+		it("UT-NORM-03: NFKCで全角英数字・互換文字を正規化し、表示値では大文字小文字を保持する", () => {
+			const vector = unicodeFixture.displayNormalizationVectors.find(
+				(candidate) => candidate.id === "nfkc-and-case-preservation"
+			);
+			expect(vector).toBeDefined();
+			expect(normalizeDisplayText(vector?.input ?? "")).toBe(vector?.expected);
+		});
 
 		// @category: core-functionality
 		// @dependency: normalize.ts
 		// @complexity: medium
-		it.todo("UT-NORM-04: key値とtag normalized_nameだけにUnicode小文字化を適用する");
+		it("UT-NORM-04: key値とtag normalized_nameだけにUnicode小文字化を適用する", () => {
+			const vector = unicodeFixture.keyNormalizationVectors.find(
+				(candidate) => candidate.id === "unicode-lowercase-after-display-normalization"
+			);
+			expect(vector).toBeDefined();
+			expect(normalizeDisplayText(vector?.input ?? "")).toBe(vector?.expectedDisplay);
+			expect(normalizeForKey(vector?.input ?? "")).toBe(vector?.expected);
+		});
 
 		// @category: edge-case
 		// @dependency: normalize.ts, unicode-card-key fixture
 		// @complexity: high
-		it.todo("UT-NORM-05: BMP外文字と結合文字を欠損させず、UTF-8 fixtureどおり正規化する");
+		it("UT-NORM-05: BMP外文字と結合文字を欠損させず、UTF-8 fixtureどおり正規化する", () => {
+			const displayVector = unicodeFixture.displayNormalizationVectors.find(
+				(candidate) => candidate.id === "astral-and-combining-mark"
+			);
+			const keyVector = unicodeFixture.keyNormalizationVectors.find(
+				(candidate) => candidate.id === "astral-and-combining-mark-for-key"
+			);
+			expect(displayVector).toBeDefined();
+			expect(keyVector).toBeDefined();
+			expect(normalizeDisplayText(displayVector?.input ?? "")).toBe(displayVector?.expected);
+			expect(normalizeForKey(keyVector?.input ?? "")).toBe(keyVector?.expected);
+		});
 
 		// @category: core-functionality
 		// @dependency: card-key.ts, normalize.ts

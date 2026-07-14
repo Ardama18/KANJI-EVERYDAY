@@ -19,6 +19,7 @@ export default defineConfig({
 		include: [
 			"src/**/*.test.ts",
 			"src/**/*.test.tsx",
+			"../specs/stories/S-10-ai-card-import-foundation/tests/*.test.ts",
 			"../specs/stories/S-01-project-scaffolding/tests/*.test.ts",
 			"../specs/stories/S-01-project-scaffolding/tests/*.test.tsx",
 			"../specs/stories/S-03-authentication-flow/tests/*.test.ts",

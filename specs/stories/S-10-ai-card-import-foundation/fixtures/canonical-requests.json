@@ -1,0 +1,93 @@
+{
+  "contractVersion": 1,
+  "generationVectors": [
+    {
+      "id": "baseline",
+      "input": {
+        "input": {
+          "grade": 3,
+          "kanji": ["漢", "字"],
+          "notes": "小学　3  年"
+        },
+        "options": {
+          "language": "ja",
+          "maxConcepts": 2,
+          "includeWriting": true
+        },
+        "requestedUnits": {
+          "cardGeneration": 4,
+          "illustrationConcept": 2
+        },
+        "ownerUserId": "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE",
+        "reservationKey": "generation-ignored"
+      },
+      "canonicalJson": "{\"input\":{\"grade\":3,\"kanji\":[\"漢\",\"字\"],\"notes\":\"小学 3 年\"},\"options\":{\"includeWriting\":true,\"language\":\"ja\",\"maxConcepts\":2},\"requestedUnits\":{\"cardGeneration\":4,\"illustrationConcept\":2}}",
+      "expectedSha256Hex": "4e30642ccef1b23b5669544cb856fe387228b22435b56c91ba780d26ed31d558"
+    },
+    {
+      "id": "requested-unit-difference",
+      "input": {
+        "input": {
+          "grade": 3,
+          "kanji": ["漢", "字"],
+          "notes": "小学 3 年"
+        },
+        "options": {
+          "includeWriting": true,
+          "language": "ja",
+          "maxConcepts": 2
+        },
+        "requestedUnits": {
+          "cardGeneration": 5,
+          "illustrationConcept": 2
+        }
+      },
+      "canonicalJson": "{\"input\":{\"grade\":3,\"kanji\":[\"漢\",\"字\"],\"notes\":\"小学 3 年\"},\"options\":{\"includeWriting\":true,\"language\":\"ja\",\"maxConcepts\":2},\"requestedUnits\":{\"cardGeneration\":5,\"illustrationConcept\":2}}",
+      "expectedSha256Hex": "2e78bf31efdd56010449fd606eee2ae86c26358b5395dbbf0371e782ded3d238"
+    }
+  ],
+  "importVectors": [
+    {
+      "id": "ordinal-and-normalized-tag-order",
+      "input": {
+        "deck": {
+          "id": "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE"
+        },
+        "items": [
+          {
+            "clientItemId": "item-1",
+            "conceptId": "concept-1",
+            "pattern": "R1",
+            "front": "　漢字　",
+            "back": "かんじ",
+            "tags": [" 国語 ", "Ｇｒａｄｅ　３"],
+            "image": {
+              "mode": "none"
+            }
+          },
+          {
+            "clientItemId": "item-2",
+            "conceptId": "concept-1",
+            "pattern": "W1",
+            "front": "かんじ",
+            "back": "漢字",
+            "tags": ["Ｇｒａｄｅ　３", "国語"],
+            "image": {
+              "mode": "ai"
+            }
+          }
+        ],
+        "ownerUserId": "FFFFFFFF-BBBB-4CCC-8DDD-EEEEEEEEEEEE",
+        "reservationKey": "import-ignored",
+        "source": "app_ai"
+      },
+      "canonicalJson": "{\"deck\":{\"id\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"},\"items\":[{\"clientItemId\":\"item-1\",\"conceptId\":\"concept-1\",\"pattern\":\"R1\",\"front\":\"漢字\",\"back\":\"かんじ\",\"tags\":[\"grade 3\",\"国語\"],\"image\":{\"mode\":\"none\"}},{\"clientItemId\":\"item-2\",\"conceptId\":\"concept-1\",\"pattern\":\"W1\",\"front\":\"かんじ\",\"back\":\"漢字\",\"tags\":[\"grade 3\",\"国語\"],\"image\":{\"mode\":\"ai\"}}]}",
+      "expectedSha256Hex": "1aa5e988b528e484630b37cbc1ba2746bda6f68d1ca0ba5c7a3aacd541f223a8"
+    }
+  ],
+  "hashSeparation": {
+    "generationVectorId": "baseline",
+    "importVectorId": "ordinal-and-normalized-tag-order",
+    "mustDiffer": true
+  }
+}

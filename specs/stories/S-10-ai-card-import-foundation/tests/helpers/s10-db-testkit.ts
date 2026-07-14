@@ -1,0 +1,183 @@
+import { execFile } from "node:child_process";
+
+export type S10ActorKind = "ownerA" | "ownerB" | "anonymous" | "service";
+
+export interface S10Actor {
+	kind: S10ActorKind;
+	role: "authenticated" | "anon" | "service_role";
+	userId: string | null;
+}
+
+export interface S10ExecutionContext {
+	actor?: S10Actor;
+	testClock?: string;
+	failpoint?: string;
+}
+
+export interface S10SnapshotQuery {
+	name: string;
+	sql: string;
+}
+
+export interface S10Snapshot {
+	readonly entries: Readonly<Record<string, readonly Readonly<Record<string, unknown>>[]>>;
+}
+
+export interface S10DbClient {
+	databaseUrl: string;
+	execute(sql: string, context?: S10ExecutionContext): Promise<void>;
+	query<T extends Record<string, unknown>>(
+		sql: string,
+		context?: S10ExecutionContext
+	): Promise<T[]>;
+}
+
+export const S10_ACTORS = {
+	ownerA: {
+		kind: "ownerA",
+		role: "authenticated",
+		userId: "10000000-0000-4000-8000-00000000000a",
+	},
+	ownerB: {
+		kind: "ownerB",
+		role: "authenticated",
+		userId: "10000000-0000-4000-8000-00000000000b",
+	},
+	anonymous: { kind: "anonymous", role: "anon", userId: null },
+	service: { kind: "service", role: "service_role", userId: null },
+} as const satisfies Record<S10ActorKind, S10Actor>;
+
+export class S10DatabaseCommandError extends Error {
+	readonly exitCode: number | null;
+
+	constructor(exitCode: number | null) {
+		super("S-10 database command failed; inspect the isolated test database logs");
+		this.name = "S10DatabaseCommandError";
+		this.exitCode = exitCode;
+	}
+}
+
+export function requireS10TestDatabaseUrl(
+	environment: Readonly<Record<string, string | undefined>> = process.env
+): string {
+	const databaseUrl = environment.S10_TEST_DATABASE_URL?.trim();
+	if (databaseUrl === undefined || databaseUrl.length === 0) {
+		throw new Error("S10_TEST_DATABASE_URL is required for S-10 database tests");
+	}
+	return databaseUrl;
+}
+
+export function createS10DbClient(databaseUrl = requireS10TestDatabaseUrl()): S10DbClient {
+	return {
+		databaseUrl,
+		async execute(sql: string, context?: S10ExecutionContext): Promise<void> {
+			await runPsql(databaseUrl, buildContextSql(sql, context));
+		},
+		async query<T extends Record<string, unknown>>(
+			sql: string,
+			context?: S10ExecutionContext
+		): Promise<T[]> {
+			const query = trimTrailingSemicolon(sql);
+			const wrapped = `
+				WITH result_row AS (${query})
+				SELECT COALESCE(json_agg(row_to_json(result_row)), '[]'::json)::text
+				FROM result_row
+			`;
+			const output = await runPsql(databaseUrl, buildContextSql(wrapped, context));
+			return parseRows<T>(output.trim());
+		},
+	};
+}
+
+export async function captureS10Snapshot(
+	client: S10DbClient,
+	queries: readonly S10SnapshotQuery[]
+): Promise<S10Snapshot> {
+	const entries: Record<string, readonly Readonly<Record<string, unknown>>[]> = {};
+	for (const query of queries) {
+		entries[query.name] = await client.query(query.sql);
+	}
+	return { entries };
+}
+
+export async function runWithS10Connections<T>(
+	connectionCount: number,
+	operation: (client: S10DbClient, connectionIndex: number) => Promise<T>,
+	databaseUrl = requireS10TestDatabaseUrl()
+): Promise<T[]> {
+	if (!Number.isInteger(connectionCount) || connectionCount < 1) {
+		throw new Error("connectionCount must be a positive integer");
+	}
+	return await Promise.all(
+		Array.from({ length: connectionCount }, (_, index) =>
+			operation(createS10DbClient(databaseUrl), index)
+		)
+	);
+}
+
+export function sqlLiteral(value: string): string {
+	return `'${value.replace(/'/gu, "''")}'`;
+}
+
+function trimTrailingSemicolon(sql: string): string {
+	return sql.trim().replace(/;\s*$/u, "");
+}
+
+function buildContextSql(sql: string, context?: S10ExecutionContext): string {
+	const statement = trimTrailingSemicolon(sql);
+	if (context === undefined) {
+		return statement;
+	}
+	const settings = [
+		context.testClock === undefined
+			? ""
+			: `SET LOCAL app.s10_test_now = ${sqlLiteral(context.testClock)};`,
+		context.failpoint === undefined
+			? ""
+			: `SET LOCAL app.s10_failpoint = ${sqlLiteral(context.failpoint)};`,
+	].join("\n");
+	const actor = context.actor;
+	const actorSettings =
+		actor === undefined
+			? ""
+			: `
+				SET LOCAL ROLE ${actor.role};
+				SET LOCAL request.jwt.claim.role = ${sqlLiteral(actor.role)};
+				SET LOCAL request.jwt.claim.sub = ${sqlLiteral(actor.userId ?? "")};
+				SET LOCAL request.jwt.claims = ${sqlLiteral(JSON.stringify({ role: actor.role, ...(actor.userId === null ? {} : { sub: actor.userId }) }))};
+			`;
+	return `BEGIN;\n${actorSettings}\n${settings}\n${statement};\nCOMMIT;`;
+}
+
+function parseRows<T extends Record<string, unknown>>(output: string): T[] {
+	if (output.length === 0) {
+		return [];
+	}
+	const parsed: unknown = JSON.parse(output);
+	if (!Array.isArray(parsed) || parsed.some((row) => typeof row !== "object" || row === null)) {
+		throw new Error("S-10 database query returned an invalid row envelope");
+	}
+	return parsed as T[];
+}
+
+async function runPsql(databaseUrl: string, sql: string): Promise<string> {
+	return await new Promise((resolve, reject) => {
+		execFile(
+			"psql",
+			[databaseUrl, "-v", "ON_ERROR_STOP=1", "-X", "-A", "-t", "-q", "-c", sql],
+			{
+				encoding: "utf8",
+				env: { ...process.env, PGAPPNAME: "s10-ai-card-import-tests" },
+				maxBuffer: 10 * 1024 * 1024,
+			},
+			(error, stdout) => {
+				if (error !== null) {
+					const exitCode = typeof error.code === "number" ? error.code : null;
+					reject(new S10DatabaseCommandError(exitCode));
+					return;
+				}
+				resolve(stdout);
+			}
+		);
+	});
+}
