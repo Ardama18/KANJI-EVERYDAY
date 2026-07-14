@@ -14,9 +14,9 @@
 		"test:s10:unit": "vitest run ../specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.test.ts",
 		"test:s10:integration": "npm run test:s10:assert-db && vitest run ../specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.int.test.ts",
 		"test:s10:e2e": "npm run test:s10:assert-db && vitest run ../specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.e2e.test.ts",
-		"test:s10:fresh": "npm run test:s10:assert-db && vitest run ../specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.e2e.test.ts -t E2E-MIGRATION-01",
-		"test:s10:upgrade": "npm run test:s10:assert-db && vitest run ../specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.e2e.test.ts -t E2E-MIGRATION-02",
-		"test:s10:failure": "npm run test:s10:assert-db && vitest run ../specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.e2e.test.ts -t E2E-MIGRATION-03",
+		"test:s10:fresh": "vite-node -c vitest.config.ts ../specs/stories/S-10-ai-card-import-foundation/tests/helpers/s10-db-jobs.ts fresh",
+		"test:s10:upgrade": "vite-node -c vitest.config.ts ../specs/stories/S-10-ai-card-import-foundation/tests/helpers/s10-db-jobs.ts upgrade",
+		"test:s10:failure": "vite-node -c vitest.config.ts ../specs/stories/S-10-ai-card-import-foundation/tests/helpers/s10-db-jobs.ts failure",
 		"test:s10:inventory": "vitest run ../specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.test.ts ../specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.int.test.ts ../specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.e2e.test.ts"
 	},
   "dependencies": {

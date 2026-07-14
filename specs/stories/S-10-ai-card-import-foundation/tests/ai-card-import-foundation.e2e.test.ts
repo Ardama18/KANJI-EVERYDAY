@@ -8,7 +8,21 @@
 // そのためブラウザE2Eは作らず、信頼済みadapter相当の入力からDB最終状態までを通す契約E2Eとする。
 // Queue/providerはstubさえ起動せず、commit/finalize/fail primitiveを直接境界として検証する。
 
-import { describe, it } from "vitest";
+import { describe, expect, it } from "vitest";
+
+import {
+	captureS10SeedGeneralSnapshot,
+	captureS10SeedKeySnapshot,
+	createS10DbClient,
+} from "./helpers/s10-db-testkit";
+import {
+	readS10JobSnapshot,
+	runS10AcSmoke,
+	runS10MigrationFailureChecks,
+	selectS10DatabaseJobs,
+} from "./helpers/s10-db-jobs";
+
+const database = createS10DbClient();
 
 describe("S-10 AIカード登録基盤 契約E2E", () => {
 	// AC原文 (AC-01/06): 異なるownerの同内容private cardをcommit/finalizeでき、owner関連と二段階境界が一致する。
@@ -77,12 +91,25 @@ describe("S-10 AIカード登録基盤 契約E2E", () => {
 	// @category: e2e
 	// @dependency: isolated fresh database job
 	// @complexity: high
-	it.todo("E2E-MIGRATION-01: fresh DBへ全migrationと更新seedを適用しAC-01〜09の契約smokeを完走する");
+	it.runIf(process.env.S10_DATABASE_JOB === "fresh")("E2E-MIGRATION-01: fresh DBへ全migrationと更新seedを適用しAC-01〜09の契約smokeを完走する", async () => {
+		const selections = selectS10DatabaseJobs();
+		expect(new Set(selections.map(({ databaseUrl }) => databaseUrl)).size).toBe(3);
+		expect(new Set(selections.map(({ databaseName }) => databaseName)).size).toBe(3);
+		expect(await runS10AcSmoke(database)).toEqual({ passedAc: [1, 2, 3, 4, 5, 6, 7, 8, 9] });
+	});
 
 	// @category: e2e
 	// @dependency: frozen pre-S10 seed, isolated upgrade database job
 	// @complexity: high
-	it.todo("E2E-MIGRATION-02: pre-S10 seed済みDBをupgradeしkey backfill・部分unique・seed再実行・契約smokeを完走する");
+	it.runIf(process.env.S10_DATABASE_JOB === "upgrade")("E2E-MIGRATION-02: pre-S10 seed済みDBをupgradeしkey backfill・部分unique・seed再実行・契約smokeを完走する", async () => {
+		expect(await captureS10SeedGeneralSnapshot(database)).toEqual(
+			await readS10JobSnapshot(database, "upgrade_baseline_general")
+		);
+		expect(await captureS10SeedKeySnapshot(database)).toEqual(
+			await readS10JobSnapshot(database, "upgrade_after_migration_keys")
+		);
+		expect(await runS10AcSmoke(database)).toEqual({ passedAc: [1, 2, 3, 4, 5, 6, 7, 8, 9] });
+	});
 
 	// AC原文 (AC-10b): migration途中へ失敗を注入すると追加schema、制約、backfill dataが適用前へ戻る。
 	// 検証: DDL/backfill区間ごとのfailpointでmigrationを中断しbaseline snapshotと比較する。
@@ -90,7 +117,11 @@ describe("S-10 AIカード登録基盤 契約E2E", () => {
 	// @category: edge-case
 	// @dependency: migration failure-injection harness
 	// @complexity: high
-	it.todo("E2E-MIGRATION-03: 各migration failpointでtransaction rollback後のDB全snapshotを適用前と一致させる");
+	it.runIf(process.env.S10_DATABASE_JOB === "failure")("E2E-MIGRATION-03: 各migration failpointでtransaction rollback後のDB全snapshotを適用前と一致させる", async () => {
+		const results = await runS10MigrationFailureChecks(database);
+		expect(results).toHaveLength(5);
+		expect(results.every(({ rolledBack }) => rolledBack)).toBe(true);
+	});
 
 	// @category: e2e
 	// @dependency: parallel lock-intersection harness, full S-10 primitives

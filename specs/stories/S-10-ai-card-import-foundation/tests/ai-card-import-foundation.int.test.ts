@@ -14,15 +14,27 @@ import {
 	hashImportRequest,
 	type CanonicalImportRequestInput,
 } from "../../../../frontend/src/lib/ai-import/canonical-request";
+import {
+	type CardPattern,
+	computeCardKey,
+} from "../../../../frontend/src/lib/ai-import/card-key";
 import canonicalRequestFixture from "../fixtures/canonical-requests.json";
 import unicodeFixture from "../fixtures/unicode-card-key.json";
 import {
+	captureS10SeedGeneralSnapshot,
+	captureS10SeedKeySnapshot,
 	captureS10Snapshot,
 	createS10DbClient,
 	ensureS10ActorFixtures,
 	S10_ACTORS,
 	sqlLiteral,
 } from "./helpers/s10-db-testkit";
+import {
+	readS10JobSnapshot,
+	runS10AcSmoke,
+	runS10MigrationFailureChecks,
+	selectS10DatabaseJobs,
+} from "./helpers/s10-db-jobs";
 
 const database = createS10DbClient();
 
@@ -2409,26 +2421,155 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 		// @category: integration
 		// @dependency: fresh database fixture
 		// @complexity: high
-		it.todo("IT-MIGRATION-01: 空DBへ全migration chainと更新済みseedを適用しAC-01〜09のDB契約fixtureを実行できる");
+		it.runIf(process.env.S10_DATABASE_JOB === "fresh")("IT-MIGRATION-01: 空DBへ全migration chainと更新済みseedを適用しAC-01〜09のDB契約fixtureを実行できる", async () => {
+			expect(() => selectS10DatabaseJobs({})).toThrow(/S10_FRESH_DATABASE_URL/u);
+			const reusedDatabase = "postgresql://postgres:postgres@127.0.0.1:54322/s10_reused";
+			const distinctEnvironment = {
+				S10_FRESH_DATABASE_URL:
+					"postgresql://postgres:postgres@127.0.0.1:54322/s10_guard_fresh",
+				S10_UPGRADE_DATABASE_URL:
+					"postgresql://postgres:postgres@127.0.0.1:54322/s10_guard_upgrade",
+				S10_FAILURE_DATABASE_URL:
+					"postgresql://postgres:postgres@127.0.0.1:54322/s10_guard_failure",
+			};
+			expect(() =>
+				selectS10DatabaseJobs({
+					S10_FRESH_DATABASE_URL: reusedDatabase,
+					S10_UPGRADE_DATABASE_URL: reusedDatabase,
+					S10_FAILURE_DATABASE_URL: reusedDatabase,
+				})
+			).toThrow(/distinct connection strings/u);
+			expect(() =>
+				selectS10DatabaseJobs({
+					S10_FRESH_DATABASE_URL: `${reusedDatabase}?application_name=fresh`,
+					S10_UPGRADE_DATABASE_URL: `${reusedDatabase}?application_name=upgrade`,
+					S10_FAILURE_DATABASE_URL: `${reusedDatabase}?application_name=failure`,
+				})
+			).toThrow(/distinct database names/u);
+			for (const databaseName of [
+				"postgres",
+				"template0",
+				"template1",
+				`test_${"x".repeat(59)}`,
+				"s10_guard%22%3BDROP%20DATABASE%20postgres%3B--",
+			]) {
+				expect(() =>
+					selectS10DatabaseJobs({
+						...distinctEnvironment,
+						S10_FRESH_DATABASE_URL: `postgresql://postgres:postgres@127.0.0.1:54322/${databaseName}`,
+					})
+				).toThrow(/dedicated alphanumeric test database/u);
+			}
+			for (const override of [
+				"dbname=postgres",
+				"host=/tmp/redirected",
+				"hostaddr=127.0.0.2",
+				"port=5432",
+				"user=other",
+				"password=other",
+				"service=other",
+			]) {
+				expect(() =>
+					selectS10DatabaseJobs({
+						...distinctEnvironment,
+						S10_FRESH_DATABASE_URL: `${distinctEnvironment.S10_FRESH_DATABASE_URL}?${override}`,
+					})
+				).toThrow(/must not override connection identity/u);
+			}
+			const selections = selectS10DatabaseJobs();
+			expect(new Set(selections.map(({ databaseUrl }) => databaseUrl)).size).toBe(3);
+			expect(new Set(selections.map(({ databaseName }) => databaseName)).size).toBe(3);
+			const marker = await database.query<{ job: string; database_name: string }>(
+				"SELECT job, database_name FROM s10_job.metadata"
+			);
+			expect(marker).toEqual([{ job: "fresh", database_name: selections[0]?.databaseName }]);
+			expect(await runS10AcSmoke(database)).toEqual({ passedAc: [1, 2, 3, 4, 5, 6, 7, 8, 9] });
+		});
 
 		// @category: integration
 		// @dependency: frozen pre-S10 seed upgrade fixture
 		// @complexity: high
-		it.todo("IT-MIGRATION-02: pre-S10 seed済みDBへforward migrationを適用し一般Seed snapshotを不変に保つ");
+		it.runIf(process.env.S10_DATABASE_JOB === "upgrade")("IT-MIGRATION-02: pre-S10 seed済みDBへforward migrationを適用し一般Seed snapshotを不変に保つ", async () => {
+			const upgradeSelection = selectS10DatabaseJobs().find(({ job }) => job === "upgrade");
+			expect(await database.query<{ job: string; database_name: string }>(
+				"SELECT job, database_name FROM s10_job.metadata"
+			)).toEqual([{ job: "upgrade", database_name: upgradeSelection?.databaseName }]);
+			expect(await readS10JobSnapshot(database, "upgrade_baseline_general")).toEqual(
+				await readS10JobSnapshot(database, "upgrade_after_migration_general")
+			);
+			expect(await captureS10SeedGeneralSnapshot(database)).toEqual(
+				await readS10JobSnapshot(database, "upgrade_baseline_general")
+			);
+		});
 
 		// @category: integration
 		// @dependency: Unicode fixture, key backfill
 		// @complexity: high
-		it.todo("IT-MIGRATION-03: 旧card_keyを別記録し、全既存cardのbackfill後keyを個別SHA-256期待値と一致させる");
+		it.runIf(process.env.S10_DATABASE_JOB === "upgrade")("IT-MIGRATION-03: 旧card_keyを別記録し、全既存cardのbackfill後keyを個別SHA-256期待値と一致させる", async () => {
+			const oldKeys = await readS10JobSnapshot(database, "upgrade_baseline_keys");
+			const newKeys = await readS10JobSnapshot(database, "upgrade_after_migration_keys");
+			expect(oldKeys).not.toEqual(newKeys);
+			expect(await captureS10SeedKeySnapshot(database)).toEqual(newKeys);
+			const cards = await database.query<{
+				id: string;
+				pattern: CardPattern;
+				front: string;
+				back: string;
+				card_key: string;
+			}>(`
+				SELECT id::text, pattern, front_text AS front, back_text AS back, card_key
+				FROM public.cards WHERE visibility = 'public' ORDER BY id
+			`);
+			const expectedKeys = new Map(
+				await Promise.all(
+					cards.map(async (card) => [
+						card.id,
+						await computeCardKey({
+							pattern: card.pattern,
+							front: card.front,
+							back: card.back,
+						}),
+					] as const)
+				)
+			);
+			expect(cards).toHaveLength(100);
+			expect(cards.filter((card) => expectedKeys.get(card.id) !== card.card_key)).toEqual([]);
+			const invalid = await database.query<{ count: number }>(`
+				SELECT count(*)::int AS count FROM public.cards
+				WHERE card_key IS DISTINCT FROM public.ai_compute_card_key(pattern, front_text, back_text)
+			`);
+			expect(invalid).toEqual([{ count: 0 }]);
+		});
 
 		// @category: integration
 		// @dependency: updated seed.sql
 		// @complexity: high
-		it.todo("IT-MIGRATION-04: seed再実行で公開card/deck/relation件数とmigration後card_keyを増減・変更しない");
+		it.runIf(process.env.S10_DATABASE_JOB === "upgrade")("IT-MIGRATION-04: seed再実行で公開card/deck/relation件数とmigration後card_keyを増減・変更しない", async () => {
+			expect(await readS10JobSnapshot(database, "upgrade_after_seed_general")).toEqual(
+				await readS10JobSnapshot(database, "upgrade_after_migration_general")
+			);
+			expect(await readS10JobSnapshot(database, "upgrade_after_seed_keys")).toEqual(
+				await readS10JobSnapshot(database, "upgrade_after_migration_keys")
+			);
+		});
 
 		// @category: edge-case
 		// @dependency: migration failpoint harness
 		// @complexity: high
-		it.todo("IT-MIGRATION-05: normalization/backfill/index/table/RLS各区間の失敗注入でschema/constraint/keyを適用前snapshotへ戻す");
+		it.runIf(process.env.S10_DATABASE_JOB === "failure")("IT-MIGRATION-05: normalization/backfill/index/table/RLS各区間の失敗注入でschema/constraint/keyを適用前snapshotへ戻す", async () => {
+			const failureSelection = selectS10DatabaseJobs().find(({ job }) => job === "failure");
+			expect(await database.query<{ job: string; database_name: string }>(
+				"SELECT job, database_name FROM s10_job.metadata"
+			)).toEqual([{ job: "failure", database_name: failureSelection?.databaseName }]);
+			const results = await runS10MigrationFailureChecks(database);
+			expect(results.map(({ failpoint }) => failpoint)).toEqual([
+				"after_helper_self_check",
+				"after_collision_check",
+				"after_card_key_backfill",
+				"after_import_schema",
+				"after_rls_contract",
+			]);
+			expect(results.every(({ rolledBack }) => rolledBack)).toBe(true);
+		});
 	});
 });

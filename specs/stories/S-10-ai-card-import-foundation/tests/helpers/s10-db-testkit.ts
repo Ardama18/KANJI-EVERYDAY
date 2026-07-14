@@ -23,6 +23,8 @@ export interface S10Snapshot {
 	readonly entries: Readonly<Record<string, readonly Readonly<Record<string, unknown>>[]>>;
 }
 
+export type S10JsonSnapshot = unknown;
+
 export interface S10DatabaseErrorDiagnostic {
 	readonly sqlState: string | null;
 	readonly constraint: string | null;
@@ -85,7 +87,7 @@ export function createS10DbClient(databaseUrl = requireS10TestDatabaseUrl()): S1
 	return {
 		databaseUrl,
 		async execute(sql: string, context?: S10ExecutionContext): Promise<void> {
-			await runPsql(databaseUrl, buildContextSql(sql, context));
+			await runS10Psql(databaseUrl, buildContextSql(sql, context));
 		},
 		async query<T extends Record<string, unknown>>(
 			sql: string,
@@ -97,7 +99,7 @@ export function createS10DbClient(databaseUrl = requireS10TestDatabaseUrl()): S1
 				SELECT COALESCE(json_agg(row_to_json(result_row)), '[]'::json)::text
 				FROM result_row
 			`;
-			const output = await runPsql(databaseUrl, buildContextSql(wrapped, context));
+			const output = await runS10Psql(databaseUrl, buildContextSql(wrapped, context));
 			return parseRows<T>(output.trim());
 		},
 		async captureError(
@@ -172,6 +174,62 @@ export async function captureS10Snapshot(
 	return { entries };
 }
 
+export async function captureS10SeedGeneralSnapshot(
+	client: S10DbClient
+): Promise<S10JsonSnapshot> {
+	const rows = await client.query<{ snapshot: S10JsonSnapshot }>(`
+		SELECT jsonb_build_object(
+			'cards', COALESCE((
+				SELECT jsonb_agg(to_jsonb(seed_card) ORDER BY seed_card.id)
+				FROM (
+					SELECT id::text, owner_user_id::text, visibility, skill, pattern,
+						front_text, back_text, illustration_key
+					FROM public.cards WHERE visibility = 'public'
+				) AS seed_card
+			), '[]'::jsonb),
+			'decks', COALESCE((
+				SELECT jsonb_agg(to_jsonb(seed_deck) ORDER BY seed_deck.id)
+				FROM (
+					SELECT id::text, owner_user_id::text, name, new_limit_per_day
+					FROM public.decks
+				) AS seed_deck
+			), '[]'::jsonb),
+			'deckCards', COALESCE((
+				SELECT jsonb_agg(to_jsonb(seed_relation) ORDER BY seed_relation.deck_id, seed_relation.card_id)
+				FROM (
+					SELECT deck_id::text, card_id::text FROM public.deck_cards
+				) AS seed_relation
+			), '[]'::jsonb),
+			'counts', jsonb_build_object(
+				'cards', (SELECT count(*) FROM public.cards WHERE visibility = 'public'),
+				'decks', (SELECT count(*) FROM public.decks),
+				'deckCards', (SELECT count(*) FROM public.deck_cards)
+			)
+		) AS snapshot
+	`);
+	const snapshot = rows[0]?.snapshot;
+	if (snapshot === undefined) {
+		throw new Error("S-10 seed general snapshot query returned no row");
+	}
+	return snapshot;
+}
+
+export async function captureS10SeedKeySnapshot(
+	client: S10DbClient
+): Promise<S10JsonSnapshot> {
+	const rows = await client.query<{ snapshot: S10JsonSnapshot }>(`
+		SELECT COALESCE(jsonb_agg(to_jsonb(seed_key) ORDER BY seed_key.id), '[]'::jsonb) AS snapshot
+		FROM (
+			SELECT id::text, card_key FROM public.cards WHERE visibility = 'public'
+		) AS seed_key
+	`);
+	const snapshot = rows[0]?.snapshot;
+	if (snapshot === undefined) {
+		throw new Error("S-10 seed key snapshot query returned no row");
+	}
+	return snapshot;
+}
+
 export async function runWithS10Connections<T>(
 	connectionCount: number,
 	operation: (client: S10DbClient, connectionIndex: number) => Promise<T>,
@@ -232,7 +290,7 @@ function parseRows<T extends Record<string, unknown>>(output: string): T[] {
 	return parsed as T[];
 }
 
-async function runPsql(databaseUrl: string, sql: string): Promise<string> {
+export async function runS10Psql(databaseUrl: string, sql: string): Promise<string> {
 	return await new Promise((resolve, reject) => {
 		execFile(
 			"psql",
@@ -249,6 +307,28 @@ async function runPsql(databaseUrl: string, sql: string): Promise<string> {
 					return;
 				}
 				resolve(stdout);
+			}
+		);
+	});
+}
+
+export async function runS10PsqlFile(databaseUrl: string, filePath: string): Promise<void> {
+	await new Promise<void>((resolve, reject) => {
+		execFile(
+			"psql",
+			[databaseUrl, "-v", "ON_ERROR_STOP=1", "-X", "-q", "-f", filePath],
+			{
+				encoding: "utf8",
+				env: { ...process.env, PGAPPNAME: "s10-ai-card-import-migration-job" },
+				maxBuffer: 10 * 1024 * 1024,
+			},
+			(error) => {
+				if (error !== null) {
+					const exitCode = typeof error.code === "number" ? error.code : null;
+					reject(new S10DatabaseCommandError(exitCode));
+					return;
+				}
+				resolve();
 			}
 		);
 	});
