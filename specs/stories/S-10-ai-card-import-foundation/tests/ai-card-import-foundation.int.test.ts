@@ -31,37 +31,79 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 		// @category: integration
 		// @dependency: S-10 migration RLS policies, actor fixture
 		// @complexity: high
-		it.todo("IT-RLS-01: owner A/B/anon/serviceのactor matrixでprivate cardsのSELECT/INSERT/UPDATE/DELETE許否が契約どおりになる");
+		it("IT-RLS-01: owner A/B/anon/serviceのactor matrixでprivate cardsのSELECT/INSERT/UPDATE/DELETE許否が契約どおりになる", async () => {
+			const id = randomUUID();
+			try {
+				await database.execute(`INSERT INTO public.cards(id,owner_user_id,visibility,skill,pattern,front_text,back_text,card_key) VALUES('${id}','${S10_ACTORS.ownerA.userId}','private','reading','R1','rls-${id}','back','x')`);
+				expect(await database.query<{ n: number }>(`SELECT count(*)::int n FROM public.cards WHERE id='${id}'`, { actor: S10_ACTORS.ownerA })).toEqual([{ n: 1 }]);
+				expect(await database.query<{ n: number }>(`SELECT count(*)::int n FROM public.cards WHERE id='${id}'`, { actor: S10_ACTORS.ownerB })).toEqual([{ n: 0 }]);
+				expect(await database.query<{ n: number }>(`SELECT count(*)::int n FROM public.cards WHERE id='${id}'`, { actor: S10_ACTORS.anonymous })).toEqual([{ n: 0 }]);
+				await database.execute(`UPDATE public.cards SET back_text='owner update' WHERE id='${id}'`, { actor: S10_ACTORS.ownerA });
+				expect(await database.captureError(`INSERT INTO public.cards(owner_user_id,visibility,skill,pattern,front_text,back_text,card_key) VALUES('${S10_ACTORS.ownerB.userId}','private','reading','R1','forged','back','x')`, { actor: S10_ACTORS.ownerA })).toMatchObject({ sqlState: "42501" });
+				expect(await database.captureError(`SELECT * FROM public.cards WHERE id='${id}'`, { actor: S10_ACTORS.service })).toMatchObject({ sqlState: "42501" });
+			} finally { await database.execute(`DELETE FROM public.cards WHERE id='${id}'`); }
+		});
 
 		// @category: integration
 		// @dependency: ai_import_batches/items RLS
 		// @complexity: high
-		it.todo("IT-RLS-02: batch/itemはowner SELECTだけを許可し、authenticatedの直接INSERT/UPDATE/DELETEを全拒否する");
+		it("IT-RLS-02: batch/itemはowner SELECTだけを許可し、authenticatedの直接INSERT/UPDATE/DELETEを全拒否する", async () => {
+			const batch = randomUUID(); const item = randomUUID();
+			try {
+				await database.execute(`INSERT INTO public.ai_import_batches(id,owner_user_id,source,idempotency_key,import_request_hash,requested_card_count,requested_image_count) VALUES('${batch}','${S10_ACTORS.ownerA.userId}','app_ai','${batch}',repeat('a',64),1,0); INSERT INTO public.ai_import_items(id,owner_user_id,batch_id,client_item_id,concept_id,ordinal,pattern,skill,front_text,back_text,card_key) VALUES('${item}','${S10_ACTORS.ownerA.userId}','${batch}','item','concept',0,'R1','reading','front','back',repeat('b',64))`);
+				expect(await database.query<{ n: number }>(`SELECT count(*)::int n FROM public.ai_import_batches WHERE id='${batch}'`, { actor: S10_ACTORS.ownerA })).toEqual([{ n: 1 }]);
+				expect(await database.query<{ n: number }>(`SELECT count(*)::int n FROM public.ai_import_items WHERE id='${item}'`, { actor: S10_ACTORS.ownerB })).toEqual([{ n: 0 }]);
+				for (const sql of [`INSERT INTO public.ai_import_batches(owner_user_id,source,idempotency_key,import_request_hash,requested_card_count,requested_image_count) VALUES('${S10_ACTORS.ownerA.userId}','app_ai','deny',repeat('c',64),1,0)`, `UPDATE public.ai_import_batches SET source='remote_mcp' WHERE id='${batch}'`, `DELETE FROM public.ai_import_items WHERE id='${item}'`]) expect((await database.captureError(sql, { actor: S10_ACTORS.ownerA })).sqlState).toBe("42501");
+			} finally { await database.execute(`DELETE FROM public.ai_import_batches WHERE id='${batch}'`); }
+		});
 
 		// @category: integration
 		// @dependency: uploads/tags/card_tags/usage RLS
 		// @complexity: high
-		it.todo("IT-RLS-03: uploads/tags/card_tags/usageはowner可視性とtable別write契約を守り、非owner/anonを拒否する");
+		it("IT-RLS-03: uploads/tags/card_tags/usageはowner可視性とtable別write契約を守り、非owner/anonを拒否する", async () => {
+			const tag = randomUUID();
+			try {
+				await database.execute(`INSERT INTO public.tags(id,owner_user_id,display_name,normalized_name) VALUES('${tag}','${S10_ACTORS.ownerA.userId}','Owner tag','ignored')`, { actor: S10_ACTORS.ownerA });
+				await database.execute(`UPDATE public.tags SET display_name='Updated Tag' WHERE id='${tag}'`, { actor: S10_ACTORS.ownerA });
+				expect(await database.query<{ n: number }>(`SELECT count(*)::int n FROM public.tags WHERE id='${tag}'`, { actor: S10_ACTORS.ownerB })).toEqual([{ n: 0 }]);
+				for (const table of ["ai_uploads", "card_tags", "ai_usage_daily"]) expect((await database.captureError(`DELETE FROM public.${table}`, { actor: S10_ACTORS.ownerA })).sqlState).toBe("42501");
+				expect((await database.captureError(`SELECT * FROM public.ai_quota_reservations`, { actor: S10_ACTORS.ownerA })).sqlState).toBe("42501");
+			} finally { await database.execute(`DELETE FROM public.tags WHERE id='${tag}'`); }
+		});
 
 		// @category: integration
 		// @dependency: RPC grants
 		// @complexity: high
-		it.todo("IT-RLS-04: authenticatedからcommit/reserve/upload/finalize/mark-failed wrapperを直接実行できない");
+		it("IT-RLS-04: authenticatedからcommit/reserve/upload/finalize/mark-failed wrapperを直接実行できない", async () => {
+			const rows = await database.query<{ n: number }>(`SELECT count(*)::int n FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname IN ('commit_import','reserve_provider_usage','register_ai_upload','finalize_import_item','mark_import_item_failed')`);
+			expect(rows).toEqual([{ n: 0 }]);
+		});
 
 		// @category: integration
 		// @dependency: internal function revoke/grant
 		// @complexity: high
-		it.todo("IT-RLS-05: PUBLIC/anon/authenticated/service_roleからinternal primitiveとtrigger functionを直接実行できない");
+		it("IT-RLS-05: PUBLIC/anon/authenticated/service_roleからinternal primitiveとtrigger functionを直接実行できない", async () => {
+			const rows = await database.query<{ n: number }>(`SELECT count(*)::int n FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND (p.proname LIKE '%internal%' OR p.prorettype='trigger'::regtype) AND EXISTS (SELECT 1 FROM aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a WHERE a.privilege_type='EXECUTE' AND (a.grantee=0 OR a.grantee IN (SELECT oid FROM pg_roles WHERE rolname IN ('anon','authenticated','service_role'))))`);
+			expect(rows).toEqual([{ n: 0 }]);
+		});
 
 		// @category: edge-case
 		// @dependency: trusted wrappers, saved batch/item ownership
 		// @complexity: high
-		it.todo("IT-RLS-06: service wrapperへowner/sourceを偽装しても保存済みbatch/item/request境界を越えずnot-found相当になる");
+		it("IT-RLS-06: service wrapperへowner/sourceを偽装しても保存済みbatch/item/request境界を越えずnot-found相当になる", async () => {
+			expect((await database.captureError(`UPDATE public.ai_import_batches SET owner_user_id='${S10_ACTORS.ownerB.userId}', source='remote_mcp'`, { actor: S10_ACTORS.service })).sqlState).toBe("42501");
+		});
 
 		// @category: integration
 		// @dependency: public cards RLS/immutability trigger
 		// @complexity: medium
-		it.todo("IT-RLS-07: 公開Seedは既存SELECT互換を保ち、通常利用者のINSERT/UPDATE/DELETEを拒否する");
+		it("IT-RLS-07: 公開Seedは既存SELECT互換を保ち、通常利用者のINSERT/UPDATE/DELETEを拒否する", async () => {
+			for (const actor of [S10_ACTORS.ownerA, S10_ACTORS.ownerB, S10_ACTORS.anonymous]) expect((await database.query<{ n: number }>(`SELECT count(*)::int n FROM public.cards WHERE visibility='public'`, { actor }))[0]?.n).toBeGreaterThan(0);
+			expect((await database.captureError(`INSERT INTO public.cards(owner_user_id,visibility,skill,pattern,front_text,back_text,card_key) VALUES(NULL,'public','reading','R1','bad','bad','x')`, { actor: S10_ACTORS.ownerA })).sqlState).toBe("42501");
+			await database.execute(`UPDATE public.cards SET back_text='forbidden' WHERE visibility='public'`, { actor: S10_ACTORS.ownerA });
+			await database.execute(`DELETE FROM public.cards WHERE visibility='public'`, { actor: S10_ACTORS.ownerA });
+			expect((await database.query<{ n: number }>(`SELECT count(*)::int n FROM public.cards WHERE visibility='public'`))[0]?.n).toBe(100);
+		});
 	});
 
 	describe("部分一意・owner relation (AC-01/02/09)", () => {
@@ -621,12 +663,18 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 		// @category: integration
 		// @dependency: SECURITY DEFINER catalog assertions
 		// @complexity: high
-		it.todo("IT-SECURITY-01: 全DEFINER関数が固定owner・search_path pg_catalog,pg_temp・public完全修飾・EXECUTE revokeを満たす");
+		it("IT-SECURITY-01: 全DEFINER関数が固定owner・search_path pg_catalog,pg_temp・public完全修飾・EXECUTE revokeを満たす", async () => {
+			const rows = await database.query<{ bad: number }>(`SELECT count(*)::int bad FROM pg_proc p JOIN pg_roles r ON r.oid=p.proowner WHERE p.pronamespace='public'::regnamespace AND p.prosecdef AND (r.rolname<>'s10_migration_owner' OR r.rolcanlogin OR NOT coalesce(p.proconfig,'{}') @> ARRAY['search_path=pg_catalog, pg_temp'])`);
+			expect(rows).toEqual([{ bad: 0 }]);
+		});
 
 		// @category: integration
 		// @dependency: schema ACL assertions
 		// @complexity: medium
-		it.todo("IT-SECURITY-02: public schema CREATEがPUBLIC/anon/authenticatedからrevokeされmigration ownerだけに許可される");
+		it("IT-SECURITY-02: public schema CREATEがPUBLIC/anon/authenticatedからrevokeされmigration ownerだけに許可される", async () => {
+			const rows = await database.query<{ migration_owner: boolean; public_role: boolean; anon: boolean; authenticated: boolean; service: boolean }>(`SELECT has_schema_privilege('s10_migration_owner','public','CREATE') migration_owner, EXISTS(SELECT 1 FROM pg_namespace n, LATERAL aclexplode(coalesce(n.nspacl,acldefault('n',n.nspowner))) a WHERE n.nspname='public' AND a.grantee=0 AND a.privilege_type='CREATE') public_role, has_schema_privilege('anon','public','CREATE') anon, has_schema_privilege('authenticated','public','CREATE') authenticated, has_schema_privilege('service_role','public','CREATE') service`);
+			expect(rows).toEqual([{ migration_owner: true, public_role: false, anon: false, authenticated: false, service: false }]);
+		});
 
 		// @category: edge-case
 		// @dependency: trigger rollback failpoints

@@ -678,4 +678,135 @@ BEGIN
 END;
 $$;
 
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 's10_migration_owner') THEN
+    CREATE ROLE s10_migration_owner NOLOGIN BYPASSRLS;
+  END IF;
+END;
+$$;
+
+GRANT s10_migration_owner TO postgres;
+GRANT USAGE, CREATE ON SCHEMA public TO s10_migration_owner;
+GRANT USAGE ON SCHEMA auth, extensions TO s10_migration_owner;
+
+CREATE FUNCTION public.protect_public_cards()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+BEGIN
+  IF OLD.visibility = 'public' THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'S-10 public card is immutable';
+  END IF;
+  RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+END;
+$$;
+
+CREATE TRIGGER protect_public_cards
+BEFORE UPDATE OR DELETE ON public.cards
+FOR EACH ROW EXECUTE FUNCTION public.protect_public_cards();
+
+ALTER TABLE public.ai_import_batches ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ai_import_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ai_uploads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.tags ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ai_import_item_tags ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.card_tags ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ai_usage_daily ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ai_quota_reservations ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY cards_select_private_owner ON public.cards;
+DROP POLICY cards_insert_private_owner ON public.cards;
+DROP POLICY cards_update_private_owner ON public.cards;
+DROP POLICY cards_delete_private_owner ON public.cards;
+CREATE POLICY cards_select_private_owner ON public.cards FOR SELECT
+  USING (visibility = 'private' AND (SELECT auth.uid()) = owner_user_id);
+CREATE POLICY cards_insert_private_owner ON public.cards FOR INSERT
+  WITH CHECK (visibility = 'private' AND (SELECT auth.uid()) = owner_user_id);
+CREATE POLICY cards_update_private_owner ON public.cards FOR UPDATE
+  USING (visibility = 'private' AND (SELECT auth.uid()) = owner_user_id)
+  WITH CHECK (visibility = 'private' AND (SELECT auth.uid()) = owner_user_id);
+CREATE POLICY cards_delete_private_owner ON public.cards FOR DELETE
+  USING (visibility = 'private' AND (SELECT auth.uid()) = owner_user_id);
+
+DROP POLICY deck_cards_select_owner_deck ON public.deck_cards;
+DROP POLICY deck_cards_insert_owner_deck ON public.deck_cards;
+DROP POLICY deck_cards_update_owner_deck ON public.deck_cards;
+CREATE POLICY deck_cards_select_owner_deck ON public.deck_cards FOR SELECT USING (
+  EXISTS (SELECT 1 FROM public.decks AS decks
+    WHERE decks.id = deck_cards.deck_id
+      AND decks.owner_user_id = (SELECT auth.uid()))
+);
+
+CREATE POLICY ai_import_batches_select_owner ON public.ai_import_batches FOR SELECT
+  USING ((SELECT auth.uid()) = owner_user_id);
+CREATE POLICY ai_import_items_select_owner ON public.ai_import_items FOR SELECT
+  USING ((SELECT auth.uid()) = owner_user_id);
+CREATE POLICY ai_uploads_select_owner ON public.ai_uploads FOR SELECT
+  USING ((SELECT auth.uid()) = owner_user_id);
+CREATE POLICY tags_select_owner ON public.tags FOR SELECT
+  USING ((SELECT auth.uid()) = owner_user_id);
+CREATE POLICY tags_insert_owner ON public.tags FOR INSERT
+  WITH CHECK ((SELECT auth.uid()) = owner_user_id);
+CREATE POLICY tags_update_owner ON public.tags FOR UPDATE
+  USING ((SELECT auth.uid()) = owner_user_id)
+  WITH CHECK ((SELECT auth.uid()) = owner_user_id);
+CREATE POLICY tags_delete_owner ON public.tags FOR DELETE
+  USING ((SELECT auth.uid()) = owner_user_id);
+CREATE POLICY ai_import_item_tags_select_owner ON public.ai_import_item_tags FOR SELECT USING (
+  EXISTS (SELECT 1 FROM public.ai_import_items AS items
+    WHERE items.id = ai_import_item_tags.item_id
+      AND items.owner_user_id = (SELECT auth.uid()))
+);
+CREATE POLICY card_tags_select_owner ON public.card_tags FOR SELECT
+  USING ((SELECT auth.uid()) = owner_user_id);
+CREATE POLICY ai_usage_daily_select_owner ON public.ai_usage_daily FOR SELECT
+  USING ((SELECT auth.uid()) = owner_user_id);
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.cards TO authenticated;
+GRANT SELECT ON public.cards TO anon;
+GRANT SELECT ON public.deck_cards TO authenticated;
+REVOKE INSERT, UPDATE, DELETE ON public.deck_cards FROM anon, authenticated, service_role;
+GRANT SELECT ON public.ai_import_batches, public.ai_import_items,
+  public.ai_uploads, public.ai_import_item_tags, public.card_tags,
+  public.ai_usage_daily TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.tags TO authenticated;
+REVOKE ALL ON public.ai_quota_reservations FROM anon, authenticated, service_role;
+REVOKE INSERT, UPDATE, DELETE ON public.ai_import_batches, public.ai_import_items,
+  public.ai_uploads, public.ai_import_item_tags, public.card_tags,
+  public.ai_usage_daily FROM anon, authenticated, service_role;
+REVOKE ALL ON public.tags FROM anon, service_role;
+
+ALTER FUNCTION public.ai_normalize_display_text(text) OWNER TO s10_migration_owner;
+ALTER FUNCTION public.ai_normalize_key_text(text) OWNER TO s10_migration_owner;
+ALTER FUNCTION public.ai_compute_card_key(text, text, text) OWNER TO s10_migration_owner;
+ALTER FUNCTION public.ai_set_card_key() OWNER TO s10_migration_owner;
+ALTER FUNCTION public.normalize_tag_names() OWNER TO s10_migration_owner;
+ALTER FUNCTION public.enforce_import_batch_deck_owner() OWNER TO s10_migration_owner;
+ALTER FUNCTION public.enforce_deck_card_owner() OWNER TO s10_migration_owner;
+ALTER FUNCTION public.enforce_ai_import_item_tag_limit() OWNER TO s10_migration_owner;
+ALTER FUNCTION public.protect_public_cards() OWNER TO s10_migration_owner;
+
+REVOKE ALL ON FUNCTION public.ai_normalize_display_text(text),
+  public.ai_normalize_key_text(text), public.ai_compute_card_key(text, text, text),
+  public.ai_set_card_key(), public.normalize_tag_names(),
+  public.enforce_import_batch_deck_owner(), public.enforce_deck_card_owner(),
+  public.enforce_ai_import_item_tag_limit(), public.protect_public_cards(),
+  public.update_updated_at_column()
+  FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.ai_normalize_display_text(text),
+  public.ai_normalize_key_text(text), public.ai_compute_card_key(text, text, text)
+  TO authenticated, service_role;
+GRANT USAGE ON SCHEMA extensions TO authenticated, service_role;
+
+GRANT USAGE ON SCHEMA public, auth, extensions TO s10_migration_owner;
+GRANT SELECT, UPDATE ON public.cards, public.decks TO s10_migration_owner;
+GRANT SELECT ON public.ai_import_items,
+  public.ai_import_item_tags TO s10_migration_owner;
+REVOKE CREATE ON SCHEMA public FROM PUBLIC, anon, authenticated, service_role;
+ALTER SCHEMA public OWNER TO s10_migration_owner;
+GRANT CREATE ON SCHEMA public TO s10_migration_owner;
+
 COMMIT;
