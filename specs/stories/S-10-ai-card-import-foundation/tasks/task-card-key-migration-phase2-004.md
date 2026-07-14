@@ -14,18 +14,18 @@
 
 ## 対象ファイル
 
-- [ ] `supabase/migrations/20260714000000_s10_ai_card_import_foundation.sql`
-- [ ] `supabase/seed.sql`
-- [ ] `specs/stories/S-10-ai-card-import-foundation/fixtures/unicode-card-key.json`
-- [ ] `specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.int.test.ts`
-- [ ] `specs/stories/S-10-ai-card-import-foundation/tests/helpers/s10-db-testkit.ts`
+- [x] `supabase/migrations/20260714000000_s10_ai_card_import_foundation.sql`
+- [x] `supabase/seed.sql`
+- [x] `specs/stories/S-10-ai-card-import-foundation/fixtures/unicode-card-key.json`
+- [x] `specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.int.test.ts`
+- [x] `specs/stories/S-10-ai-card-import-foundation/tests/helpers/s10-db-testkit.ts`
 
 ## 実装手順（TDD: Red-Green-Refactor）
 
 ### 1. Red Phase
 
-- [ ] `IT-UNIQUE-01〜03`を実DBの失敗テストへ置換する。
-- [ ] pre-S10 Seed上で旧global unique、新key未backfill、SQL fixture不一致を観測する。
+- [x] `IT-UNIQUE-01〜03`を実DBの失敗テストへ置換する。
+- [x] pre-S10 Seed上で旧global unique、新key未backfill、SQL fixture不一致を観測する。
 
 ```bash
 S10_TEST_DATABASE_URL="$S10_TEST_DATABASE_URL" npm --prefix frontend run test:s10:integration -- -t "IT-UNIQUE"
@@ -33,28 +33,27 @@ S10_TEST_DATABASE_URL="$S10_TEST_DATABASE_URL" npm --prefix frontend run test:s1
 
 ### 2. Green Phase
 
-- [ ] ICU/NFKC/lowercaseが利用不能なら先頭self-checkでfail-fastする安定名のimmutable helperを作る。
-- [ ] 全既存cardの新keyを一時領域へ計算し、public key/private owner-key衝突を旧unique drop前に検査する。
-- [ ] `cards.updated_at`、owner/visibility check、64文字lowercase hex check、`cards_id_owner_uq`を追加する。
-- [ ] `cards_public_card_key_uidx`と`cards_private_owner_card_key_uidx`を作り、caller提供keyはtriggerで再計算する。
-- [ ] `seed.sql`を`ai_compute_card_key`と`ON CONFLICT (card_key) WHERE visibility = 'public' DO NOTHING`へ変更し、ID/本文/skill/pattern/deck関連/件数を変えない。
+- [x] ICU/NFKC/lowercaseが利用不能なら先頭self-checkでfail-fastする安定名のimmutable helperを作る。
+- [x] 全既存cardの新keyを一時領域へ計算し、public key/private owner-key衝突を旧unique drop前に検査する。
+- [x] `cards.updated_at`、owner/visibility check、64文字lowercase hex check、`cards_id_owner_uq`を追加する。
+- [x] `cards_public_card_key_uidx`と`cards_private_owner_card_key_uidx`を作り、caller提供keyはtriggerで再計算する。
+- [x] `seed.sql`を`ai_compute_card_key`と`ON CONFLICT (card_key) WHERE visibility = 'public' DO NOTHING`へ変更し、ID/本文/skill/pattern/deck関連/件数を変えない。
 
 ### 3. Refactor Phase
 
-- [ ] function/constraint/indexへDesign記載の安定名を付け、named `23505`だけを`DUPLICATE_EXISTING`対象として識別可能にする。
-- [ ] migration transactionへrepo Seed実行を混在させず、区間failpointを後続jobから注入可能にする。
+- [x] function/constraint/indexへDesign記載の安定名を付け、named `23505`だけを`DUPLICATE_EXISTING`対象として識別可能にする。
+- [x] migration transactionへrepo Seed実行を混在させず、区間failpointを後続jobから注入可能にする。
 
 ## 完了条件
 
-- [ ] `IT-UNIQUE-01〜03`がPASSする。
-- [ ] owner A/Bの同keyと公開Seed同値privateを許可し、同一owner private重複だけを拒否する。
-- [ ] 衝突またはself-check失敗でschema/key/constraintが適用前へ全rollbackする。
-- [ ] Seed再実行で公開card/deck/relation件数が変わらない。
-- [ ] 既存S-02 migration 2ファイルに差分がない。
-- [ ] 動作確認レベルL2を満たす。
+- [x] `IT-UNIQUE-01〜03`がPASSする。
+- [x] owner A/Bの同keyと公開Seed同値privateを許可し、同一owner private重複だけを拒否する。
+- [x] 衝突またはself-check失敗でschema/key/constraintが適用前へ全rollbackする。
+- [x] Seed再実行で公開card/deck/relation件数が変わらない。
+- [x] 既存S-02 migration 2ファイルに差分がない。
+- [x] 動作確認レベルL2を満たす。
 
 ## 注意事項
 
 - 恣意的な既存cardのmerge/deleteやdown migrationを実装しない。
 - RLS/RPC/Contract E2Eは後続タスクへ残す。
-

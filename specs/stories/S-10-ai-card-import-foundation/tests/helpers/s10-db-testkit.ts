@@ -23,6 +23,11 @@ export interface S10Snapshot {
 	readonly entries: Readonly<Record<string, readonly Readonly<Record<string, unknown>>[]>>;
 }
 
+export interface S10DatabaseErrorDiagnostic {
+	readonly sqlState: string | null;
+	readonly constraint: string | null;
+}
+
 export interface S10DbClient {
 	databaseUrl: string;
 	execute(sql: string, context?: S10ExecutionContext): Promise<void>;
@@ -30,6 +35,10 @@ export interface S10DbClient {
 		sql: string,
 		context?: S10ExecutionContext
 	): Promise<T[]>;
+	captureError(
+		sql: string,
+		context?: S10ExecutionContext
+	): Promise<S10DatabaseErrorDiagnostic>;
 }
 
 export const S10_ACTORS = {
@@ -86,7 +95,59 @@ export function createS10DbClient(databaseUrl = requireS10TestDatabaseUrl()): S1
 			const output = await runPsql(databaseUrl, buildContextSql(wrapped, context));
 			return parseRows<T>(output.trim());
 		},
+		async captureError(
+			sql: string,
+			context?: S10ExecutionContext
+		): Promise<S10DatabaseErrorDiagnostic> {
+			return await capturePsqlError(databaseUrl, buildContextSql(sql, context));
+		},
 	};
+}
+
+export async function ensureS10ActorFixtures(client: S10DbClient): Promise<void> {
+	await client.execute(`
+		INSERT INTO auth.users (
+			id,
+			instance_id,
+			aud,
+			role,
+			email,
+			encrypted_password,
+			email_confirmed_at,
+			raw_app_meta_data,
+			raw_user_meta_data,
+			created_at,
+			updated_at
+		)
+		VALUES
+			(
+				'${S10_ACTORS.ownerA.userId}'::uuid,
+				'00000000-0000-0000-0000-000000000000'::uuid,
+				'authenticated',
+				'authenticated',
+				's10-owner-a@example.local',
+				's10-test-not-for-login',
+				now(),
+				'{"provider":"email","providers":["email"]}'::jsonb,
+				'{}'::jsonb,
+				now(),
+				now()
+			),
+			(
+				'${S10_ACTORS.ownerB.userId}'::uuid,
+				'00000000-0000-0000-0000-000000000000'::uuid,
+				'authenticated',
+				'authenticated',
+				's10-owner-b@example.local',
+				's10-test-not-for-login',
+				now(),
+				'{"provider":"email","providers":["email"]}'::jsonb,
+				'{}'::jsonb,
+				now(),
+				now()
+			)
+		ON CONFLICT (id) DO NOTHING
+	`);
 }
 
 export async function captureS10Snapshot(
@@ -177,6 +238,47 @@ async function runPsql(databaseUrl: string, sql: string): Promise<string> {
 					return;
 				}
 				resolve(stdout);
+			}
+		);
+	});
+}
+
+async function capturePsqlError(
+	databaseUrl: string,
+	sql: string
+): Promise<S10DatabaseErrorDiagnostic> {
+	return await new Promise((resolve, reject) => {
+		execFile(
+			"psql",
+			[
+				databaseUrl,
+				"-v",
+				"ON_ERROR_STOP=1",
+				"-v",
+				"VERBOSITY=verbose",
+				"-X",
+				"-A",
+				"-t",
+				"-q",
+				"-c",
+				sql,
+			],
+			{
+				encoding: "utf8",
+				env: { ...process.env, PGAPPNAME: "s10-ai-card-import-tests" },
+				maxBuffer: 10 * 1024 * 1024,
+			},
+			(error, _stdout, stderr) => {
+				if (error === null) {
+					reject(new Error("S-10 database command unexpectedly succeeded"));
+					return;
+				}
+				const sqlState = /ERROR:\s+([0-9A-Z]{5}):/u.exec(stderr)?.[1] ?? null;
+				const constraint =
+					/CONSTRAINT NAME:\s+([^\s]+)/u.exec(stderr)?.[1] ??
+					/unique constraint "([^"]+)"/u.exec(stderr)?.[1] ??
+					null;
+				resolve({ sqlState, constraint });
 			}
 		);
 	});

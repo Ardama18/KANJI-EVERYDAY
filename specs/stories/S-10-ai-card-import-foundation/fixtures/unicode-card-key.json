@@ -1,5 +1,11 @@
 {
   "contractVersion": 1,
+  "sqlContract": {
+    "collation": "ai_und_icu",
+    "displayFunction": "ai_normalize_display_text",
+    "keyFunction": "ai_normalize_key_text",
+    "cardKeyFunction": "ai_compute_card_key"
+  },
   "whiteSpaceCodePoints": [
     "0009",
     "000A",

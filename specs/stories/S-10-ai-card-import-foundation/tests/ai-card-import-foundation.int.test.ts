@@ -6,7 +6,23 @@
 // TODO(test-executor): S-02のDB testkitをS-10用に拡張し、各todoを独立transaction、
 // actor fixture、固定DB clock、parallel connection、failpoint fixtureで実装する。
 
-import { describe, it } from "vitest";
+import { randomUUID } from "node:crypto";
+
+import { beforeAll, describe, expect, it } from "vitest";
+
+import unicodeFixture from "../fixtures/unicode-card-key.json";
+import {
+	createS10DbClient,
+	ensureS10ActorFixtures,
+	S10_ACTORS,
+	sqlLiteral,
+} from "./helpers/s10-db-testkit";
+
+const database = createS10DbClient();
+
+beforeAll(async () => {
+	await ensureS10ActorFixtures(database);
+});
 
 describe("S-10 AIカード登録基盤 DB統合契約", () => {
 	describe("RLS・grant・owner境界 (AC-09)", () => {
@@ -54,17 +70,155 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 		// @category: integration
 		// @dependency: cards partial unique indexes
 		// @complexity: high
-		it.todo("IT-UNIQUE-01: 同一card_keyのprivate cardを異なるowner A/Bが各1件保持できる");
+		it("IT-UNIQUE-01: 同一card_keyのprivate cardを異なるowner A/Bが各1件保持できる", async () => {
+			for (const vector of unicodeFixture.displayNormalizationVectors) {
+				const rows = await database.query<{ normalized: string }>(`
+					SELECT public.ai_normalize_display_text(${sqlLiteral(vector.input)}) AS normalized
+				`);
+				expect(rows).toEqual([{ normalized: vector.expected }]);
+			}
+
+			for (const vector of unicodeFixture.keyNormalizationVectors) {
+				const rows = await database.query<{ normalized: string }>(`
+					SELECT public.ai_normalize_key_text(${sqlLiteral(vector.input)}) AS normalized
+				`);
+				expect(rows).toEqual([{ normalized: vector.expected }]);
+			}
+
+			for (const vector of unicodeFixture.cardKeyVectors) {
+				const rows = await database.query<{ card_key: string }>(`
+					SELECT public.ai_compute_card_key(
+						${sqlLiteral(vector.pattern)},
+						${sqlLiteral(vector.front)},
+						${sqlLiteral(vector.back)}
+					) AS card_key
+				`);
+				expect(rows).toEqual([{ card_key: vector.expectedSha256Hex }]);
+			}
+
+			const marker = `s10-unique-owner-${randomUUID()}`;
+			try {
+				await database.execute(`
+					INSERT INTO public.cards (
+						owner_user_id, visibility, skill, pattern, front_text, back_text, card_key
+					)
+					VALUES
+						('${S10_ACTORS.ownerA.userId}'::uuid, 'private', 'reading', 'R1', ${sqlLiteral(marker)}, 'same back', 'caller-a'),
+						('${S10_ACTORS.ownerB.userId}'::uuid, 'private', 'reading', 'R1', ${sqlLiteral(marker)}, 'same back', 'caller-b')
+				`);
+				const rows = await database.query<{ owner_count: number; key_count: number }>(`
+					SELECT count(DISTINCT owner_user_id)::int AS owner_count,
+						count(DISTINCT card_key)::int AS key_count
+					FROM public.cards
+					WHERE front_text = ${sqlLiteral(marker)}
+				`);
+				expect(rows).toEqual([{ owner_count: 2, key_count: 1 }]);
+			} finally {
+				await database.execute(`DELETE FROM public.cards WHERE front_text = ${sqlLiteral(marker)}`);
+			}
+		});
 
 		// @category: integration
 		// @dependency: cards partial unique indexes
 		// @complexity: medium
-		it.todo("IT-UNIQUE-02: 公開Seedと同一card_keyのprivate cardを作成できる");
+		it("IT-UNIQUE-02: 公開Seedと同一card_keyのprivate cardを作成できる", async () => {
+			const publicCards = await database.query<{
+				pattern: string;
+				front_text: string;
+				back_text: string;
+				card_key: string;
+			}>(`
+				SELECT pattern, front_text, back_text, card_key
+				FROM public.cards
+				WHERE visibility = 'public'
+				ORDER BY id
+				LIMIT 1
+			`);
+			expect(publicCards).toHaveLength(1);
+			const source = publicCards[0];
+			if (source === undefined) {
+				throw new Error("S-10 integration database requires the repository Seed");
+			}
+
+			try {
+				await database.execute(`
+					INSERT INTO public.cards (
+						owner_user_id, visibility, skill, pattern, front_text, back_text, card_key
+					)
+					VALUES (
+						'${S10_ACTORS.ownerA.userId}'::uuid,
+						'private',
+						'reading',
+						${sqlLiteral(source.pattern)},
+						${sqlLiteral(source.front_text)},
+						${sqlLiteral(source.back_text)},
+						'caller-value-is-ignored'
+					)
+				`);
+				const rows = await database.query<{ card_key: string }>(`
+					SELECT card_key
+					FROM public.cards
+					WHERE visibility = 'private'
+						AND owner_user_id = '${S10_ACTORS.ownerA.userId}'::uuid
+						AND pattern = ${sqlLiteral(source.pattern)}
+						AND front_text = ${sqlLiteral(source.front_text)}
+						AND back_text = ${sqlLiteral(source.back_text)}
+				`);
+				expect(rows).toEqual([{ card_key: source.card_key }]);
+			} finally {
+				await database.execute(`
+					DELETE FROM public.cards
+					WHERE visibility = 'private'
+						AND owner_user_id = '${S10_ACTORS.ownerA.userId}'::uuid
+						AND pattern = ${sqlLiteral(source.pattern)}
+						AND front_text = ${sqlLiteral(source.front_text)}
+						AND back_text = ${sqlLiteral(source.back_text)}
+				`);
+			}
+		});
 
 		// @category: edge-case
 		// @dependency: private owner partial unique index, error mapper
 		// @complexity: high
-		it.todo("IT-UNIQUE-03: 同一ownerのprivate重複をnamed 23505からDUPLICATE_EXISTINGへ分類する");
+		it("IT-UNIQUE-03: 同一ownerのprivate重複をnamed 23505からDUPLICATE_EXISTINGへ分類する", async () => {
+			const marker = `s10-unique-duplicate-${randomUUID()}`;
+			try {
+				await database.execute(`
+					INSERT INTO public.cards (
+						owner_user_id, visibility, skill, pattern, front_text, back_text, card_key
+					)
+					VALUES (
+						'${S10_ACTORS.ownerA.userId}'::uuid,
+						'private',
+						'reading',
+						'R1',
+						${sqlLiteral(marker)},
+						'duplicate back',
+						'caller-value-first'
+					)
+				`);
+				const diagnostic = await database.captureError(`
+					INSERT INTO public.cards (
+						owner_user_id, visibility, skill, pattern, front_text, back_text, card_key
+					)
+					VALUES (
+						'${S10_ACTORS.ownerA.userId}'::uuid,
+						'private',
+						'reading',
+						'R1',
+						${sqlLiteral(marker)},
+						'duplicate back',
+						'caller-value-second'
+					)
+				`);
+				expect(diagnostic).toEqual({
+					sqlState: "23505",
+					constraint: "cards_private_owner_card_key_uidx",
+				});
+			} finally {
+				await database.execute(`DELETE FROM public.cards WHERE front_text = ${sqlLiteral(marker)}`);
+			}
+		});
 
 		// @category: integration
 		// @dependency: card_tags composite foreign keys and trigger
