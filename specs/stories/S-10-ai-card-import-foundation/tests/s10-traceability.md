@@ -51,7 +51,7 @@
 | Unit | `npm --prefix frontend run test:s10:unit` | 32/32 PASS |
 | DB Integration | `S10_TEST_DATABASE_URL=... npm --prefix frontend run test:s10:integration` + 独立3 job | 62/62 PASS（通常57 + job 5） |
 | Contract E2E | `S10_TEST_DATABASE_URL=... npm --prefix frontend run test:s10:e2e` + 独立3 job | 13/13 PASS（通常10 + job 3） |
-| Fresh | `npm --prefix frontend run test:s10:fresh` | PASS（Integration 57、migration E2E 1） |
+| Fresh | `npm --prefix frontend run test:s10:fresh` | PASS（Integration 58/58、Contract E2E 11/11） |
 | Upgrade | `npm --prefix frontend run test:s10:upgrade` | PASS（Integration 3、migration E2E 1） |
 | Failure injection | `npm --prefix frontend run test:s10:failure` | PASS（Integration 1、migration E2E 1） |
 | Existing tests | `S10_TEST_DATABASE_URL=... npm --prefix frontend run test -- --maxWorkers=1 --minWorkers=1` | inventory 446（47 files）、通常438/438 PASS、独立job条件付き8 skip（独立jobで8/8 PASS） |
