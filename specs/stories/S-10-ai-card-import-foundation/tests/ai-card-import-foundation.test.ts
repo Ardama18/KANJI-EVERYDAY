@@ -9,8 +9,35 @@
 
 import { describe, expect, it } from "vitest";
 
+import {
+	buildCardKeyMaterial,
+	computeCardKey,
+	type CardKeyInput,
+} from "@/lib/ai-import/card-key";
+import {
+	canonicalizeGenerationRequest,
+	canonicalizeImportRequest,
+	hashGenerationRequest,
+	hashImportRequest,
+} from "@/lib/ai-import/canonical-request";
 import { normalizeDisplayText, normalizeForKey } from "@/lib/ai-import/normalize";
+import canonicalFixture from "../fixtures/canonical-requests.json";
 import unicodeFixture from "../fixtures/unicode-card-key.json";
+
+function requireFixtureById<T extends { id: string }>(values: readonly T[], id: string): T {
+	const value = values.find((candidate) => candidate.id === id);
+	if (value === undefined) {
+		throw new Error(`Missing fixture: ${id}`);
+	}
+	return value;
+}
+
+function toCardKeyInput(value: { pattern: string; front: string; back: string }): CardKeyInput {
+	if (value.pattern !== "R1" && value.pattern !== "W1") {
+		throw new Error(`Invalid card-key fixture pattern: ${value.pattern}`);
+	}
+	return { pattern: value.pattern, front: value.front, back: value.back };
+}
 
 describe("S-10 AIカード登録基盤 Unit契約", () => {
 	describe("Stage 1 schema", () => {
@@ -141,17 +168,41 @@ describe("S-10 AIカード登録基盤 Unit契約", () => {
 		// @category: core-functionality
 		// @dependency: card-key.ts, normalize.ts
 		// @complexity: high
-		it.todo("UT-CARDKEY-01: pattern+U+001F+normalized front+U+001F+normalized backのUTF-8 SHA-256 lowercase hexを返す");
+		it("UT-CARDKEY-01: pattern+U+001F+normalized front+U+001F+normalized backのUTF-8 SHA-256 lowercase hexを返す", async () => {
+			for (const vector of unicodeFixture.cardKeyVectors) {
+				const input = toCardKeyInput(vector);
+				expect(buildCardKeyMaterial(input)).toBe(vector.material);
+				const digest = await computeCardKey(input);
+				expect(digest).toBe(vector.expectedSha256Hex);
+				expect(digest).toMatch(/^[0-9a-f]{64}$/u);
+			}
+		});
 
 		// @category: edge-case
 		// @dependency: card-key.ts, unicode-card-key fixture
 		// @complexity: medium
-		it.todo("UT-CARDKEY-02: 表示上異なるNFKC・空白・case同値入力が同一card_keyになる");
+		it("UT-CARDKEY-02: 表示上異なるNFKC・空白・case同値入力が同一card_keyになる", async () => {
+			for (const group of unicodeFixture.cardKeyEquivalenceGroups) {
+				const digests = await Promise.all(
+					group.variants.map((variant) => computeCardKey(toCardKeyInput(variant)))
+				);
+				expect(new Set(digests)).toEqual(new Set([group.expectedSha256Hex]));
+			}
+		});
 
 		// @category: edge-case
 		// @dependency: card-key.ts
 		// @complexity: medium
-		it.todo("UT-CARDKEY-03: R1/W1またはfront/back順序が異なる入力は異なるcard_keyになる");
+		it("UT-CARDKEY-03: R1/W1またはfront/back順序が異なる入力は異なるcard_keyになる", async () => {
+			const vector = requireFixtureById(unicodeFixture.cardKeyVectors, "r1-basic");
+			const baselineInput = toCardKeyInput(vector);
+			const [baseline, otherPattern, reversed] = await Promise.all([
+				computeCardKey(baselineInput),
+				computeCardKey({ ...baselineInput, pattern: "W1" }),
+				computeCardKey({ ...baselineInput, front: vector.back, back: vector.front }),
+			]);
+			expect(new Set([baseline, otherPattern, reversed])).toHaveLength(3);
+		});
 	});
 
 	describe("generation reservation hash と import request hash", () => {
@@ -160,37 +211,104 @@ describe("S-10 AIカード登録基盤 Unit契約", () => {
 		// @category: core-functionality
 		// @dependency: canonical-request.ts
 		// @complexity: high
-		it.todo("UT-HASH-01: generation入力・model-independent options・requested unitsを固定key順でcanonical化する");
+		it("UT-HASH-01: generation入力・model-independent options・requested unitsを固定key順でcanonical化する", async () => {
+			const vector = requireFixtureById(canonicalFixture.generationVectors, "baseline");
+			expect(canonicalizeGenerationRequest(vector.input)).toBe(vector.canonicalJson);
+			expect(await hashGenerationRequest(vector.input)).toBe(vector.expectedSha256Hex);
+		});
 
 		// @category: edge-case
 		// @dependency: canonical-request.ts
 		// @complexity: medium
-		it.todo("UT-HASH-02: generation hashはobject挿入順や余分な空白に依存せず同値入力で一致する");
+		it("UT-HASH-02: generation hashはobject挿入順や余分な空白に依存せず同値入力で一致する", async () => {
+			const baseline = requireFixtureById(canonicalFixture.generationVectors, "baseline");
+			const equivalent = requireFixtureById(
+				canonicalFixture.generationVectors,
+				"equivalent-reordered-and-spacing"
+			);
+			expect(canonicalizeGenerationRequest(equivalent.input)).toBe(baseline.canonicalJson);
+			expect(await hashGenerationRequest(equivalent.input)).toBe(baseline.expectedSha256Hex);
+		});
 
 		// @category: edge-case
 		// @dependency: canonical-request.ts
 		// @complexity: medium
-		it.todo("UT-HASH-03: requested unitsまたはgeneration optionの意味差分でgeneration hashが変わる");
+		it("UT-HASH-03: requested unitsまたはgeneration optionの意味差分でgeneration hashが変わる", async () => {
+			const ids = ["baseline", "requested-unit-difference", "generation-option-difference"];
+			const vectors = ids.map((id) => requireFixtureById(canonicalFixture.generationVectors, id));
+			const digests = await Promise.all(vectors.map((vector) => hashGenerationRequest(vector.input)));
+			expect(new Set(digests)).toHaveLength(ids.length);
+			expect(digests).toEqual(vectors.map((vector) => vector.expectedSha256Hex));
+			for (const digest of digests) {
+				expect(digest).toMatch(/^[0-9a-f]{64}$/u);
+			}
+		});
 
 		// @category: core-functionality
 		// @dependency: canonical-request.ts, normalize.ts
 		// @complexity: high
-		it.todo("UT-HASH-04: import requestはitem ordinalを保持し、各itemのtagをnormalized_name昇順にsortしてcanonical化する");
+		it("UT-HASH-04: import requestはitem ordinalを保持し、各itemのtagをnormalized_name昇順にsortしてcanonical化する", async () => {
+			const baseline = requireFixtureById(canonicalFixture.importVectors, "ordinal-and-normalized-tag-order");
+			const ordinalDifference = requireFixtureById(canonicalFixture.importVectors, "ordinal-difference");
+			expect(canonicalizeImportRequest(baseline.input)).toBe(baseline.canonicalJson);
+			expect(canonicalizeImportRequest(ordinalDifference.input)).toBe(ordinalDifference.canonicalJson);
+			expect(await hashImportRequest(ordinalDifference.input)).not.toBe(baseline.expectedSha256Hex);
+		});
 
 		// @category: core-functionality
 		// @dependency: canonical-request.ts
 		// @complexity: high
-		it.todo("UT-HASH-05: UUID lowercase化・integer表現・optional key省略・無空白JSONをUTF-8 SHA-256化する");
+		it("UT-HASH-05: UUID lowercase化・integer表現・optional key省略・無空白JSONをUTF-8 SHA-256化する", async () => {
+			const generation = requireFixtureById(canonicalFixture.generationVectors, "baseline");
+			const importRequest = requireFixtureById(canonicalFixture.importVectors, "ordinal-and-normalized-tag-order");
+			const canonical = canonicalizeImportRequest(importRequest.input);
+			expect(canonical).toBe(JSON.stringify(JSON.parse(canonical)));
+			expect(canonical).toContain(importRequest.input.deck.id.toLowerCase());
+			expect(canonical).not.toContain("uploadId");
+			expect(canonicalizeGenerationRequest(generation.input)).toContain('"maxConcepts":2');
+			const digest = await hashImportRequest(importRequest.input);
+			expect(digest).toBe(importRequest.expectedSha256Hex);
+			expect(digest).toMatch(/^[0-9a-f]{64}$/u);
+		});
 
 		// @category: edge-case
 		// @dependency: canonical-request.ts
 		// @complexity: medium
-		it.todo("UT-HASH-06: ownerとreservation keyをgeneration/import hash対象から除外する");
+		it("UT-HASH-06: ownerとreservation keyをgeneration/import hash対象から除外する", async () => {
+			const generation = requireFixtureById(
+				canonicalFixture.generationVectors,
+				"equivalent-reordered-and-spacing"
+			);
+			const importRequest = requireFixtureById(
+				canonicalFixture.importVectors,
+				"equivalent-trusted-fields-and-tag-order"
+			);
+			expect(canonicalizeGenerationRequest(generation.input)).not.toMatch(/owner|reservation/iu);
+			expect(canonicalizeImportRequest(importRequest.input)).not.toMatch(
+				/owner|reservation|source|quota/iu
+			);
+			expect(await hashGenerationRequest(generation.input)).toBe(generation.expectedSha256Hex);
+			expect(await hashImportRequest(importRequest.input)).toBe(importRequest.expectedSha256Hex);
+		});
 
 		// @category: core-functionality
 		// @dependency: canonical-request.ts
 		// @complexity: high
-		it.todo("UT-HASH-07: provider結果を含む最終import hashはgeneration hashと独立して決定され、一致を要求しない");
+		it("UT-HASH-07: provider結果を含む最終import hashはgeneration hashと独立して決定され、一致を要求しない", async () => {
+			const generation = requireFixtureById(
+				canonicalFixture.generationVectors,
+				canonicalFixture.hashSeparation.generationVectorId
+			);
+			const importRequest = requireFixtureById(
+				canonicalFixture.importVectors,
+				canonicalFixture.hashSeparation.importVectorId
+			);
+			const [generationHash, importHash] = await Promise.all([
+				hashGenerationRequest(generation.input),
+				hashImportRequest(importRequest.input),
+			]);
+			expect(generationHash === importHash).toBe(!canonicalFixture.hashSeparation.mustDiffer);
+		});
 	});
 
 	describe("preview HMAC", () => {

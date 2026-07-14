@@ -14,17 +14,17 @@
 
 ## 対象ファイル
 
-- [ ] `frontend/src/lib/ai-import/card-key.ts`
-- [ ] `frontend/src/lib/ai-import/canonical-request.ts`
-- [ ] `specs/stories/S-10-ai-card-import-foundation/fixtures/canonical-requests.json`
-- [ ] `specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.test.ts`
+- [x] `frontend/src/lib/ai-import/card-key.ts`
+- [x] `frontend/src/lib/ai-import/canonical-request.ts`
+- [x] `specs/stories/S-10-ai-card-import-foundation/fixtures/canonical-requests.json`
+- [x] `specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.test.ts`
 
 ## 実装手順（TDD: Red-Green-Refactor）
 
 ### 1. Red Phase
 
-- [ ] `UT-CARDKEY-01〜03`と`UT-HASH-01〜07`をfixture駆動の失敗テストへ置換する。
-- [ ] pattern/front/back順、NFKC/空白/case同値、意味差分、object挿入順、tag順、ordinal、UUID、integer、optional省略を個別に検証する。
+- [x] `UT-CARDKEY-01〜03`と`UT-HASH-01〜07`をfixture駆動の失敗テストへ置換する。
+- [x] pattern/front/back順、NFKC/空白/case同値、意味差分、object挿入順、tag順、ordinal、UUID、integer、optional省略を個別に検証する。
 
 ```bash
 npm --prefix frontend run test:s10:unit -- -t "UT-CARDKEY|UT-HASH"
@@ -32,10 +32,10 @@ npm --prefix frontend run test:s10:unit -- -t "UT-CARDKEY|UT-HASH"
 
 ### 2. Green Phase
 
-- [ ] `pattern + U+001F + normalizedFront + U+001F + normalizedBack`のUTF-8 SHA-256 lowercase hexを返す。
-- [ ] generation入力/options/requested unitsと最終ImportRequestを別canonical form/hashとして実装する。
-- [ ] item ordinalを維持し、tagはnormalized name順、UUIDはlowercase、未使用optional keyは省略、JSON空白なしとする。
-- [ ] owner/reservation key/source/trusted flagをcanonical requestから排除する。
+- [x] `pattern + U+001F + normalizedFront + U+001F + normalizedBack`のUTF-8 SHA-256 lowercase hexを返す。
+- [x] generation入力/options/requested unitsと最終ImportRequestを別canonical form/hashとして実装する。
+- [x] item ordinalを維持し、tagはnormalized name順、UUIDはlowercase、未使用optional keyは省略、JSON空白なしとする。
+- [x] owner/reservation key/source/trusted flagをcanonical requestから排除する。
 
 ```bash
 npm --prefix frontend run test:s10:unit -- -t "UT-CARDKEY|UT-HASH"
@@ -43,19 +43,18 @@ npm --prefix frontend run test:s10:unit -- -t "UT-CARDKEY|UT-HASH"
 
 ### 3. Refactor Phase
 
-- [ ] Web/Nodeの環境依存やDB/network参照を除き、UTF-8/SHA-256処理を重複させない。
-- [ ] generation/import hashが一致することを要求せず、意味差分だけでdigestが変わることを確認する。
+- [x] Web/Nodeの環境依存やDB/network参照を除き、UTF-8/SHA-256処理を重複させない。
+- [x] generation/import hashが一致することを要求せず、意味差分だけでdigestが変わることを確認する。
 
 ## 完了条件
 
-- [ ] 対象10件がPASSし、Unit累計15/32件が実テスト化される。
-- [ ] digestが常にlowercase 64文字hexで、fixture全vectorと一致する。
-- [ ] canonical input/result型に`any`およびtrusted/client境界違反がない。
-- [ ] `npm --prefix frontend run typecheck`がPASSする。
-- [ ] 動作確認レベルL1が満たされる。
+- [x] 対象10件がPASSし、Unit累計15/32件が実テスト化される。
+- [x] digestが常にlowercase 64文字hexで、fixture全vectorと一致する。
+- [x] canonical input/result型に`any`およびtrusted/client境界違反がない。
+- [x] `npm --prefix frontend run typecheck`がPASSする。
+- [x] 動作確認レベルL1が満たされる。
 
 ## 注意事項
 
 - preview HMAC、DB migration、schema validationはこのタスクで実装しない。
 - provider SDK、Queue、MCP transportを追加しない。
-

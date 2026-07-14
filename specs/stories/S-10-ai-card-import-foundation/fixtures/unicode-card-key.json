@@ -84,6 +84,25 @@
       "back": "漢字",
       "material": "W1\u001fかんじ\u001f漢字",
       "expectedSha256Hex": "3b7bbc148d1fbe6b33b697e3b9681801ee35957b2c85f0befb919d56479230f2"
+    },
+    {
+      "id": "r1-nfkc-space-case-equivalence",
+      "pattern": "R1",
+      "front": "　ＡＢＣ　",
+      "back": " Ä ",
+      "material": "R1\u001fabc\u001fä",
+      "expectedSha256Hex": "8fff37f7d16cd63d59d80d7df27d81c24f3b3bf054d2c5d799f96d2eea67df07"
+    }
+  ],
+  "cardKeyEquivalenceGroups": [
+    {
+      "id": "nfkc-space-case",
+      "expectedSha256Hex": "8fff37f7d16cd63d59d80d7df27d81c24f3b3bf054d2c5d799f96d2eea67df07",
+      "variants": [
+        { "pattern": "R1", "front": "　ＡＢＣ　", "back": " Ä " },
+        { "pattern": "R1", "front": "abc", "back": "ä" },
+        { "pattern": "R1", "front": "  AbC  ", "back": "  Ä  " }
+      ]
     }
   ]
 }
