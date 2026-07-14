@@ -82,6 +82,51 @@ interface RegisterUploadResult {
 	status: "ready";
 }
 
+interface FinalizeItemParams {
+	ownerUserId?: string;
+	batchId: string;
+	itemId: string;
+	illustrationId?: string;
+	internal?: boolean;
+}
+
+interface FinalizeItemResult {
+	itemId: string;
+	batchId: string;
+	status: "finalized" | "failed";
+	cardId?: string;
+	errorCode?: string;
+	batchStatus: "processing" | "completed";
+}
+
+interface MarkFailedParams {
+	ownerUserId?: string;
+	batchId: string;
+	itemId: string;
+	attemptKey: string;
+	errorCode: string;
+	safeDetail?: Readonly<Record<string, unknown>>;
+	internal?: boolean;
+}
+
+interface MarkFailedResult {
+	itemId: string;
+	batchId: string;
+	status: "failed";
+	errorCode: string;
+	batchStatus: "processing" | "completed";
+}
+
+interface FinalizeFixture {
+	marker: string;
+	deckId: string;
+	batchId: string;
+	itemId: string;
+	conceptId: string;
+	uploadId?: string;
+	illustrationId?: string;
+}
+
 interface CommitFixture {
 	marker: string;
 	deckId: string;
@@ -179,6 +224,50 @@ async function registerUpload(params: RegisterUploadParams): Promise<RegisterUpl
 	return result;
 }
 
+function finalizeItemSql(params: FinalizeItemParams): string {
+	const functionName = params.internal
+		? "public.finalize_import_item_internal"
+		: "public.finalize_import_item";
+	return `SELECT ${functionName}(
+		${sqlLiteral(params.ownerUserId ?? S10_ACTORS.ownerA.userId)}::uuid,
+		${sqlLiteral(params.batchId)}::uuid,
+		${sqlLiteral(params.itemId)}::uuid,
+		${nullableUuid(params.illustrationId)}
+	) AS result`;
+}
+
+async function finalizeItem(params: FinalizeItemParams): Promise<FinalizeItemResult> {
+	const rows = await database.query<{ result: FinalizeItemResult }>(
+		finalizeItemSql(params), params.internal ? undefined : { actor: S10_ACTORS.service }
+	);
+	const result = rows[0]?.result;
+	if (result === undefined) throw new Error("finalize did not return a result");
+	return result;
+}
+
+function markFailedSql(params: MarkFailedParams): string {
+	const functionName = params.internal
+		? "public.mark_import_item_failed_internal"
+		: "public.mark_import_item_failed";
+	return `SELECT ${functionName}(
+		${sqlLiteral(params.ownerUserId ?? S10_ACTORS.ownerA.userId)}::uuid,
+		${sqlLiteral(params.batchId)}::uuid,
+		${sqlLiteral(params.itemId)}::uuid,
+		${sqlLiteral(params.attemptKey)},
+		${sqlLiteral(params.errorCode)},
+		${sqlLiteral(JSON.stringify(params.safeDetail ?? {}))}::jsonb
+	) AS result`;
+}
+
+async function markFailed(params: MarkFailedParams): Promise<MarkFailedResult> {
+	const rows = await database.query<{ result: MarkFailedResult }>(
+		markFailedSql(params), params.internal ? undefined : { actor: S10_ACTORS.service }
+	);
+	const result = rows[0]?.result;
+	if (result === undefined) throw new Error("mark failed did not return a result");
+	return result;
+}
+
 async function createStorageObject(params: {
 	path: string;
 	ownerUserId?: string;
@@ -207,6 +296,76 @@ async function cleanupUploadFixtures(marker: string): Promise<void> {
 		WHERE bucket_id = 'illustrations' AND name LIKE ${sqlLiteral(`%${marker}%`)}
 	`);
 }
+
+async function createFinalizeFixture(
+	imageMode: "none" | "ai" | "upload" = "none"
+): Promise<FinalizeFixture> {
+	const marker = `finalize-${randomUUID()}`;
+	const conceptId = `concept-${marker}`;
+	let uploadId: string | undefined;
+	if (imageMode === "upload") {
+		const storagePath = `${S10_ACTORS.ownerA.userId}/${marker}.png`;
+		await createStorageObject({ path: storagePath, mimeType: "image/png", byteSize: 1024 });
+		uploadId = (await registerUpload({
+			uploadKey: `upload-${marker}`, storagePath, mimeType: "image/png", byteSize: 1024,
+		})).uploadId;
+	}
+	const item = {
+		clientItemId: `item-${marker}`, conceptId, pattern: "R1" as const,
+		front: `漢字 ${marker}`, back: `かんじ ${marker}`, tags: [` tag ${marker.slice(-8)} `],
+		image: imageMode === "upload"
+			? { mode: "upload" as const, uploadId: uploadId as string }
+			: imageMode === "ai" ? { mode: "ai" as const } : { mode: "none" as const },
+	};
+	const commitFixture = await createCommitFixture({ marker, items: [item] });
+	await createCommitReservation(commitFixture);
+	const committed = await commitImport({
+		source: "app_ai", idempotencyKey: commitFixture.idempotencyKey,
+		importRequestHash: commitFixture.importRequestHash, request: commitFixture.request,
+		cardReservationKey: commitFixture.reservationKey,
+	});
+	const [itemRow] = await database.query<{ id: string }>(`
+		SELECT id::text FROM public.ai_import_items WHERE batch_id = '${committed.batchId}'
+	`);
+	if (itemRow === undefined) throw new Error("finalize fixture item missing");
+	let illustrationId: string | undefined;
+	if (imageMode !== "none") {
+		illustrationId = randomUUID();
+		await database.execute(`
+			INSERT INTO public.illustrations (
+				id, owner_user_id, illustration_key, status, storage_path
+			) VALUES (
+				'${illustrationId}', '${S10_ACTORS.ownerA.userId}', 'illustration-${marker}',
+				'ready', '${S10_ACTORS.ownerA.userId}/${marker}-result.webp'
+			)
+		`);
+		await reserveUsage({
+			reservationKey: `illustration-${marker}`, kind: "illustration_concept",
+			source: "app_ai", generationRequestHash: fixedHash("7"),
+			units: imageMode === "ai" ? 1 : 0, batchId: committed.batchId,
+			itemId: itemRow.id, conceptId, testNow: "2049-01-01T00:00:00Z",
+		});
+	}
+	return {
+		marker, deckId: commitFixture.deckId, batchId: committed.batchId,
+		itemId: itemRow.id, conceptId, uploadId, illustrationId,
+	};
+}
+
+async function cleanupFinalizeFixture(fixture: FinalizeFixture): Promise<void> {
+	await cleanupCommitFixtures([fixture.marker]);
+	await database.execute(`DELETE FROM public.illustrations WHERE illustration_key LIKE ${sqlLiteral(`%${fixture.marker}%`)}`);
+	await cleanupUploadFixtures(fixture.marker);
+}
+
+const finalizeSnapshotQueries = (fixture: FinalizeFixture) => [
+	{ name: "cards", sql: `SELECT id::text, illustration_key FROM public.cards WHERE owner_user_id='${S10_ACTORS.ownerA.userId}' AND (front_text LIKE '%${fixture.marker}%' OR back_text LIKE '%${fixture.marker}%') ORDER BY id` },
+	{ name: "deckCards", sql: `SELECT card_id::text FROM public.deck_cards WHERE deck_id='${fixture.deckId}' ORDER BY card_id` },
+	{ name: "cardTags", sql: `SELECT card_id::text, tag_id::text FROM public.card_tags WHERE card_id IN (SELECT id FROM public.cards WHERE front_text LIKE '%${fixture.marker}%') ORDER BY card_id,tag_id` },
+	{ name: "item", sql: `SELECT status,result_card_id::text,error_code,error_detail,terminal_attempt_key,finalized_at,failed_at FROM public.ai_import_items WHERE id='${fixture.itemId}'` },
+	{ name: "upload", sql: `SELECT status,consumed_at FROM public.ai_uploads WHERE id=${nullableUuid(fixture.uploadId)}` },
+	{ name: "batch", sql: `SELECT status,finalized_count,failed_count,completed_at FROM public.ai_import_batches WHERE id='${fixture.batchId}'` },
+] as const;
 
 async function createCommitFixture(options: {
 	marker?: string;
@@ -1738,37 +1897,218 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 		// @category: integration
 		// @dependency: finalize_import_item
 		// @complexity: high
-		it.todo("IT-FINALIZE-01: committed itemからprivate card/deck_card/card_tags/resultを1 transactionで作成しownerを一致させる");
+		it("IT-FINALIZE-01: committed itemからprivate card/deck_card/card_tags/resultを1 transactionで作成しownerを一致させる", async () => {
+			const fixture = await createFinalizeFixture();
+			try {
+				const [order] = await database.query<Record<"resultCardLock" | "advisory" | "illustration" | "batch" | "item" | "actualIllustration" | "deck" | "upload" | "reservation" | "relation", number>>(`
+					WITH source AS (SELECT pg_get_functiondef('public.finalize_import_item_internal(uuid,uuid,uuid,uuid)'::regprocedure) AS definition)
+					SELECT strpos(definition,'PERFORM 1\n    FROM public.cards AS result_cards')::int "resultCardLock",
+						strpos(definition,'pg_advisory_xact_lock')::int advisory,
+						strpos(definition,'FROM public.illustrations AS illustrations')::int illustration,
+						strpos(definition,'SELECT batches.* INTO locked_batch')::int batch,
+						strpos(definition,'SELECT items.* INTO locked_item')::int item,
+						strpos(definition,'SELECT result_cards.illustration_key INTO existing_result_illustration_key')::int "actualIllustration",
+						strpos(definition,'FROM public.decks AS decks')::int deck,
+						strpos(definition,'FROM public.ai_uploads AS uploads')::int upload,
+						strpos(definition,'FROM public.ai_quota_reservations AS reservations')::int reservation,
+						strpos(definition,'INSERT INTO public.deck_cards')::int relation FROM source
+				`);
+				const positions = order === undefined ? [] : [order.advisory, order.illustration, order.batch, order.item, order.deck, order.upload, order.reservation, order.relation];
+				expect(positions.every((value) => value > 0)).toBe(true);
+				expect(positions).toEqual([...positions].sort((a, b) => a - b));
+				expect(order?.resultCardLock).toBeGreaterThan(0);
+				expect(order?.resultCardLock).toBeLessThan(order?.advisory ?? 0);
+				expect(order?.actualIllustration).toBeGreaterThan(order?.item ?? Number.MAX_SAFE_INTEGER);
+				expect(order?.actualIllustration).toBeLessThan(order?.deck ?? 0);
+
+				const result = await finalizeItem({ batchId: fixture.batchId, itemId: fixture.itemId });
+				expect(result).toMatchObject({ status: "finalized", batchStatus: "completed", cardId: expect.any(String) });
+				const [row] = await database.query<Record<string, unknown>>(`
+					SELECT cards.owner_user_id::text owner, cards.visibility, cards.front_text front,
+						cards.back_text back, cards.card_key, items.card_key item_key,
+						count(DISTINCT deck_cards.card_id)::int deck_links,
+						count(DISTINCT card_tags.tag_id)::int tag_links,
+						items.status item_status, batches.status batch_status,
+						batches.finalized_count::int finalized, batches.failed_count::int failed
+					FROM public.ai_import_items items
+					JOIN public.ai_import_batches batches ON batches.id=items.batch_id
+					JOIN public.cards cards ON cards.id=items.result_card_id
+					LEFT JOIN public.deck_cards ON deck_cards.card_id=cards.id AND deck_cards.deck_id=batches.target_deck_id
+					LEFT JOIN public.card_tags ON card_tags.card_id=cards.id
+					WHERE items.id='${fixture.itemId}'
+					GROUP BY cards.id,items.id,batches.id
+				`);
+				expect(row).toEqual(expect.objectContaining({ owner: S10_ACTORS.ownerA.userId, visibility: "private", front: `漢字 ${fixture.marker}`, back: `かんじ ${fixture.marker}`, deck_links: 1, tag_links: 1, item_status: "finalized", batch_status: "completed", finalized: 1, failed: 0 }));
+				expect(row?.card_key).toBe(row?.item_key);
+			} finally { await cleanupFinalizeFixture(fixture); }
+		});
 
 		// @category: integration
 		// @dependency: finalize_import_item, upload relation
 		// @complexity: high
-		it.todo("IT-FINALIZE-02: image modeに応じ同owner ready illustrationを検証しuploadを同transactionで一度だけconsumedにする");
+		it("IT-FINALIZE-02: image modeに応じ同owner ready illustrationを検証しuploadを同transactionで一度だけconsumedにする", async () => {
+			const ai = await createFinalizeFixture("ai");
+			const upload = await createFinalizeFixture("upload");
+			const crossOwner = randomUUID();
+			const pending = randomUUID();
+			const otherReady = randomUUID();
+			try {
+				await database.execute(`INSERT INTO public.illustrations(id,owner_user_id,illustration_key,status,storage_path) VALUES
+					('${crossOwner}','${S10_ACTORS.ownerB.userId}','cross-${ai.marker}','ready','cross'),
+					('${pending}','${S10_ACTORS.ownerA.userId}','pending-${ai.marker}','pending',NULL),
+					('${otherReady}','${S10_ACTORS.ownerA.userId}','other-${ai.marker}','ready','other')`);
+				const before = await captureS10Snapshot(database, finalizeSnapshotQueries(ai));
+				for (const [illustrationId, state] of [[crossOwner, "P1003"], [pending, "P1008"]] as const) {
+					expect((await database.captureError(finalizeItemSql({ batchId: ai.batchId, itemId: ai.itemId, illustrationId }), { actor: S10_ACTORS.service })).sqlState).toBe(state);
+					expect(await captureS10Snapshot(database, finalizeSnapshotQueries(ai))).toEqual(before);
+				}
+				await finalizeItem({ batchId: ai.batchId, itemId: ai.itemId, illustrationId: ai.illustrationId });
+				expect((await database.captureError(finalizeItemSql({batchId:ai.batchId,itemId:ai.itemId,illustrationId:otherReady}),{actor:S10_ACTORS.service})).sqlState).toBe("P1008");
+				await finalizeItem({ batchId: upload.batchId, itemId: upload.itemId, illustrationId: upload.illustrationId });
+				expect(await database.query<{ mode:string; illustration:string; uploadStatus:string|null; units:number|null; quotaStatus:string|null }>(`
+					SELECT items.image_mode mode,cards.illustration_key illustration,uploads.status "uploadStatus",
+						reservations.units, reservations.status "quotaStatus"
+					FROM public.ai_import_items items JOIN public.cards ON cards.id=items.result_card_id
+					LEFT JOIN public.ai_uploads uploads ON uploads.id=items.upload_id
+					LEFT JOIN public.ai_quota_reservations reservations ON reservations.item_id=items.id AND reservations.kind='illustration_concept'
+					WHERE items.id IN('${ai.itemId}','${upload.itemId}') ORDER BY items.image_mode
+				`)).toEqual([
+					{ mode:"ai", illustration:`illustration-${ai.marker}`, uploadStatus:null, units:1, quotaStatus:"reserved" },
+					{ mode:"upload", illustration:`illustration-${upload.marker}`, uploadStatus:"consumed", units:0, quotaStatus:"exempt" },
+				]);
+			} finally {
+				await database.execute(`DELETE FROM public.illustrations WHERE id IN('${crossOwner}','${pending}','${otherReady}')`);
+				await cleanupFinalizeFixture(ai); await cleanupFinalizeFixture(upload);
+			}
+		});
 
 		// @category: edge-case
 		// @dependency: finalize idempotency, parallel clients
 		// @complexity: high
-		it.todo("IT-FINALIZE-03: 同一itemの再実行と並行finalizeが同じcard IDを返し全副作用を1回分に保つ");
+		it("IT-FINALIZE-03: 同一itemの再実行と並行finalizeが同じcard IDを返し全副作用を1回分に保つ", async () => {
+			const fixture = await createFinalizeFixture();
+			const imageFixture = await createFinalizeFixture("ai");
+			try {
+				const params = { batchId: fixture.batchId, itemId: fixture.itemId };
+				const results = await Promise.all([createS10DbClient(),createS10DbClient()].map(async client => (await client.query<{result:FinalizeItemResult}>(finalizeItemSql(params),{actor:S10_ACTORS.service}))[0]?.result));
+				expect(results[0]).toEqual(results[1]);
+				expect(await finalizeItem(params)).toEqual(results[0]);
+				expect((await database.captureError(finalizeItemSql(params),{actor:S10_ACTORS.ownerA})).sqlState).toBe("42501");
+				expect((await database.captureError(finalizeItemSql({...params,internal:true}),{actor:S10_ACTORS.service})).sqlState).toBe("42501");
+				expect(await database.query<{cards:number;decks:number;tags:number;finalized:number}>(`
+					SELECT (SELECT count(*)::int FROM public.cards WHERE front_text LIKE '%${fixture.marker}%') cards,
+					(SELECT count(*)::int FROM public.deck_cards WHERE deck_id='${fixture.deckId}') decks,
+					(SELECT count(*)::int FROM public.card_tags WHERE card_id=(SELECT result_card_id FROM public.ai_import_items WHERE id='${fixture.itemId}')) tags,
+					(SELECT finalized_count::int FROM public.ai_import_batches WHERE id='${fixture.batchId}') finalized
+				`)).toEqual([{cards:1,decks:1,tags:1,finalized:1}]);
+
+				await finalizeItem({ batchId: imageFixture.batchId, itemId: imageFixture.itemId, illustrationId: imageFixture.illustrationId });
+				const changedIllustrationKey = `changed-${imageFixture.marker}`;
+				const updater = createS10DbClient();
+				const retry = createS10DbClient();
+				const updating = updater.execute(`
+					BEGIN;
+					UPDATE public.cards SET illustration_key='${changedIllustrationKey}'
+					WHERE id=(SELECT result_card_id FROM public.ai_import_items WHERE id='${imageFixture.itemId}');
+					SELECT pg_sleep(0.15);
+					COMMIT;
+				`);
+				await new Promise((resolve) => setTimeout(resolve, 25));
+				const retryError = await retry.captureError(finalizeItemSql({
+					batchId: imageFixture.batchId,
+					itemId: imageFixture.itemId,
+					illustrationId: imageFixture.illustrationId,
+				}), { actor: S10_ACTORS.service });
+				await updating;
+				expect(retryError.sqlState).toBe("P1008");
+			} finally {
+				await cleanupFinalizeFixture(fixture);
+				await cleanupFinalizeFixture(imageFixture);
+			}
+		});
 
 		// @category: edge-case
 		// @dependency: private partial unique, finalize duplicate mapper
 		// @complexity: high
-		it.todo("IT-FINALIZE-04: commit後finalize前にowner重複が作られた場合itemだけをDUPLICATE_EXISTING failedへ確定する");
+		it("IT-FINALIZE-04: commit後finalize前にowner重複が作られた場合itemだけをDUPLICATE_EXISTING failedへ確定する", async () => {
+			const fixture = await createFinalizeFixture();
+			try {
+				await database.execute(`INSERT INTO public.cards(owner_user_id,visibility,skill,pattern,front_text,back_text,card_key)
+					SELECT owner_user_id,'private',skill,pattern,front_text,back_text,card_key FROM public.ai_import_items WHERE id='${fixture.itemId}'`);
+				const result = await finalizeItem({batchId:fixture.batchId,itemId:fixture.itemId});
+				expect(result).toMatchObject({status:"failed",errorCode:"DUPLICATE_EXISTING",batchStatus:"completed"});
+				expect(await database.query<Record<string,unknown>>(`SELECT items.status,items.error_code,items.result_card_id,
+					batches.failed_count::int failed,batches.finalized_count::int finalized,
+					(SELECT count(*)::int FROM public.deck_cards WHERE deck_id=batches.target_deck_id) deck_links,
+					(SELECT count(*)::int FROM public.card_tags WHERE card_id IN(SELECT id FROM public.cards WHERE front_text LIKE '%${fixture.marker}%')) tag_links
+					FROM public.ai_import_items items JOIN public.ai_import_batches batches ON batches.id=items.batch_id WHERE items.id='${fixture.itemId}'`)).toEqual([expect.objectContaining({status:"failed",error_code:"DUPLICATE_EXISTING",result_card_id:null,failed:1,finalized:0,deck_links:0,tag_links:0})]);
+			} finally { await cleanupFinalizeFixture(fixture); }
+		});
 
 		// @category: edge-case
 		// @dependency: finalize failpoints
 		// @complexity: high
-		it.todo("IT-FINALIZE-05: card/relation/upload/item各区間のfailpointで全変更をrollbackしcardだけを残さない");
+		it("IT-FINALIZE-05: card/relation/upload/item各区間のfailpointで全変更をrollbackしcardだけを残さない", async () => {
+			const fixture = await createFinalizeFixture("upload");
+			try {
+				for (const failpoint of ["finalize_after_card","finalize_after_deck_card","finalize_after_card_tags","finalize_after_upload","finalize_after_item"]) {
+					const before=await captureS10Snapshot(database,finalizeSnapshotQueries(fixture));
+					const error=await database.captureError(finalizeItemSql({batchId:fixture.batchId,itemId:fixture.itemId,illustrationId:fixture.illustrationId}),{actor:S10_ACTORS.service,failpoint});
+					expect(error.sqlState).toBe("P1008");
+					expect(await captureS10Snapshot(database,finalizeSnapshotQueries(fixture))).toEqual(before);
+				}
+				await finalizeItem({batchId:fixture.batchId,itemId:fixture.itemId,illustrationId:fixture.illustrationId});
+			} finally { await cleanupFinalizeFixture(fixture); }
+		});
 
 		// @category: integration
 		// @dependency: mark_import_item_failed
 		// @complexity: high
-		it.todo("IT-FAIL-01: committed/processing itemをsafe allow-list errorでfailedにしbatch counts/statusを同transactionで再集計する");
+		it("IT-FAIL-01: committed/processing itemをsafe allow-list errorでfailedにしbatch counts/statusを同transactionで再集計する", async () => {
+			const committed=await createFinalizeFixture(); const processing=await createFinalizeFixture("ai");
+			const aggregate=await createCommitFixture({marker:`aggregate-${randomUUID()}`});
+			try {
+				for(const fixture of [committed,processing]){
+					const result=await markFailed({batchId:fixture.batchId,itemId:fixture.itemId,attemptKey:`attempt-${fixture.marker}`,errorCode:"PROVIDER_ERROR",safeDetail:{stage:"illustration",retryable:false}});
+					expect(result).toMatchObject({status:"failed",batchStatus:"completed"});
+					expect(await database.query<Record<string,unknown>>(`SELECT items.status,items.result_card_id,items.deleted_card_id,items.error_code,items.error_detail,batches.status batch_status,batches.finalized_count::int finalized,batches.failed_count::int failed,(batches.completed_at IS NOT NULL) completed FROM public.ai_import_items items JOIN public.ai_import_batches batches ON batches.id=items.batch_id WHERE items.id='${fixture.itemId}'`)).toEqual([expect.objectContaining({status:"failed",result_card_id:null,deleted_card_id:null,error_code:"PROVIDER_ERROR",error_detail:{stage:"illustration",retryable:false},batch_status:"completed",finalized:0,failed:1,completed:true})]);
+				}
+				await createCommitReservation(aggregate);
+				const aggregateBatch=await commitImport({source:"app_ai",idempotencyKey:aggregate.idempotencyKey,importRequestHash:aggregate.importRequestHash,request:aggregate.request,cardReservationKey:aggregate.reservationKey});
+				const aggregateItems=await database.query<{id:string}>(`SELECT id::text FROM public.ai_import_items WHERE batch_id='${aggregateBatch.batchId}' ORDER BY ordinal`);
+				const first=aggregateItems[0]?.id, second=aggregateItems[1]?.id;
+				if(first===undefined||second===undefined) throw new Error("aggregate items missing");
+				expect((await markFailed({batchId:aggregateBatch.batchId,itemId:first,attemptKey:`attempt-${aggregate.marker}`,errorCode:"TIMEOUT"})).batchStatus).toBe("processing");
+				expect((await finalizeItem({batchId:aggregateBatch.batchId,itemId:second})).batchStatus).toBe("completed");
+				expect(await database.query<Record<string,unknown>>(`SELECT status,finalized_count::int finalized,failed_count::int failed,(completed_at IS NOT NULL) completed FROM public.ai_import_batches WHERE id='${aggregateBatch.batchId}'`)).toEqual([{status:"completed",finalized:1,failed:1,completed:true}]);
+			} finally { await cleanupFinalizeFixture(committed); await cleanupFinalizeFixture(processing); await cleanupCommitFixtures([aggregate.marker]); }
+		});
 
 		// @category: edge-case
 		// @dependency: mark_import_item_failed idempotency
 		// @complexity: high
-		it.todo("IT-FAIL-02: 同attempt/error再送は同じ結果、別attemptまたはterminal itemはCONFLICTとなりprovider本文/stackを保存しない");
+		it("IT-FAIL-02: 同attempt/error再送は同じ結果、別attemptまたはterminal itemはCONFLICTとなりprovider本文/stackを保存しない", async () => {
+			const fixture=await createFinalizeFixture();
+			const params={batchId:fixture.batchId,itemId:fixture.itemId,attemptKey:`attempt-${fixture.marker}`,errorCode:"PROVIDER_ERROR",safeDetail:{stage:"illustration",retryable:true}};
+			try {
+				for(const invalid of [
+					{...params,errorCode:"RAW_PROVIDER_BODY"},
+					{...params,safeDetail:{stack:`stack-${fixture.marker}`,providerBody:`body-${fixture.marker}`}},
+				]) expect((await database.captureError(markFailedSql(invalid),{actor:S10_ACTORS.service})).sqlState).toBe("P1000");
+				const first=await markFailed(params); expect(await markFailed(params)).toEqual(first);
+				for(const conflict of [
+					{...params,attemptKey:`other-${fixture.marker}`},
+					{...params,errorCode:"STORAGE_ERROR"},
+					{...params,safeDetail:{stage:"storage",retryable:true}},
+				]) expect((await database.captureError(markFailedSql(conflict),{actor:S10_ACTORS.service})).sqlState).toBe("P1008");
+				expect((await database.captureError(finalizeItemSql({batchId:fixture.batchId,itemId:fixture.itemId}),{actor:S10_ACTORS.service})).sqlState).toBe("P1008");
+				expect((await database.captureError(markFailedSql(params),{actor:S10_ACTORS.ownerA})).sqlState).toBe("42501");
+				expect((await database.captureError(markFailedSql({...params,internal:true}),{actor:S10_ACTORS.service})).sqlState).toBe("42501");
+				const [stored]=await database.query<{text:string}>(`SELECT error_detail::text text FROM public.ai_import_items WHERE id='${fixture.itemId}'`);
+				expect(stored?.text).toBe('{"stage": "illustration", "retryable": true}');
+				expect(stored?.text).not.toContain(fixture.marker);
+			} finally { await cleanupFinalizeFixture(fixture); }
+		});
 	});
 
 	describe("active guard・review reset・undo (AC-07/08)", () => {

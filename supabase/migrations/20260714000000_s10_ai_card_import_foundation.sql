@@ -1662,6 +1662,398 @@ BEGIN
 END;
 $$;
 
+CREATE FUNCTION public.ai_recount_import_batch(
+  p_owner_user_id uuid,
+  p_batch_id uuid
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE v_finalized_count integer;
+DECLARE v_failed_count integer;
+DECLARE v_processing_count integer;
+DECLARE v_requested_count integer;
+DECLARE next_status text;
+BEGIN
+  SELECT count(*) FILTER (WHERE items.status = 'finalized'),
+    count(*) FILTER (WHERE items.status = 'failed'),
+    count(*) FILTER (WHERE items.status = 'processing')
+  INTO v_finalized_count, v_failed_count, v_processing_count
+  FROM public.ai_import_items AS items
+  WHERE items.batch_id = p_batch_id AND items.owner_user_id = p_owner_user_id;
+
+  SELECT batches.requested_card_count INTO STRICT v_requested_count
+  FROM public.ai_import_batches AS batches
+  WHERE batches.id = p_batch_id AND batches.owner_user_id = p_owner_user_id;
+
+  next_status := CASE
+    WHEN v_finalized_count + v_failed_count = v_requested_count THEN 'completed'
+    WHEN v_finalized_count + v_failed_count + v_processing_count > 0 THEN 'processing'
+    ELSE 'committed'
+  END;
+  UPDATE public.ai_import_batches
+  SET finalized_count = v_finalized_count,
+      failed_count = v_failed_count,
+      status = next_status,
+      completed_at = CASE
+        WHEN next_status = 'completed' THEN COALESCE(completed_at, statement_timestamp())
+        ELSE NULL
+      END
+  WHERE id = p_batch_id AND owner_user_id = p_owner_user_id;
+
+  RETURN jsonb_build_object(
+    'status', next_status, 'finalizedCount', v_finalized_count,
+    'failedCount', v_failed_count, 'terminalCount', v_finalized_count + v_failed_count
+  );
+END;
+$$;
+
+CREATE FUNCTION public.finalize_import_item_internal(
+  p_owner_user_id uuid,
+  p_batch_id uuid,
+  p_item_id uuid,
+  p_illustration_id uuid DEFAULT NULL
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE initial_item public.ai_import_items%ROWTYPE;
+DECLARE locked_batch public.ai_import_batches%ROWTYPE;
+DECLARE locked_item public.ai_import_items%ROWTYPE;
+DECLARE locked_deck_owner uuid;
+DECLARE locked_upload_owner uuid;
+DECLARE locked_upload_status text;
+DECLARE illustration_owner uuid;
+DECLARE illustration_status text;
+DECLARE illustration_key text;
+DECLARE illustration_storage_path text;
+DECLARE reservation public.ai_quota_reservations%ROWTYPE;
+DECLARE card_reservation_found boolean := false;
+DECLARE illustration_reservation_found boolean := false;
+DECLARE duplicate_card_id uuid;
+DECLARE created_card_id uuid;
+DECLARE existing_result_illustration_key text;
+DECLARE batch_summary jsonb;
+DECLARE failed_constraint text;
+BEGIN
+  SELECT items.* INTO initial_item
+  FROM public.ai_import_items AS items
+  WHERE items.id = p_item_id AND items.batch_id = p_batch_id;
+  IF NOT FOUND OR initial_item.owner_user_id IS DISTINCT FROM p_owner_user_id THEN
+    PERFORM public.ai_raise_import_error('DECK_NOT_FOUND');
+  END IF;
+  IF initial_item.result_card_id IS NOT NULL THEN
+    -- Existing result cards are the first row-lock class in the Design lock matrix.
+    -- Lock the row now, but read mutable retry state only after the item is locked.
+    PERFORM 1
+    FROM public.cards AS result_cards
+    WHERE result_cards.id = initial_item.result_card_id
+      AND result_cards.owner_user_id = p_owner_user_id
+      AND result_cards.visibility = 'private'
+    FOR UPDATE;
+    IF NOT FOUND THEN
+      PERFORM public.ai_raise_import_error('DECK_NOT_FOUND');
+    END IF;
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtextextended(
+    p_owner_user_id::text || chr(31) || 'card-key' || chr(31) || initial_item.card_key, 1011
+  ));
+
+  IF p_illustration_id IS NOT NULL THEN
+    SELECT illustrations.owner_user_id, illustrations.status,
+      illustrations.illustration_key, illustrations.storage_path
+    INTO illustration_owner, illustration_status, illustration_key, illustration_storage_path
+    FROM public.illustrations AS illustrations
+    WHERE illustrations.id = p_illustration_id
+    FOR UPDATE;
+    IF NOT FOUND OR illustration_owner IS DISTINCT FROM p_owner_user_id THEN
+      PERFORM public.ai_raise_import_error('DECK_NOT_FOUND');
+    END IF;
+  END IF;
+
+  SELECT batches.* INTO locked_batch
+  FROM public.ai_import_batches AS batches
+  WHERE batches.id = p_batch_id AND batches.owner_user_id = p_owner_user_id
+  FOR UPDATE;
+  IF NOT FOUND THEN PERFORM public.ai_raise_import_error('DECK_NOT_FOUND'); END IF;
+
+  SELECT items.* INTO locked_item
+  FROM public.ai_import_items AS items
+  WHERE items.id = p_item_id AND items.batch_id = p_batch_id
+    AND items.owner_user_id = p_owner_user_id
+  FOR UPDATE;
+  IF NOT FOUND OR locked_item.card_key IS DISTINCT FROM initial_item.card_key THEN
+    PERFORM public.ai_raise_import_error('DECK_NOT_FOUND');
+  END IF;
+  IF initial_item.result_card_id IS NOT NULL AND
+     locked_item.result_card_id IS DISTINCT FROM initial_item.result_card_id THEN
+    PERFORM public.ai_raise_import_error('CONFLICT');
+  END IF;
+  IF initial_item.result_card_id IS NOT NULL THEN
+    SELECT result_cards.illustration_key INTO existing_result_illustration_key
+    FROM public.cards AS result_cards
+    WHERE result_cards.id = locked_item.result_card_id
+      AND result_cards.owner_user_id = p_owner_user_id;
+    IF NOT FOUND THEN
+      PERFORM public.ai_raise_import_error('DECK_NOT_FOUND');
+    END IF;
+  END IF;
+
+  SELECT decks.owner_user_id INTO locked_deck_owner
+  FROM public.decks AS decks
+  WHERE decks.id = locked_batch.target_deck_id
+  FOR UPDATE;
+  IF NOT FOUND OR locked_deck_owner IS DISTINCT FROM p_owner_user_id THEN
+    PERFORM public.ai_raise_import_error('DECK_NOT_FOUND');
+  END IF;
+
+  IF locked_item.upload_id IS NOT NULL THEN
+    SELECT uploads.owner_user_id, uploads.status
+    INTO locked_upload_owner, locked_upload_status
+    FROM public.ai_uploads AS uploads
+    WHERE uploads.id = locked_item.upload_id
+    FOR UPDATE;
+    IF NOT FOUND OR locked_upload_owner IS DISTINCT FROM p_owner_user_id THEN
+      PERFORM public.ai_raise_import_error('DECK_NOT_FOUND');
+    END IF;
+    IF locked_upload_status IS DISTINCT FROM 'ready' AND NOT (
+      locked_item.status = 'finalized' AND locked_upload_status = 'consumed'
+    ) THEN
+      PERFORM public.ai_raise_import_error('CONFLICT');
+    END IF;
+  END IF;
+
+  FOR reservation IN
+    SELECT reservations.*
+    FROM public.ai_quota_reservations AS reservations
+    WHERE reservations.owner_user_id = p_owner_user_id AND (
+      (reservations.kind = 'card_generation' AND reservations.batch_id = p_batch_id AND
+       reservations.reservation_key = locked_batch.card_reservation_key) OR
+      (reservations.kind = 'illustration_concept' AND reservations.batch_id = p_batch_id AND
+       reservations.item_id = p_item_id)
+    )
+    ORDER BY reservations.id
+    FOR UPDATE
+  LOOP
+    IF reservation.kind = 'card_generation' THEN
+      card_reservation_found := true;
+    ELSE
+      illustration_reservation_found := true;
+      IF reservation.reservation_key IS DISTINCT FROM locked_item.illustration_reservation_key OR
+         reservation.concept_id IS DISTINCT FROM locked_item.concept_id OR
+         reservation.source IS DISTINCT FROM locked_batch.source OR
+         reservation.provider_started_at IS NULL THEN
+        PERFORM public.ai_raise_import_error('CONFLICT');
+      END IF;
+    END IF;
+  END LOOP;
+  IF NOT card_reservation_found THEN PERFORM public.ai_raise_import_error('CONFLICT'); END IF;
+
+  IF locked_item.image_mode = 'none' THEN
+    IF p_illustration_id IS NOT NULL THEN PERFORM public.ai_raise_import_error('CONFLICT'); END IF;
+    illustration_key := NULL;
+  ELSE
+    IF p_illustration_id IS NULL OR illustration_status IS DISTINCT FROM 'ready' OR
+       illustration_storage_path IS NULL OR NOT illustration_reservation_found OR
+       locked_item.status NOT IN ('processing','finalized') THEN
+      PERFORM public.ai_raise_import_error('CONFLICT');
+    END IF;
+  END IF;
+
+  IF locked_item.status = 'finalized' THEN
+    IF initial_item.result_card_id IS NOT NULL AND
+       existing_result_illustration_key IS DISTINCT FROM illustration_key THEN
+      PERFORM public.ai_raise_import_error('CONFLICT');
+    END IF;
+    RETURN jsonb_build_object(
+      'itemId', locked_item.id, 'batchId', locked_batch.id, 'status', 'finalized',
+      'cardId', locked_item.result_card_id, 'batchStatus', locked_batch.status
+    );
+  END IF;
+  IF locked_item.status IN ('failed', 'deleted', 'undone') THEN
+    PERFORM public.ai_raise_import_error('CONFLICT');
+  END IF;
+  IF locked_item.status NOT IN ('committed', 'processing') THEN
+    PERFORM public.ai_raise_import_error('CONFLICT');
+  END IF;
+
+  SELECT cards.id INTO duplicate_card_id
+  FROM public.cards AS cards
+  WHERE cards.owner_user_id = p_owner_user_id AND cards.visibility = 'private'
+    AND cards.card_key = locked_item.card_key
+  LIMIT 1;
+  IF duplicate_card_id IS NOT NULL THEN
+    UPDATE public.ai_import_items SET status='failed', error_code='DUPLICATE_EXISTING',
+      error_detail=jsonb_build_object('itemId',locked_item.client_item_id), failed_at=statement_timestamp()
+    WHERE id=p_item_id;
+    batch_summary := public.ai_recount_import_batch(p_owner_user_id,p_batch_id);
+    RETURN jsonb_build_object(
+      'itemId',p_item_id,'batchId',p_batch_id,'status','failed',
+      'errorCode','DUPLICATE_EXISTING','batchStatus',batch_summary->>'status'
+    );
+  END IF;
+
+  PERFORM public.ai_enable_internal_context();
+  BEGIN
+    INSERT INTO public.cards (
+      owner_user_id,visibility,skill,pattern,front_text,back_text,illustration_key,card_key
+    ) VALUES (
+      p_owner_user_id,'private',locked_item.skill,locked_item.pattern,
+      locked_item.front_text,locked_item.back_text,illustration_key,locked_item.card_key
+    ) RETURNING id INTO STRICT created_card_id;
+  EXCEPTION WHEN unique_violation THEN
+    GET STACKED DIAGNOSTICS failed_constraint = CONSTRAINT_NAME;
+    IF failed_constraint = 'cards_private_owner_card_key_uidx' THEN
+      UPDATE public.ai_import_items SET status='failed',error_code='DUPLICATE_EXISTING',
+        error_detail=jsonb_build_object('itemId',locked_item.client_item_id),failed_at=statement_timestamp()
+      WHERE id=p_item_id;
+      batch_summary := public.ai_recount_import_batch(p_owner_user_id,p_batch_id);
+      RETURN jsonb_build_object(
+        'itemId',p_item_id,'batchId',p_batch_id,'status','failed',
+        'errorCode','DUPLICATE_EXISTING','batchStatus',batch_summary->>'status'
+      );
+    END IF;
+    RAISE;
+  END;
+  IF current_setting('app.s10_failpoint',true)='finalize_after_card' THEN
+    PERFORM public.ai_raise_import_error('CONFLICT');
+  END IF;
+
+  INSERT INTO public.deck_cards(deck_id,card_id) VALUES(locked_batch.target_deck_id,created_card_id);
+  IF current_setting('app.s10_failpoint',true)='finalize_after_deck_card' THEN
+    PERFORM public.ai_raise_import_error('CONFLICT');
+  END IF;
+  INSERT INTO public.card_tags(owner_user_id,card_id,tag_id)
+  SELECT p_owner_user_id,created_card_id,item_tags.tag_id
+  FROM public.ai_import_item_tags AS item_tags WHERE item_tags.item_id=p_item_id
+  ORDER BY item_tags.tag_id;
+  IF current_setting('app.s10_failpoint',true)='finalize_after_card_tags' THEN
+    PERFORM public.ai_raise_import_error('CONFLICT');
+  END IF;
+  IF locked_item.upload_id IS NOT NULL THEN
+    UPDATE public.ai_uploads SET status='consumed',consumed_at=statement_timestamp()
+    WHERE id=locked_item.upload_id;
+  END IF;
+  IF current_setting('app.s10_failpoint',true)='finalize_after_upload' THEN
+    PERFORM public.ai_raise_import_error('CONFLICT');
+  END IF;
+  UPDATE public.ai_import_items SET status='finalized',result_card_id=created_card_id,
+    finalized_at=statement_timestamp(),error_code=NULL,error_detail='{}'::jsonb,terminal_attempt_key=NULL
+  WHERE id=p_item_id;
+  IF current_setting('app.s10_failpoint',true)='finalize_after_item' THEN
+    PERFORM public.ai_raise_import_error('CONFLICT');
+  END IF;
+  batch_summary := public.ai_recount_import_batch(p_owner_user_id,p_batch_id);
+  RETURN jsonb_build_object(
+    'itemId',p_item_id,'batchId',p_batch_id,'status','finalized','cardId',created_card_id,
+    'batchStatus',batch_summary->>'status'
+  );
+END;
+$$;
+
+CREATE FUNCTION public.finalize_import_item(
+  p_owner_user_id uuid,p_batch_id uuid,p_item_id uuid,p_illustration_id uuid DEFAULT NULL
+)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+BEGIN
+  IF current_setting('request.jwt.claim.role',true) IS DISTINCT FROM 'service_role' THEN
+    PERFORM public.ai_raise_import_error('UNAUTHORIZED');
+  END IF;
+  IF p_owner_user_id IS NULL OR p_batch_id IS NULL OR p_item_id IS NULL THEN
+    PERFORM public.ai_raise_import_error('VALIDATION_ERROR',jsonb_build_object('field','finalize','rule','arguments'));
+  END IF;
+  RETURN public.finalize_import_item_internal(p_owner_user_id,p_batch_id,p_item_id,p_illustration_id);
+END;
+$$;
+
+CREATE FUNCTION public.mark_import_item_failed_internal(
+  p_owner_user_id uuid,p_batch_id uuid,p_item_id uuid,p_attempt_key text,
+  p_error_code text,p_safe_detail jsonb DEFAULT '{}'::jsonb
+)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE locked_batch public.ai_import_batches%ROWTYPE;
+DECLARE locked_item public.ai_import_items%ROWTYPE;
+DECLARE reservation_id uuid;
+DECLARE batch_summary jsonb;
+BEGIN
+  IF p_owner_user_id IS NULL OR p_batch_id IS NULL OR p_item_id IS NULL OR
+     p_attempt_key IS NULL OR char_length(p_attempt_key) NOT BETWEEN 1 AND 128 OR
+     p_error_code IS NULL OR
+     p_error_code NOT IN ('PROVIDER_ERROR','STORAGE_ERROR','TIMEOUT','INTERNAL_ERROR') OR
+     p_safe_detail IS NULL OR jsonb_typeof(p_safe_detail)<>'object' OR
+     octet_length(p_safe_detail::text)>512 OR EXISTS(
+       SELECT 1 FROM jsonb_object_keys(p_safe_detail) keys(key)
+       WHERE keys.key NOT IN ('stage','retryable')
+     ) OR (p_safe_detail?'stage' AND (
+       jsonb_typeof(p_safe_detail->'stage')<>'string' OR
+       p_safe_detail->>'stage' NOT IN ('card_generation','illustration','storage','finalize')
+     )) OR (p_safe_detail?'retryable' AND jsonb_typeof(p_safe_detail->'retryable')<>'boolean') THEN
+    PERFORM public.ai_raise_import_error('VALIDATION_ERROR',jsonb_build_object('field','failure','rule','safe'));
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtextextended(
+    p_owner_user_id::text||chr(31)||'attempt'||chr(31)||p_attempt_key,1014
+  ));
+  SELECT batches.* INTO locked_batch FROM public.ai_import_batches AS batches
+  WHERE batches.id=p_batch_id AND batches.owner_user_id=p_owner_user_id FOR UPDATE;
+  IF NOT FOUND THEN PERFORM public.ai_raise_import_error('DECK_NOT_FOUND'); END IF;
+  SELECT items.* INTO locked_item FROM public.ai_import_items AS items
+  WHERE items.id=p_item_id AND items.batch_id=p_batch_id AND items.owner_user_id=p_owner_user_id
+  FOR UPDATE;
+  IF NOT FOUND THEN PERFORM public.ai_raise_import_error('DECK_NOT_FOUND'); END IF;
+
+  FOR reservation_id IN SELECT reservations.id
+    FROM public.ai_quota_reservations AS reservations
+    WHERE reservations.owner_user_id=p_owner_user_id AND
+      (reservations.batch_id=p_batch_id OR reservations.item_id=p_item_id)
+    ORDER BY reservations.id FOR UPDATE
+  LOOP NULL; END LOOP;
+
+  IF locked_item.status='failed' THEN
+    IF locked_item.terminal_attempt_key IS NOT DISTINCT FROM p_attempt_key AND
+       locked_item.error_code IS NOT DISTINCT FROM p_error_code AND
+       locked_item.error_detail IS NOT DISTINCT FROM p_safe_detail THEN
+      RETURN jsonb_build_object(
+        'itemId',p_item_id,'batchId',p_batch_id,'status','failed','errorCode',p_error_code,
+        'batchStatus',locked_batch.status
+      );
+    END IF;
+    PERFORM public.ai_raise_import_error('CONFLICT');
+  END IF;
+  IF locked_item.status NOT IN ('committed','processing') THEN
+    PERFORM public.ai_raise_import_error('CONFLICT');
+  END IF;
+  UPDATE public.ai_import_items SET status='failed',error_code=p_error_code,
+    error_detail=p_safe_detail,terminal_attempt_key=p_attempt_key,failed_at=statement_timestamp()
+  WHERE id=p_item_id;
+  batch_summary:=public.ai_recount_import_batch(p_owner_user_id,p_batch_id);
+  RETURN jsonb_build_object(
+    'itemId',p_item_id,'batchId',p_batch_id,'status','failed','errorCode',p_error_code,
+    'batchStatus',batch_summary->>'status'
+  );
+END;
+$$;
+
+CREATE FUNCTION public.mark_import_item_failed(
+  p_owner_user_id uuid,p_batch_id uuid,p_item_id uuid,p_attempt_key text,
+  p_error_code text,p_safe_detail jsonb DEFAULT '{}'::jsonb
+)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+BEGIN
+  IF current_setting('request.jwt.claim.role',true) IS DISTINCT FROM 'service_role' THEN
+    PERFORM public.ai_raise_import_error('UNAUTHORIZED');
+  END IF;
+  RETURN public.mark_import_item_failed_internal(
+    p_owner_user_id,p_batch_id,p_item_id,p_attempt_key,p_error_code,p_safe_detail
+  );
+END;
+$$;
+
 CREATE FUNCTION public.reserve_provider_usage_internal(
   p_owner_user_id uuid,
   p_reservation_key text,
@@ -2019,6 +2411,15 @@ ALTER FUNCTION public.register_ai_upload_internal(uuid, text, text, text, text, 
   OWNER TO s10_migration_owner;
 ALTER FUNCTION public.register_ai_upload(uuid, text, text, text, text, bigint)
   OWNER TO s10_migration_owner;
+ALTER FUNCTION public.ai_recount_import_batch(uuid, uuid) OWNER TO s10_migration_owner;
+ALTER FUNCTION public.finalize_import_item_internal(uuid, uuid, uuid, uuid)
+  OWNER TO s10_migration_owner;
+ALTER FUNCTION public.finalize_import_item(uuid, uuid, uuid, uuid)
+  OWNER TO s10_migration_owner;
+ALTER FUNCTION public.mark_import_item_failed_internal(uuid, uuid, uuid, text, text, jsonb)
+  OWNER TO s10_migration_owner;
+ALTER FUNCTION public.mark_import_item_failed(uuid, uuid, uuid, text, text, jsonb)
+  OWNER TO s10_migration_owner;
 ALTER FUNCTION public.reserve_provider_usage_internal(
   uuid, text, text, text, text, integer, uuid, uuid, text, timestamptz
 ) OWNER TO s10_migration_owner;
@@ -2041,6 +2442,9 @@ REVOKE ALL ON FUNCTION public.ai_enable_internal_context(),
   public.ai_prepare_import_request(jsonb),
   public.commit_import_internal(uuid, text, text, text, jsonb, text),
   public.register_ai_upload_internal(uuid, text, text, text, text, bigint),
+  public.ai_recount_import_batch(uuid, uuid),
+  public.finalize_import_item_internal(uuid, uuid, uuid, uuid),
+  public.mark_import_item_failed_internal(uuid, uuid, uuid, text, text, jsonb),
   public.reserve_provider_usage_internal(
     uuid, text, text, text, text, integer, uuid, uuid, text, timestamptz
   )
@@ -2052,6 +2456,9 @@ REVOKE ALL ON FUNCTION public.commit_import(uuid, text, text, text, jsonb, text)
   FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.register_ai_upload(uuid, text, text, text, text, bigint)
   FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.finalize_import_item(uuid, uuid, uuid, uuid),
+  public.mark_import_item_failed(uuid, uuid, uuid, text, text, jsonb)
+  FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.ai_normalize_display_text(text),
   public.ai_normalize_key_text(text), public.ai_compute_card_key(text, text, text)
   TO authenticated, service_role;
@@ -2062,11 +2469,16 @@ GRANT EXECUTE ON FUNCTION public.commit_import(uuid, text, text, text, jsonb, te
   TO service_role;
 GRANT EXECUTE ON FUNCTION public.register_ai_upload(uuid, text, text, text, text, bigint)
   TO service_role;
+GRANT EXECUTE ON FUNCTION public.finalize_import_item(uuid, uuid, uuid, uuid),
+  public.mark_import_item_failed(uuid, uuid, uuid, text, text, jsonb)
+  TO service_role;
 GRANT USAGE ON SCHEMA extensions TO authenticated, service_role;
 
 GRANT USAGE ON SCHEMA public, extensions, storage TO s10_migration_owner;
-GRANT SELECT, UPDATE ON public.cards TO s10_migration_owner;
+GRANT SELECT, INSERT, UPDATE ON public.cards TO s10_migration_owner;
 GRANT SELECT, INSERT, UPDATE ON public.decks TO s10_migration_owner;
+GRANT SELECT, UPDATE ON public.illustrations TO s10_migration_owner;
+GRANT SELECT, INSERT ON public.deck_cards, public.card_tags TO s10_migration_owner;
 GRANT SELECT ON public.study_sessions TO s10_migration_owner;
 GRANT SELECT, DELETE ON public.review_states TO s10_migration_owner;
 GRANT SELECT, INSERT, UPDATE ON public.ai_import_batches, public.ai_import_items,
