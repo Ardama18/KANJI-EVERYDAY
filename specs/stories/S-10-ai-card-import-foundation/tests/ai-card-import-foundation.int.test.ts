@@ -20,6 +20,125 @@ import {
 
 const database = createS10DbClient();
 
+type QuotaKind = "card_generation" | "illustration_concept";
+type ImportSource = "app_ai" | "remote_mcp";
+
+interface ReserveUsageParams {
+	ownerUserId?: string;
+	reservationKey: string;
+	kind: QuotaKind;
+	source: ImportSource;
+	generationRequestHash: string;
+	units: number;
+	batchId?: string;
+	itemId?: string;
+	conceptId?: string;
+	testNow?: string;
+}
+
+interface ReservationResult {
+	reservationId: string;
+	status: "reserved" | "exempt";
+	usageDate: string;
+	units: number;
+	providerStartedAt: string;
+}
+
+const fixedHash = (marker: string): string => marker.repeat(64).slice(0, 64);
+
+const nullableText = (value: string | undefined): string =>
+	value === undefined ? "NULL" : sqlLiteral(value);
+
+const nullableUuid = (value: string | undefined): string =>
+	value === undefined ? "NULL" : `${sqlLiteral(value)}::uuid`;
+
+function reserveUsageSql(params: ReserveUsageParams): string {
+	const argumentsSql = [
+		`${sqlLiteral(params.ownerUserId ?? S10_ACTORS.ownerA.userId)}::uuid`,
+		sqlLiteral(params.reservationKey),
+		sqlLiteral(params.kind),
+		sqlLiteral(params.source),
+		sqlLiteral(params.generationRequestHash),
+		String(params.units),
+		nullableUuid(params.batchId),
+		nullableUuid(params.itemId),
+		nullableText(params.conceptId),
+	];
+	const functionName =
+		params.testNow === undefined
+			? "public.reserve_provider_usage"
+			: "public.reserve_provider_usage_internal";
+	if (params.testNow !== undefined) {
+		argumentsSql.push(`${sqlLiteral(params.testNow)}::timestamptz`);
+	}
+	return `SELECT ${functionName}(${argumentsSql.join(", ")}) AS result`;
+}
+
+async function reserveUsage(params: ReserveUsageParams): Promise<ReservationResult> {
+	const rows = await database.query<{ result: ReservationResult }>(reserveUsageSql(params));
+	const result = rows[0]?.result;
+	if (result === undefined) {
+		throw new Error("quota reservation did not return a result");
+	}
+	return result;
+}
+
+async function createIllustrationQuotaFixture(params: {
+	source: ImportSource;
+	imageMode: "ai" | "upload";
+}): Promise<{ batchId: string; itemId: string; conceptId: string; uploadId?: string }> {
+	const batchId = randomUUID();
+	const itemId = randomUUID();
+	const conceptId = `concept-${randomUUID()}`;
+	const uploadId = params.imageMode === "upload" ? randomUUID() : undefined;
+	if (uploadId !== undefined) {
+		await database.execute(`
+			INSERT INTO public.ai_uploads (
+				id, owner_user_id, upload_key, purpose, storage_path, mime_type, byte_size
+			) VALUES (
+				'${uploadId}', '${S10_ACTORS.ownerA.userId}', '${uploadId}',
+				'card_illustration', '${S10_ACTORS.ownerA.userId}/${uploadId}.png',
+				'image/png', 1024
+			)
+		`);
+	}
+	await database.execute(`
+		INSERT INTO public.ai_import_batches (
+			id, owner_user_id, source, idempotency_key, import_request_hash,
+			requested_card_count, requested_image_count
+		) VALUES (
+			'${batchId}', '${S10_ACTORS.ownerA.userId}', '${params.source}', '${batchId}',
+			'${fixedHash("d")}', 1, 1
+		);
+		INSERT INTO public.ai_import_items (
+			id, owner_user_id, batch_id, client_item_id, concept_id, ordinal,
+			pattern, skill, front_text, back_text, card_key, image_mode, upload_id
+		) VALUES (
+			'${itemId}', '${S10_ACTORS.ownerA.userId}', '${batchId}', 'item-${itemId}',
+			'${conceptId}', 0, 'R1', 'reading', 'front-${itemId}', 'back',
+			'${randomUUID().replaceAll("-", "").repeat(2)}', '${params.imageMode}',
+			${nullableUuid(uploadId)}
+		)
+	`);
+	return { batchId, itemId, conceptId, uploadId };
+}
+
+async function cleanupQuotaFixtures(
+	reservationKeys: readonly string[],
+	batchIds: readonly string[] = [],
+	uploadIds: readonly string[] = []
+): Promise<void> {
+	const keys = reservationKeys.map(sqlLiteral).join(", ");
+	const batches = batchIds.map((id) => `${sqlLiteral(id)}::uuid`).join(", ");
+	const uploads = uploadIds.map((id) => `${sqlLiteral(id)}::uuid`).join(", ");
+	await database.execute(`
+		${reservationKeys.length === 0 ? "" : `DELETE FROM public.ai_quota_reservations WHERE reservation_key IN (${keys});`}
+		${batchIds.length === 0 ? "" : `DELETE FROM public.ai_import_batches WHERE id IN (${batches});`}
+		${uploadIds.length === 0 ? "" : `DELETE FROM public.ai_uploads WHERE id IN (${uploads});`}
+		DELETE FROM public.ai_usage_daily WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}'
+	`);
+}
+
 beforeAll(async () => {
 	await ensureS10ActorFixtures(database);
 });
@@ -75,8 +194,30 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 		// @dependency: RPC grants
 		// @complexity: high
 		it("IT-RLS-04: authenticatedからcommit/reserve/upload/finalize/mark-failed wrapperを直接実行できない", async () => {
-			const rows = await database.query<{ n: number }>(`SELECT count(*)::int n FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname IN ('commit_import','reserve_provider_usage','register_ai_upload','finalize_import_item','mark_import_item_failed')`);
-			expect(rows).toEqual([{ n: 0 }]);
+			const rows = await database.query<{
+				name: string;
+				authenticated: boolean;
+				service: boolean;
+			}>(`
+				SELECT p.proname AS name,
+					has_function_privilege('authenticated', p.oid, 'EXECUTE') AS authenticated,
+					has_function_privilege('service_role', p.oid, 'EXECUTE') AS service
+				FROM pg_proc AS p
+				WHERE p.pronamespace = 'public'::regnamespace
+					AND p.proname IN (
+						'commit_import', 'reserve_provider_usage', 'register_ai_upload',
+						'finalize_import_item', 'mark_import_item_failed'
+					)
+				ORDER BY p.proname
+			`);
+			expect(rows).toContainEqual({
+				name: "reserve_provider_usage",
+				authenticated: false,
+				service: true,
+			});
+			for (const row of rows) {
+				expect(row.authenticated).toBe(false);
+			}
 		});
 
 		// @category: integration
@@ -501,42 +642,394 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 		// @category: edge-case
 		// @dependency: test-only DB clock wrapper, reserve_provider_usage
 		// @complexity: high
-		it.todo("IT-QUOTA-01: JST 23:59:59と00:00:00で別usage_dateに予約しclient日付を参照しない");
+		it("IT-QUOTA-01: JST 23:59:59と00:00:00で別usage_dateに予約しclient日付を参照しない", async () => {
+			const beforeKey = `quota-jst-before-${randomUUID()}`;
+			const afterKey = `quota-jst-after-${randomUUID()}`;
+			const productionKey = `quota-jst-production-${randomUUID()}`;
+			try {
+				const before = await reserveUsage({
+					reservationKey: beforeKey,
+					kind: "card_generation",
+					source: "app_ai",
+					generationRequestHash: fixedHash("1"),
+					units: 1,
+					testNow: "2040-01-01T14:59:59Z",
+				});
+				const after = await reserveUsage({
+					reservationKey: afterKey,
+					kind: "card_generation",
+					source: "app_ai",
+					generationRequestHash: fixedHash("2"),
+					units: 1,
+					testNow: "2040-01-01T15:00:00Z",
+				});
+				expect(before.usageDate).toBe("2040-01-01");
+				expect(after.usageDate).toBe("2040-01-02");
+
+				const productionRows = await database.query<{ result: ReservationResult }>(
+					reserveUsageSql({
+						reservationKey: productionKey,
+						kind: "card_generation",
+						source: "app_ai",
+						generationRequestHash: fixedHash("3"),
+						units: 1,
+					}),
+					{ actor: S10_ACTORS.service, testClock: "1999-01-01T00:00:00Z" }
+				);
+				expect(productionRows[0]?.result.usageDate).not.toBe("1999-01-01");
+			} finally {
+				await cleanupQuotaFixtures([beforeKey, afterKey, productionKey]);
+			}
+		});
 
 		// @category: edge-case
 		// @dependency: ai_usage_daily row lock
 		// @complexity: high
-		it.todo("IT-QUOTA-02: card generation 199+1を成功、199+2をQUOTA_EXCEEDEDにして成功合計200以下を守る");
+		it("IT-QUOTA-02: card generation 199+1を成功、199+2をQUOTA_EXCEEDEDにして成功合計200以下を守る", async () => {
+			const successKey = `quota-card-success-${randomUUID()}`;
+			const rejectedKey = `quota-card-rejected-${randomUUID()}`;
+			const now = "2041-01-01T00:00:00Z";
+			try {
+				await database.execute(`
+					INSERT INTO public.ai_usage_daily (
+						owner_user_id, usage_date, generated_card_count
+					) VALUES ('${S10_ACTORS.ownerA.userId}', '2041-01-01', 199)
+				`);
+				await reserveUsage({
+					reservationKey: successKey,
+					kind: "card_generation",
+					source: "app_ai",
+					generationRequestHash: fixedHash("4"),
+					units: 1,
+					testNow: now,
+				});
+				const rejected = await database.captureError(
+					reserveUsageSql({
+						reservationKey: rejectedKey,
+						kind: "card_generation",
+						source: "app_ai",
+						generationRequestHash: fixedHash("5"),
+						units: 2,
+						testNow: now,
+					})
+				);
+				expect(rejected.sqlState).toBe("P1005");
+				expect(JSON.parse(rejected.detail ?? "{}")).toEqual({
+					limit: 200,
+					current: 200,
+					requested: 2,
+					date: "2041-01-01",
+				});
+				expect(
+					await database.query<{ count: number }>(`
+						SELECT generated_card_count AS count FROM public.ai_usage_daily
+						WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}' AND usage_date = '2041-01-01'
+					`)
+				).toEqual([{ count: 200 }]);
+			} finally {
+				await cleanupQuotaFixtures([successKey, rejectedKey]);
+			}
+		});
 
 		// @category: edge-case
 		// @dependency: ai_usage_daily row lock
 		// @complexity: high
-		it.todo("IT-QUOTA-03: illustration concept 49+1を成功、49+2をQUOTA_EXCEEDEDにして成功合計50以下を守る");
+		it("IT-QUOTA-03: illustration concept 49+1を成功、49+2をQUOTA_EXCEEDEDにして成功合計50以下を守る", async () => {
+			const successKey = `quota-image-success-${randomUUID()}`;
+			const rejectedKey = `quota-image-rejected-${randomUUID()}`;
+			const successFixture = await createIllustrationQuotaFixture({ source: "app_ai", imageMode: "ai" });
+			const rejectedFixture = await createIllustrationQuotaFixture({ source: "app_ai", imageMode: "ai" });
+			try {
+				await database.execute(`
+					INSERT INTO public.ai_usage_daily (
+						owner_user_id, usage_date, generated_image_count
+					) VALUES ('${S10_ACTORS.ownerA.userId}', '2042-01-01', 49)
+				`);
+				await reserveUsage({
+					reservationKey: successKey,
+					kind: "illustration_concept",
+					source: "app_ai",
+					generationRequestHash: fixedHash("6"),
+					units: 1,
+					batchId: successFixture.batchId,
+					itemId: successFixture.itemId,
+					conceptId: successFixture.conceptId,
+					testNow: "2042-01-01T00:00:00Z",
+				});
+				const rejected = await database.captureError(
+					reserveUsageSql({
+						reservationKey: rejectedKey,
+						kind: "illustration_concept",
+						source: "app_ai",
+						generationRequestHash: fixedHash("7"),
+						units: 2,
+						batchId: rejectedFixture.batchId,
+						itemId: rejectedFixture.itemId,
+						conceptId: rejectedFixture.conceptId,
+						testNow: "2042-01-01T00:00:00Z",
+					})
+				);
+				expect(rejected.sqlState).toBe("P1005");
+				expect(
+					await database.query<{ count: number }>(`
+						SELECT generated_image_count AS count FROM public.ai_usage_daily
+						WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}' AND usage_date = '2042-01-01'
+					`)
+				).toEqual([{ count: 50 }]);
+			} finally {
+				await cleanupQuotaFixtures(
+					[successKey, rejectedKey],
+					[successFixture.batchId, rejectedFixture.batchId]
+				);
+			}
+		});
 
 		// @category: edge-case
 		// @dependency: parallel clients, advisory and row locks
 		// @complexity: high
-		it.todo("IT-QUOTA-04: 上限付近の異なるreservation並行実行で上限内要求だけ成功しoversubscriptionを0件にする");
+		it("IT-QUOTA-04: 上限付近の異なるreservation並行実行で上限内要求だけ成功しoversubscriptionを0件にする", async () => {
+			const firstKey = `quota-parallel-a-${randomUUID()}`;
+			const secondKey = `quota-parallel-b-${randomUUID()}`;
+			try {
+				await database.execute(`
+					INSERT INTO public.ai_usage_daily (
+						owner_user_id, usage_date, generated_card_count
+					) VALUES ('${S10_ACTORS.ownerA.userId}', '2043-01-01', 198)
+				`);
+				const requests = [firstKey, secondKey].map((reservationKey, index) =>
+					reserveUsageSql({
+						reservationKey,
+						kind: "card_generation",
+						source: "app_ai",
+						generationRequestHash: fixedHash(index === 0 ? "8" : "9"),
+						units: 2,
+						testNow: "2043-01-01T00:00:00Z",
+					})
+				);
+				const results = await Promise.allSettled(
+					requests.map((sql) => createS10DbClient().execute(sql))
+				);
+				expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+				expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+				expect(
+					await database.query<{ count: number }>(`
+						SELECT generated_card_count AS count FROM public.ai_usage_daily
+						WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}' AND usage_date = '2043-01-01'
+					`)
+				).toEqual([{ count: 200 }]);
+				expect(
+					await database.query<{ count: number }>(`
+						SELECT count(*)::int AS count FROM public.ai_quota_reservations
+						WHERE reservation_key IN ('${firstKey}', '${secondKey}')
+					`)
+				).toEqual([{ count: 1 }]);
+			} finally {
+				await cleanupQuotaFixtures([firstKey, secondKey]);
+			}
+		});
 
 		// @category: integration
 		// @dependency: reservation idempotency ledger
 		// @complexity: high
-		it.todo("IT-QUOTA-05: 同owner/key/kind/hash/units再送は同じreservationを返しusageを加算せず、差分再送はCONFLICTになる");
+		it("IT-QUOTA-05: 同owner/key/kind/hash/units再送は同じreservationを返しusageを加算せず、差分再送はCONFLICTになる", async () => {
+			const key = `quota-idempotent-${randomUUID()}`;
+			const request = {
+				reservationKey: key,
+				kind: "card_generation" as const,
+				source: "app_ai" as const,
+				generationRequestHash: fixedHash("a"),
+				units: 10,
+				testNow: "2044-01-01T00:00:00Z",
+			};
+			try {
+				const first = await reserveUsage(request);
+				const second = await reserveUsage(request);
+				expect(second).toEqual(first);
+				const conflict = await database.captureError(
+					reserveUsageSql({ ...request, generationRequestHash: fixedHash("b") })
+				);
+				expect(conflict).toMatchObject({ sqlState: "P1008", constraint: null });
+				expect(
+					await database.query<{ count: number }>(`
+						SELECT generated_card_count AS count FROM public.ai_usage_daily
+						WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}' AND usage_date = '2044-01-01'
+					`)
+				).toEqual([{ count: 10 }]);
+			} finally {
+				await cleanupQuotaFixtures([key]);
+			}
+		});
 
 		// @category: integration
 		// @dependency: trusted source/image mode
 		// @complexity: high
-		it.todo("IT-QUOTA-06: remote_mcp cardとupload imageをtrusted DB contextからunits 0 exemptとして記録する");
+		it("IT-QUOTA-06: remote_mcp cardとupload imageをtrusted DB contextからunits 0 exemptとして記録する", async () => {
+			const remoteKey = `quota-remote-${randomUUID()}`;
+			const uploadKey = `quota-upload-${randomUUID()}`;
+			const forgedCardKey = `quota-forged-card-${randomUUID()}`;
+			const forgedImageKey = `quota-forged-image-${randomUUID()}`;
+			const uploadFixture = await createIllustrationQuotaFixture({ source: "app_ai", imageMode: "upload" });
+			const aiFixture = await createIllustrationQuotaFixture({ source: "app_ai", imageMode: "ai" });
+			try {
+				const remote = await reserveUsage({
+					reservationKey: remoteKey,
+					kind: "card_generation",
+					source: "remote_mcp",
+					generationRequestHash: fixedHash("c"),
+					units: 0,
+					testNow: "2045-01-01T00:00:00Z",
+				});
+				const upload = await reserveUsage({
+					reservationKey: uploadKey,
+					kind: "illustration_concept",
+					source: "app_ai",
+					generationRequestHash: fixedHash("d"),
+					units: 0,
+					batchId: uploadFixture.batchId,
+					itemId: uploadFixture.itemId,
+					conceptId: uploadFixture.conceptId,
+					testNow: "2045-01-01T00:00:00Z",
+				});
+				expect(remote).toMatchObject({ status: "exempt", units: 0 });
+				expect(upload).toMatchObject({ status: "exempt", units: 0 });
+
+				const forgedCard = await database.captureError(
+					reserveUsageSql({
+						reservationKey: forgedCardKey,
+						kind: "card_generation",
+						source: "app_ai",
+						generationRequestHash: fixedHash("e"),
+						units: 0,
+						testNow: "2045-01-01T00:00:00Z",
+					})
+				);
+				const forgedImage = await database.captureError(
+					reserveUsageSql({
+						reservationKey: forgedImageKey,
+						kind: "illustration_concept",
+						source: "app_ai",
+						generationRequestHash: fixedHash("f"),
+						units: 0,
+						batchId: aiFixture.batchId,
+						itemId: aiFixture.itemId,
+						conceptId: aiFixture.conceptId,
+						testNow: "2045-01-01T00:00:00Z",
+					})
+				);
+				expect(forgedCard.sqlState).toBe("P1000");
+				expect(forgedImage.sqlState).toBe("P1000");
+				expect(
+					await database.query<{ cards: number; images: number }>(`
+						SELECT generated_card_count AS cards, generated_image_count AS images
+						FROM public.ai_usage_daily
+						WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}' AND usage_date = '2045-01-01'
+					`)
+				).toEqual([{ cards: 0, images: 0 }]);
+			} finally {
+				await cleanupQuotaFixtures(
+					[remoteKey, uploadKey, forgedCardKey, forgedImageKey],
+					[uploadFixture.batchId, aiFixture.batchId],
+					uploadFixture.uploadId === undefined ? [] : [uploadFixture.uploadId]
+				);
+			}
+		});
 
 		// @category: edge-case
 		// @dependency: provider_started_at transaction contract
 		// @complexity: medium
-		it.todo("IT-QUOTA-07: provider開始前の入力拒否は消費せず、開始済みreservationは後続成功/失敗でも返却しない");
+		it("IT-QUOTA-07: provider開始前の入力拒否は消費せず、開始済みreservationは後続成功/失敗でも返却しない", async () => {
+			const invalidKey = `quota-invalid-${randomUUID()}`;
+			const startedKey = `quota-started-${randomUUID()}`;
+			try {
+				const invalid = await database.captureError(
+					reserveUsageSql({
+						reservationKey: invalidKey,
+						kind: "card_generation",
+						source: "app_ai",
+						generationRequestHash: "not-a-hash",
+						units: 1,
+						testNow: "2046-01-01T00:00:00Z",
+					})
+				);
+				expect(invalid.sqlState).toBe("P1000");
+				const request = {
+					reservationKey: startedKey,
+					kind: "card_generation" as const,
+					source: "app_ai" as const,
+					generationRequestHash: fixedHash("0"),
+					units: 5,
+					testNow: "2046-01-01T00:00:00Z",
+				};
+				const started = await reserveUsage(request);
+				expect(started.providerStartedAt).toBeTruthy();
+				expect(await reserveUsage(request)).toEqual(started);
+				expect(
+					await database.query<{ count: number }>(`
+						SELECT generated_card_count AS count FROM public.ai_usage_daily
+						WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}' AND usage_date = '2046-01-01'
+					`)
+				).toEqual([{ count: 5 }]);
+			} finally {
+				await cleanupQuotaFixtures([invalidKey, startedKey]);
+			}
+		});
 
 		// @category: integration
 		// @dependency: reservation locking implementation
 		// @complexity: high
-		it.todo("IT-QUOTA-08: advisory→既存non-lock read→batch/item→usage→reservation順で同key並行を直列化する");
+		it("IT-QUOTA-08: advisory→既存non-lock read→batch/item→usage→reservation順で同key並行を直列化する", async () => {
+			const parallelKey = `quota-same-key-${randomUUID()}`;
+			const wrapperKey = `quota-wrapper-acl-${randomUUID()}`;
+			const request = {
+				reservationKey: parallelKey,
+				kind: "card_generation" as const,
+				source: "app_ai" as const,
+				generationRequestHash: fixedHash("9"),
+				units: 7,
+				testNow: "2047-01-01T00:00:00Z",
+			};
+			try {
+				const results = await Promise.all(
+					[createS10DbClient(), createS10DbClient()].map(async (client) => {
+						const rows = await client.query<{ result: ReservationResult }>(reserveUsageSql(request));
+						return rows[0]?.result;
+					})
+				);
+				expect(results[0]).toEqual(results[1]);
+				expect(
+					await database.query<{ usage: number; reservations: number }>(`
+						SELECT usage.generated_card_count AS usage,
+							count(reservations.id)::int AS reservations
+						FROM public.ai_usage_daily AS usage
+						LEFT JOIN public.ai_quota_reservations AS reservations
+							ON reservations.owner_user_id = usage.owner_user_id
+							AND reservations.usage_date = usage.usage_date
+							AND reservations.reservation_key = '${parallelKey}'
+						WHERE usage.owner_user_id = '${S10_ACTORS.ownerA.userId}'
+							AND usage.usage_date = '2047-01-01'
+						GROUP BY usage.generated_card_count
+					`)
+				).toEqual([{ usage: 7, reservations: 1 }]);
+
+				const authenticated = await database.captureError(
+					reserveUsageSql({
+						...request,
+						reservationKey: wrapperKey,
+						generationRequestHash: fixedHash("8"),
+						units: 1,
+						testNow: undefined,
+					}),
+					{ actor: S10_ACTORS.ownerA }
+				);
+				const serviceInternal = await database.captureError(reserveUsageSql(request), {
+					actor: S10_ACTORS.service,
+				});
+				expect(authenticated.sqlState).toBe("42501");
+				expect(serviceInternal.sqlState).toBe("42501");
+			} finally {
+				await cleanupQuotaFixtures([parallelKey, wrapperKey]);
+			}
+		});
 	});
 
 	describe("upload・finalize・failure primitive (AC-01/02/06)", () => {

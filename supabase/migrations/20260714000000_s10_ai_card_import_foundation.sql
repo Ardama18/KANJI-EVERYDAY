@@ -516,7 +516,13 @@ CREATE TABLE public.ai_quota_reservations (
     CHECK (concept_id IS NULL OR char_length(concept_id) BETWEEN 1 AND 64),
   CONSTRAINT ai_quota_reservations_status_check CHECK (status IN ('reserved', 'exempt')),
   CONSTRAINT ai_quota_reservations_status_units_check CHECK (
-    (status = 'reserved' AND source = 'app_ai' AND units BETWEEN 1 AND 200) OR
+    (
+      status = 'reserved' AND units BETWEEN 1 AND 200 AND
+      (
+        (kind = 'card_generation' AND source = 'app_ai') OR
+        kind = 'illustration_concept'
+      )
+    ) OR
     (status = 'exempt' AND units = 0)
   ),
   CONSTRAINT ai_quota_reservations_owner_key_kind_uq
@@ -794,7 +800,352 @@ $$;
 
 GRANT s10_migration_owner TO postgres;
 GRANT USAGE, CREATE ON SCHEMA public TO s10_migration_owner;
-GRANT USAGE ON SCHEMA auth, extensions TO s10_migration_owner;
+GRANT USAGE ON SCHEMA extensions TO s10_migration_owner;
+
+CREATE SCHEMA IF NOT EXISTS s10_private AUTHORIZATION s10_migration_owner;
+REVOKE ALL ON SCHEMA s10_private FROM PUBLIC, anon, authenticated, service_role;
+
+CREATE TABLE s10_private.internal_context_secret (
+  singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+  token text NOT NULL
+);
+ALTER TABLE s10_private.internal_context_secret ENABLE ROW LEVEL SECURITY;
+ALTER TABLE s10_private.internal_context_secret OWNER TO s10_migration_owner;
+REVOKE ALL ON s10_private.internal_context_secret FROM PUBLIC, anon, authenticated, service_role;
+INSERT INTO s10_private.internal_context_secret (singleton, token)
+VALUES (true, gen_random_uuid()::text);
+
+CREATE FUNCTION public.ai_enable_internal_context()
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE internal_token text;
+BEGIN
+  SELECT secrets.token
+  INTO STRICT internal_token
+  FROM s10_private.internal_context_secret AS secrets
+  WHERE secrets.singleton;
+
+  PERFORM set_config('app.s10_internal_token', internal_token, true);
+END;
+$$;
+
+CREATE FUNCTION public.ai_internal_context_active()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+  SELECT current_setting('app.s10_internal_token', true) = secrets.token
+  FROM s10_private.internal_context_secret AS secrets
+  WHERE secrets.singleton
+$$;
+
+CREATE FUNCTION public.ai_raise_import_error(
+  error_code text,
+  safe_detail jsonb DEFAULT '{}'::jsonb
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE error_state text;
+DECLARE allowed_keys text[];
+BEGIN
+  error_state := CASE error_code
+    WHEN 'VALIDATION_ERROR' THEN 'P1000'
+    WHEN 'DUPLICATE_IN_REQUEST' THEN 'P1001'
+    WHEN 'DUPLICATE_EXISTING' THEN 'P1002'
+    WHEN 'DECK_NOT_FOUND' THEN 'P1003'
+    WHEN 'DECK_AMBIGUOUS' THEN 'P1004'
+    WHEN 'QUOTA_EXCEEDED' THEN 'P1005'
+    WHEN 'ACTIVE_SESSION' THEN 'P1006'
+    WHEN 'CARD_MODIFIED' THEN 'P1007'
+    WHEN 'CONFLICT' THEN 'P1008'
+    WHEN 'UNAUTHORIZED' THEN '42501'
+    ELSE NULL
+  END;
+  allowed_keys := CASE error_code
+    WHEN 'VALIDATION_ERROR' THEN ARRAY['field', 'rule']
+    WHEN 'DUPLICATE_IN_REQUEST' THEN ARRAY['clientItemId']
+    WHEN 'DUPLICATE_EXISTING' THEN ARRAY['itemId']
+    WHEN 'DECK_AMBIGUOUS' THEN ARRAY['normalizedName']
+    WHEN 'QUOTA_EXCEEDED' THEN ARRAY['limit', 'current', 'requested', 'date']
+    WHEN 'ACTIVE_SESSION' THEN ARRAY['sessionId', 'deckId']
+    WHEN 'CARD_MODIFIED' THEN ARRAY['cardId']
+    ELSE ARRAY[]::text[]
+  END;
+
+  IF error_state IS NULL OR safe_detail IS NULL OR jsonb_typeof(safe_detail) <> 'object' OR
+     EXISTS (
+       SELECT 1
+       FROM jsonb_object_keys(safe_detail) AS detail_keys(key)
+       WHERE NOT (detail_keys.key = ANY(allowed_keys))
+     ) THEN
+    RAISE EXCEPTION USING
+      ERRCODE = 'P1000',
+      MESSAGE = 'S-10 request rejected';
+  END IF;
+
+  IF safe_detail = '{}'::jsonb THEN
+    RAISE EXCEPTION USING
+      ERRCODE = error_state,
+      MESSAGE = 'S-10 request rejected';
+  ELSE
+    RAISE EXCEPTION USING
+      ERRCODE = error_state,
+      MESSAGE = 'S-10 request rejected',
+      DETAIL = safe_detail::text;
+  END IF;
+END;
+$$;
+
+CREATE FUNCTION public.reserve_provider_usage_internal(
+  p_owner_user_id uuid,
+  p_reservation_key text,
+  p_kind text,
+  p_source text,
+  p_generation_request_hash text,
+  p_units integer,
+  p_batch_id uuid DEFAULT NULL,
+  p_item_id uuid DEFAULT NULL,
+  p_concept_id text DEFAULT NULL,
+  p_now timestamptz DEFAULT statement_timestamp()
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE existing_reservation public.ai_quota_reservations%ROWTYPE;
+DECLARE batch_source text;
+DECLARE item_image_mode text;
+DECLARE item_concept_id text;
+DECLARE item_status text;
+DECLARE item_reservation_key text;
+DECLARE effective_status text;
+DECLARE usage_day date;
+DECLARE current_card_count integer;
+DECLARE current_image_count integer;
+DECLARE quota_limit integer;
+DECLARE current_usage integer;
+DECLARE created_reservation public.ai_quota_reservations%ROWTYPE;
+DECLARE failed_constraint text;
+BEGIN
+  IF p_owner_user_id IS NULL THEN
+    PERFORM public.ai_raise_import_error('UNAUTHORIZED');
+  END IF;
+  IF p_reservation_key IS NULL OR char_length(p_reservation_key) NOT BETWEEN 1 AND 128 OR
+     p_kind NOT IN ('card_generation', 'illustration_concept') OR
+     p_source NOT IN ('app_ai', 'remote_mcp') OR
+     p_generation_request_hash !~ '^[0-9a-f]{64}$' OR
+     p_units IS NULL OR p_units NOT BETWEEN 0 AND 200 OR p_now IS NULL THEN
+    PERFORM public.ai_raise_import_error(
+      'VALIDATION_ERROR', jsonb_build_object('field', 'reservation', 'rule', 'invalid')
+    );
+  END IF;
+  IF p_kind = 'card_generation' AND (
+    p_batch_id IS NOT NULL OR p_item_id IS NOT NULL OR p_concept_id IS NOT NULL OR
+    (p_source = 'app_ai' AND p_units NOT BETWEEN 1 AND 200) OR
+    (p_source = 'remote_mcp' AND p_units <> 0)
+  ) THEN
+    PERFORM public.ai_raise_import_error(
+      'VALIDATION_ERROR', jsonb_build_object('field', 'cardGeneration', 'rule', 'trustedContext')
+    );
+  END IF;
+  IF p_kind = 'illustration_concept' AND (
+    p_batch_id IS NULL OR p_item_id IS NULL OR p_concept_id IS NULL OR
+    char_length(p_concept_id) NOT BETWEEN 1 AND 64 OR p_units > 50
+  ) THEN
+    PERFORM public.ai_raise_import_error(
+      'VALIDATION_ERROR', jsonb_build_object('field', 'illustration', 'rule', 'trustedContext')
+    );
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(
+    hashtextextended(
+      p_owner_user_id::text || chr(31) || p_reservation_key || chr(31) || p_kind,
+      1010
+    )
+  );
+
+  SELECT reservations.*
+  INTO existing_reservation
+  FROM public.ai_quota_reservations AS reservations
+  WHERE reservations.owner_user_id = p_owner_user_id
+    AND reservations.reservation_key = p_reservation_key
+    AND reservations.kind = p_kind;
+
+  IF FOUND THEN
+    IF existing_reservation.source IS DISTINCT FROM p_source OR
+       existing_reservation.generation_request_hash IS DISTINCT FROM p_generation_request_hash OR
+       existing_reservation.units IS DISTINCT FROM p_units OR
+       existing_reservation.batch_id IS DISTINCT FROM p_batch_id OR
+       existing_reservation.item_id IS DISTINCT FROM p_item_id OR
+       existing_reservation.concept_id IS DISTINCT FROM p_concept_id THEN
+      PERFORM public.ai_raise_import_error('CONFLICT');
+    END IF;
+    RETURN jsonb_build_object(
+      'reservationId', existing_reservation.id,
+      'status', existing_reservation.status,
+      'usageDate', existing_reservation.usage_date,
+      'units', existing_reservation.units,
+      'providerStartedAt', existing_reservation.provider_started_at
+    );
+  END IF;
+
+  IF p_kind = 'illustration_concept' THEN
+    SELECT batches.source
+    INTO batch_source
+    FROM public.ai_import_batches AS batches
+    WHERE batches.id = p_batch_id
+      AND batches.owner_user_id = p_owner_user_id
+    FOR UPDATE;
+    IF NOT FOUND OR batch_source IS DISTINCT FROM p_source THEN
+      PERFORM public.ai_raise_import_error('DECK_NOT_FOUND');
+    END IF;
+
+    SELECT items.image_mode, items.concept_id, items.status,
+      items.illustration_reservation_key
+    INTO item_image_mode, item_concept_id, item_status, item_reservation_key
+    FROM public.ai_import_items AS items
+    WHERE items.id = p_item_id
+      AND items.batch_id = p_batch_id
+      AND items.owner_user_id = p_owner_user_id
+    FOR UPDATE;
+    IF NOT FOUND OR item_concept_id IS DISTINCT FROM p_concept_id THEN
+      PERFORM public.ai_raise_import_error('DECK_NOT_FOUND');
+    END IF;
+    IF item_status NOT IN ('committed', 'processing') OR
+       (item_reservation_key IS NOT NULL AND item_reservation_key <> p_reservation_key) THEN
+      PERFORM public.ai_raise_import_error('CONFLICT');
+    END IF;
+
+    IF item_image_mode = 'ai' THEN
+      IF p_units NOT BETWEEN 1 AND 50 THEN
+        PERFORM public.ai_raise_import_error(
+          'VALIDATION_ERROR', jsonb_build_object('field', 'units', 'rule', 'aiIllustration')
+        );
+      END IF;
+      effective_status := 'reserved';
+    ELSIF item_image_mode = 'upload' THEN
+      IF p_units <> 0 THEN
+        PERFORM public.ai_raise_import_error(
+          'VALIDATION_ERROR', jsonb_build_object('field', 'units', 'rule', 'uploadExempt')
+        );
+      END IF;
+      effective_status := 'exempt';
+    ELSE
+      PERFORM public.ai_raise_import_error(
+        'VALIDATION_ERROR', jsonb_build_object('field', 'imageMode', 'rule', 'notReservable')
+      );
+    END IF;
+
+    UPDATE public.ai_import_items
+    SET status = 'processing', illustration_reservation_key = p_reservation_key
+    WHERE id = p_item_id;
+  ELSE
+    effective_status := CASE WHEN p_source = 'app_ai' THEN 'reserved' ELSE 'exempt' END;
+  END IF;
+
+  usage_day := (p_now AT TIME ZONE 'Asia/Tokyo')::date;
+  BEGIN
+    INSERT INTO public.ai_usage_daily (owner_user_id, usage_date)
+    VALUES (p_owner_user_id, usage_day)
+    ON CONFLICT (owner_user_id, usage_date) DO NOTHING;
+  EXCEPTION WHEN foreign_key_violation THEN
+    GET STACKED DIAGNOSTICS failed_constraint = CONSTRAINT_NAME;
+    IF failed_constraint = 'ai_usage_daily_owner_fkey' THEN
+      PERFORM public.ai_raise_import_error('UNAUTHORIZED');
+    END IF;
+    RAISE;
+  END;
+
+  SELECT usage.generated_card_count, usage.generated_image_count
+  INTO STRICT current_card_count, current_image_count
+  FROM public.ai_usage_daily AS usage
+  WHERE usage.owner_user_id = p_owner_user_id
+    AND usage.usage_date = usage_day
+  FOR UPDATE;
+
+  IF effective_status = 'reserved' THEN
+    IF p_kind = 'card_generation' THEN
+      quota_limit := 200;
+      current_usage := current_card_count;
+    ELSE
+      quota_limit := 50;
+      current_usage := current_image_count;
+    END IF;
+    IF current_usage + p_units > quota_limit THEN
+      PERFORM public.ai_raise_import_error(
+        'QUOTA_EXCEEDED',
+        jsonb_build_object(
+          'limit', quota_limit,
+          'current', current_usage,
+          'requested', p_units,
+          'date', usage_day::text
+        )
+      );
+    END IF;
+
+    UPDATE public.ai_usage_daily
+    SET generated_card_count = generated_card_count +
+          CASE WHEN p_kind = 'card_generation' THEN p_units ELSE 0 END,
+        generated_image_count = generated_image_count +
+          CASE WHEN p_kind = 'illustration_concept' THEN p_units ELSE 0 END
+    WHERE owner_user_id = p_owner_user_id AND usage_date = usage_day;
+  END IF;
+
+  INSERT INTO public.ai_quota_reservations (
+    owner_user_id, reservation_key, kind, source, generation_request_hash,
+    usage_date, batch_id, item_id, concept_id, units, status, provider_started_at
+  ) VALUES (
+    p_owner_user_id, p_reservation_key, p_kind, p_source, p_generation_request_hash,
+    usage_day, p_batch_id, p_item_id, p_concept_id, p_units, effective_status, p_now
+  )
+  RETURNING * INTO STRICT created_reservation;
+
+  RETURN jsonb_build_object(
+    'reservationId', created_reservation.id,
+    'status', created_reservation.status,
+    'usageDate', created_reservation.usage_date,
+    'units', created_reservation.units,
+    'providerStartedAt', created_reservation.provider_started_at
+  );
+END;
+$$;
+
+CREATE FUNCTION public.reserve_provider_usage(
+  p_owner_user_id uuid,
+  p_reservation_key text,
+  p_kind text,
+  p_source text,
+  p_generation_request_hash text,
+  p_units integer,
+  p_batch_id uuid DEFAULT NULL,
+  p_item_id uuid DEFAULT NULL,
+  p_concept_id text DEFAULT NULL
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+BEGIN
+  IF current_setting('request.jwt.claim.role', true) IS DISTINCT FROM 'service_role' THEN
+    PERFORM public.ai_raise_import_error('UNAUTHORIZED');
+  END IF;
+  RETURN public.reserve_provider_usage_internal(
+    p_owner_user_id, p_reservation_key, p_kind, p_source,
+    p_generation_request_hash, p_units, p_batch_id, p_item_id, p_concept_id,
+    statement_timestamp()
+  );
+END;
+$$;
 
 CREATE FUNCTION public.protect_public_cards()
 RETURNS trigger
@@ -898,6 +1249,15 @@ ALTER FUNCTION public.ai_session_card_ids(uuid, jsonb, jsonb, jsonb, jsonb) OWNE
 ALTER FUNCTION public.lock_study_session_cards() OWNER TO s10_migration_owner;
 ALTER FUNCTION public.guard_card_active_session() OWNER TO s10_migration_owner;
 ALTER FUNCTION public.reset_review_state_on_content_change() OWNER TO s10_migration_owner;
+ALTER FUNCTION public.ai_enable_internal_context() OWNER TO s10_migration_owner;
+ALTER FUNCTION public.ai_internal_context_active() OWNER TO s10_migration_owner;
+ALTER FUNCTION public.ai_raise_import_error(text, jsonb) OWNER TO s10_migration_owner;
+ALTER FUNCTION public.reserve_provider_usage_internal(
+  uuid, text, text, text, text, integer, uuid, uuid, text, timestamptz
+) OWNER TO s10_migration_owner;
+ALTER FUNCTION public.reserve_provider_usage(
+  uuid, text, text, text, text, integer, uuid, uuid, text
+) OWNER TO s10_migration_owner;
 
 REVOKE ALL ON FUNCTION public.ai_normalize_display_text(text),
   public.ai_normalize_key_text(text), public.ai_compute_card_key(text, text, text),
@@ -909,17 +1269,33 @@ REVOKE ALL ON FUNCTION public.ai_normalize_display_text(text),
   public.reset_review_state_on_content_change(),
   public.update_updated_at_column()
   FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.ai_enable_internal_context(),
+  public.ai_internal_context_active(), public.ai_raise_import_error(text, jsonb),
+  public.reserve_provider_usage_internal(
+    uuid, text, text, text, text, integer, uuid, uuid, text, timestamptz
+  )
+  FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.reserve_provider_usage(
+  uuid, text, text, text, text, integer, uuid, uuid, text
+) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.ai_normalize_display_text(text),
   public.ai_normalize_key_text(text), public.ai_compute_card_key(text, text, text)
   TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.reserve_provider_usage(
+  uuid, text, text, text, text, integer, uuid, uuid, text
+) TO service_role;
 GRANT USAGE ON SCHEMA extensions TO authenticated, service_role;
 
-GRANT USAGE ON SCHEMA public, auth, extensions TO s10_migration_owner;
+GRANT USAGE ON SCHEMA public, extensions TO s10_migration_owner;
 GRANT SELECT, UPDATE ON public.cards, public.decks TO s10_migration_owner;
 GRANT SELECT ON public.study_sessions TO s10_migration_owner;
 GRANT SELECT, DELETE ON public.review_states TO s10_migration_owner;
 GRANT SELECT ON public.ai_import_items,
   public.ai_import_item_tags TO s10_migration_owner;
+GRANT SELECT, UPDATE ON public.ai_import_batches, public.ai_import_items
+  TO s10_migration_owner;
+GRANT SELECT, INSERT, UPDATE ON public.ai_usage_daily, public.ai_quota_reservations
+  TO s10_migration_owner;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC, anon, authenticated, service_role;
 ALTER SCHEMA public OWNER TO s10_migration_owner;
 GRANT CREATE ON SCHEMA public TO s10_migration_owner;

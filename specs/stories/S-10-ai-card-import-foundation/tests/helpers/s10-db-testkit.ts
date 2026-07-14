@@ -26,6 +26,7 @@ export interface S10Snapshot {
 export interface S10DatabaseErrorDiagnostic {
 	readonly sqlState: string | null;
 	readonly constraint: string | null;
+	readonly detail?: string;
 }
 
 export interface S10DbClient {
@@ -278,7 +279,15 @@ async function capturePsqlError(
 					/CONSTRAINT NAME:\s+([^\s]+)/u.exec(stderr)?.[1] ??
 					/unique constraint "([^"]+)"/u.exec(stderr)?.[1] ??
 					null;
-				resolve({ sqlState, constraint });
+				const detail = /DETAIL:\s+([^\n]+)/u.exec(stderr)?.[1]?.trim() ?? null;
+				const diagnostic: S10DatabaseErrorDiagnostic = { sqlState, constraint };
+				if (detail !== null) {
+					Object.defineProperty(diagnostic, "detail", {
+						value: detail,
+						enumerable: false,
+					});
+				}
+				resolve(diagnostic);
 			}
 		);
 	});
