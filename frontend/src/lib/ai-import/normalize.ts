@@ -13,6 +13,9 @@ const FIXED_WHITE_SPACE_CODE_POINTS = new Set([
 ]);
 
 export function normalizeDisplayText(value: string): string {
+	if (!isUnicodeScalarText(value)) {
+		throw new TypeError("Text must contain only Unicode scalar values");
+	}
 	return value
 		.normalize("NFKC")
 		.replaceAll(/./gsu, (character) =>
@@ -20,6 +23,20 @@ export function normalizeDisplayText(value: string): string {
 		)
 		.replace(/ +/gu, " ")
 		.replace(/^ | $/gu, "");
+}
+
+export function isUnicodeScalarText(value: string): boolean {
+	for (let index = 0; index < value.length; index += 1) {
+		const codeUnit = value.charCodeAt(index);
+		if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+			const next = value.charCodeAt(index + 1);
+			if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+			index += 1;
+		} else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+			return false;
+		}
+	}
+	return true;
 }
 
 export function normalizeForKey(value: string): string {

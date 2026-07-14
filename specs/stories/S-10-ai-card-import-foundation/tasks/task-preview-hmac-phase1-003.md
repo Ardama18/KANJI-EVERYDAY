@@ -37,7 +37,7 @@ npm --prefix frontend run test:s10:unit -- -t "UT-HMAC"
 
 ### 3. Refactor / Phase gate
 
-- [x] Phase 1対象Unit 22件をまとめて回帰し、TODO inventoryがUnit残10/Integration 61/E2E 13であることを確認する。
+- [x] Phase 1対象Unit 22件をまとめて回帰し、TODO inventoryがUnit残10/Integration 62/E2E 13であることを確認する。
 - [x] token/secret/payload本文がerror/logへ出ないことをassertする。
 - [x] 品質チェックを実行し、lint/typecheck/対象Unitを修正ループ後に再実行する（`/quality-fixer`未公開のため同等コマンドで代替）。
 
@@ -69,7 +69,7 @@ npm --prefix frontend run lint
   "reason": "/quality-fixer frontend はこのセッションで未公開のため、同等の必須コマンドを直接実行",
   "checks": {
     "phase1Unit": "22 passed, 10 todo",
-    "inventory": "Unit 10 todo / Integration 61 todo / Contract E2E 13 todo",
+    "inventory": "Unit 10 todo / Integration 62 todo / Contract E2E 13 todo",
     "typecheck": "passed",
     "lint": "passed"
   }

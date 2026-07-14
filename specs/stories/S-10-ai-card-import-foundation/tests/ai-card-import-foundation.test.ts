@@ -177,6 +177,9 @@ describe("S-10 AIカード登録基盤 Unit契約", () => {
 				request.items[0].clientItemId = id;
 				await expectSchemaRules(request, ["client_item_id_length"]);
 			}
+			const invalidScalar = validImportRequest();
+			invalidScalar.items[0].clientItemId = "bad\ud800";
+			await expectSchemaRules(invalidScalar, ["unicode_scalar"]);
 			for (const id of ["c", "c".repeat(64)]) {
 				const request = validImportRequest();
 				request.items[0].conceptId = id;
@@ -246,10 +249,13 @@ describe("S-10 AIカード登録基盤 Unit契約", () => {
 		// @category: edge-case
 		// @dependency: schema.ts, Han-script fixture
 		// @complexity: medium
-		it("UT-SCHEMA-05: 漢字側にUnicode Script=Han文字がないitemを拒否し、astral planeのHan文字を受理する", async () => {
+		it("UT-SCHEMA-05: 漢字側にUnicode Script=Han相当文字がないitemを拒否し、全拡張面と日本語用追加文字を受理する", async () => {
 			const astral = validImportRequest();
-			astral.items[0].front = "𠀀";
+			astral.items[0].front = "𱍐";
 			expect((await validateImportRequest(astral)).success).toBe(true);
+			const iterationMark = validImportRequest();
+			iterationMark.items[0].front = "〆";
+			expect((await validateImportRequest(iterationMark)).success).toBe(true);
 			const invalid = validImportRequest();
 			invalid.items[0].front = "かなABC";
 			await expectSchemaRules(invalid, ["han_required"]);
@@ -271,6 +277,10 @@ describe("S-10 AIカード登録基盤 Unit契約", () => {
 			const mismatch = structuredClone(pair);
 			mismatch.items[1].front = "ちがう";
 			await expectSchemaRules(mismatch, ["concept_pair_mismatch"]);
+			const caseOnlyMismatch = structuredClone(pair);
+			caseOnlyMismatch.items[0].back = "ABC";
+			caseOnlyMismatch.items[1].front = "abc";
+			await expectSchemaRules(caseOnlyMismatch, ["concept_pair_mismatch"]);
 			const duplicate = validImportRequest(2);
 			duplicate.items[1].conceptId = duplicate.items[0].conceptId;
 			await expectSchemaRules(duplicate, ["duplicate_concept_pattern"]);
@@ -309,6 +319,7 @@ describe("S-10 AIカード登録基盤 Unit契約", () => {
 		it("UT-SCHEMA-08: deckのid/name/createを排他的unionとして検証し、複数指定または未指定を拒否する", async () => {
 			for (const deck of [
 				{ id: "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE" },
+				{ id: "01901901-9d3d-7cc2-98c8-3b4a13f994a2" },
 				{ name: " 既存　デッキ " },
 				{ create: { name: " 新規　デッキ " } },
 			]) {
@@ -572,6 +583,9 @@ describe("S-10 AIカード登録基盤 Unit契約", () => {
 			expect(canonicalizeImportRequest(ordinalDifference.input)).toBe(
 				ordinalDifference.canonicalJson
 			);
+			const byteOrder = requireFixtureById(canonicalFixture.importVectors, "unicode-byte-order");
+			expect(canonicalizeImportRequest(byteOrder.input)).toBe(byteOrder.canonicalJson);
+			expect(await hashImportRequest(byteOrder.input)).toBe(byteOrder.expectedSha256Hex);
 			expect(await hashImportRequest(ordinalDifference.input)).not.toBe(baseline.expectedSha256Hex);
 		});
 

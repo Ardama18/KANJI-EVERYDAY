@@ -52,7 +52,7 @@ npm --prefix frontend run typecheck
 
 ## 完了条件
 
-- [x] Phase 2 DB Integration 6/61件が実テスト化されPASSする。
+- [x] Phase 2 DB Integration 6/62件が実テスト化されPASSする。
 - [x] cross-owner card/tag/deck relationをservice roleでも拒否する。
 - [x] status/image/result/timeの不整合rowをCHECK/FKで拒否する。
 - [x] migration全体が単一transactionで適用される。

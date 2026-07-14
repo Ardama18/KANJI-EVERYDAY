@@ -8,7 +8,7 @@
 
 ## スコープ境界
 
-- 対象: forward migration、Seed互換、共有TypeScript契約、S-10 tables/RLS/trigger/RPC、生成DB型、Unit 32件、DB Integration 61件、Contract E2E 13件。
+- 対象: forward migration、Seed互換、共有TypeScript契約、S-10 tables/RLS/trigger/RPC、生成DB型、Unit 32件、DB Integration 62件、Contract E2E 13件。
 - 対象外: Queue、`pgmq`、enqueue、worker、retry orchestration、provider SDK/API、画像生成、Storage object処理、UI、Route Handler、Remote MCP transport、OAuth、secret環境変数配線。
 - `reserve_provider_usage`、`commit_import`、`register_ai_upload`、`finalize_import_item`、`mark_import_item_failed`はQueue/provider非依存のDB primitiveとして扱う。
 - 既存の `supabase/migrations/20260223000000_s02_schema_rls.sql` と `20260223000001_s02_storage_illustrations.sql` は編集しない。
@@ -71,7 +71,6 @@ Phase内の対象テストと `/quality-fixer frontend` がapprovedになるま�
 - 通常DB Integrationは `npm --prefix frontend run test:s10:integration -- -t "<ID regex>"` で実行する。
 - Unitは `npm --prefix frontend run test:s10:unit -- -t "<ID regex>"`、Contract E2EはPhase 6だけで `npm --prefix frontend run test:s10:e2e` を使う。
 - DB actorはowner A、owner B、anon、authenticated、service roleを型付きfixtureで切り替える。
-- parallel testは全Promiseを回収し、短い`deadlock_timeout`と有限反復を使う。
+- parallel testは全Promiseを回収し、非特権actorでも設定可能な短い`lock_timeout`と有限反復を使う。
 - error/logにはtoken、request/card本文、SQL、stackを含めない。
 - 共通Unicode/canonical fixtureをTypeScriptとSQLから読み、期待値をテスト本文へ重複記述しない。
-

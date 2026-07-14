@@ -11,7 +11,7 @@
 | 層 | ファイル | TODO数 | 責務 | 実装タイミング |
 |---|---|---:|---|---|
 | Unit | `ai-card-import-foundation.test.ts` | 32 | shared schema、Unicode、card-key、generation/import hash、preview HMAC | shared domain実装と同時 |
-| DB Integration | `ai-card-import-foundation.int.test.ts` | 61 | 実DB上のRLS、constraint、trigger、RPC、lock、migration断面 | 各migration/RPC実装と同時 |
+| DB Integration | `ai-card-import-foundation.int.test.ts` | 62 | 実DB上のRLS、constraint、trigger、RPC、lock、migration断面 | 各migration/RPC実装と同時 |
 | Contract E2E | `ai-card-import-foundation.e2e.test.ts` | 13 | adapter相当入力からDB最終状態まで、fresh/upgrade chain | S-10全primitive完成後 |
 
 ブラウザE2Eは生成しない。S-10ではUI、Route Handler、Remote MCP transport、Queue、worker、provider、Storage処理が明示的に対象外である。Contract E2EはQueue/providerを起動せず、`reserve_provider_usage`、`commit_import`、`finalize_import_item`、`mark_import_item_failed`、管理/undo RPCをシステム境界として扱う。
@@ -46,14 +46,14 @@
 
 ## 共通TODO・品質ゲート
 
-- [ ] 各TODOに実装moduleまたはmigrationのimport/setupを追加する。
-- [ ] `any`を使わず、DB result・actor・RPC errorを型付けする。
-- [ ] 非同期処理を`async/await`で完了させ、parallel caseは全Promiseを回収する。
-- [ ] 各DB caseの前後snapshotを取り、エラーcodeだけでなく副作用0を確認する。
-- [ ] quota/expiry/JST caseは公開RPCと分離されたtest-only clockを使う。
-- [ ] deadlock caseは短い`deadlock_timeout`と有限反復回数を使い、失敗時にlock経路を識別できるようにする。
-- [ ] error/log assertionでtoken、request/card本文、SQL/stackが露出しないことを確認する。
-- [ ] Unit、DB Integration、Contract E2Eを独立して実行できるscript/jobを用意する。
+- [x] 各TODOに実装moduleまたはmigrationのimport/setupを追加する。
+- [x] `any`を使わず、DB result・actor・RPC errorを型付けする。
+- [x] 非同期処理を`async/await`で完了させ、parallel caseは全Promiseを回収する。
+- [x] 各DB caseの前後snapshotを取り、エラーcodeだけでなく副作用0を確認する。
+- [x] quota/expiry/JST caseは公開RPCと分離されたtest-only clockを使う。
+- [x] deadlock caseは非特権actorでも設定可能な短い`lock_timeout`と有限反復回数を使い、失敗時にlock経路を識別できるようにする。
+- [x] error/log assertionでtoken、request/card本文、SQL/stackが露出しないことを確認する。
+- [x] Unit、DB Integration、Contract E2Eを独立して実行できるscript/jobを用意する。
 
 ## Open questions
 

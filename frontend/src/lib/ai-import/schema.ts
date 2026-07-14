@@ -1,7 +1,8 @@
 import type { Database, Json } from "@/types/database";
 import { IMPORT_REQUEST_LIMITS } from "./canonical-request";
 import { type CardPattern, computeCardKey } from "./card-key";
-import { normalizeDisplayText, normalizeForKey } from "./normalize";
+import { isUnicodeScalarText, normalizeDisplayText, normalizeForKey } from "./normalize";
+import { isCanonicalUuid } from "./uuid";
 
 export type ImportPattern = CardPattern;
 export type ImportSkill = "reading" | "writing";
@@ -29,11 +30,17 @@ export interface ClientImportRequestInput {
 	items: ClientImportItemInput[];
 }
 
-export interface TrustedImportContext {
-	readonly actorUserId: string;
-	readonly source: ImportSource;
-	readonly quotaPolicy: "consume" | "exempt";
-}
+export type TrustedImportContext =
+	| {
+			readonly actorUserId: string;
+			readonly source: "app_ai";
+			readonly quotaPolicy: "consume";
+	  }
+	| {
+			readonly actorUserId: string;
+			readonly source: "remote_mcp";
+			readonly quotaPolicy: "exempt";
+	  };
 
 export interface CommitImportWrapperArgs {
 	readonly context: TrustedImportContext;
@@ -105,8 +112,7 @@ interface ParsedItem {
 	readonly image: NormalizedImageInput;
 }
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const HAN_PATTERN = /\p{Script=Han}/u;
+const HAN_PATTERN = /[㐀-䶿一-鿿豈-﫿𠀀-𮹟丽-𪘀𰀀-𲎯々〇〆]/u;
 const ROOT_FIELDS = new Set(["deck", "items"]);
 const ITEM_FIELDS = new Set([
 	"clientItemId",
@@ -207,7 +213,7 @@ function parseDeck(value: unknown, issues: ValidationIssue[]): NormalizedDeckInp
 		return undefined;
 	}
 	if (selected[0] === "id") {
-		if (typeof value.id !== "string" || !UUID_PATTERN.test(value.id)) {
+		if (typeof value.id !== "string" || !isCanonicalUuid(value.id)) {
 			issues.push({ path: "deck.id", rule: "uuid" });
 			return undefined;
 		}
@@ -341,6 +347,10 @@ function parseTags(
 			issues.push({ path: `${path}[${index}]`, rule: "string" });
 			continue;
 		}
+		if (!isUnicodeScalarText(tag)) {
+			issues.push({ path: `${path}[${index}]`, rule: "unicode_scalar" });
+			continue;
+		}
 		const displayName = normalizeDisplayText(tag);
 		const length = codePointLength(displayName);
 		if (length < IMPORT_REQUEST_LIMITS.tagTextMin || length > IMPORT_REQUEST_LIMITS.tagTextMax) {
@@ -376,7 +386,7 @@ function parseImage(
 		return { mode: value.mode };
 	}
 	if (value.mode === "upload") {
-		if (typeof value.uploadId !== "string" || !UUID_PATTERN.test(value.uploadId)) {
+		if (typeof value.uploadId !== "string" || !isCanonicalUuid(value.uploadId)) {
 			issues.push({ path, rule: "image_union" });
 			return undefined;
 		}
@@ -413,8 +423,7 @@ function validateItemSets(items: readonly ParsedItem[], issues: ValidationIssue[
 		if (
 			pair.reading !== undefined &&
 			pair.writing !== undefined &&
-			(normalizeForKey(pair.reading.front) !== normalizeForKey(pair.writing.back) ||
-				normalizeForKey(pair.reading.back) !== normalizeForKey(pair.writing.front))
+			(pair.reading.front !== pair.writing.back || pair.reading.back !== pair.writing.front)
 		) {
 			issues.push({ path: `items[${pair.writing.index}]`, rule: "concept_pair_mismatch" });
 		}
@@ -460,6 +469,10 @@ function normalizedText(
 		issues.push({ path, rule: "string" });
 		return undefined;
 	}
+	if (!isUnicodeScalarText(value)) {
+		issues.push({ path, rule: "unicode_scalar" });
+		return undefined;
+	}
 	const normalized = normalizeDisplayText(value);
 	const length = codePointLength(normalized);
 	if (length < IMPORT_REQUEST_LIMITS.textMin || length > IMPORT_REQUEST_LIMITS.textMax) {
@@ -477,6 +490,10 @@ function boundedIdentifier(
 ): string | undefined {
 	if (typeof value !== "string") {
 		issues.push({ path, rule: "string" });
+		return undefined;
+	}
+	if (!isUnicodeScalarText(value)) {
+		issues.push({ path, rule: "unicode_scalar" });
 		return undefined;
 	}
 	const length = codePointLength(value);

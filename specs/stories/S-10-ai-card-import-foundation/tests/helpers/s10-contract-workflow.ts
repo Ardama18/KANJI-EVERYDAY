@@ -203,12 +203,12 @@ export async function commitS10ContractWorkflow(
 	client: S10DbClient,
 	prepared: S10ContractPreparedWorkflow
 ): Promise<{ readonly batchId: string; readonly status: string; readonly deckId: string }> {
+	const context =
+		prepared.source === "app_ai"
+			? ({ actorUserId: prepared.owner.userId, source: "app_ai", quotaPolicy: "consume" } as const)
+			: ({ actorUserId: prepared.owner.userId, source: "remote_mcp", quotaPolicy: "exempt" } as const);
 	const args = buildCommitImportRpcArgs({
-		context: {
-			actorUserId: prepared.owner.userId,
-			source: prepared.source,
-			quotaPolicy: prepared.source === "app_ai" ? "consume" : "exempt",
-		},
+		context,
 		idempotencyKey: prepared.idempotencyKey,
 		importRequestHash: prepared.importRequestHash,
 		cardReservationKey: prepared.cardReservationKey,

@@ -56,7 +56,7 @@ wait
 
 ## 完了条件
 
-- [x] DB Integration 61/61件が実テスト化され、`IT-MIGRATION-01〜05`が各専用DBでPASSする。
+- [x] DB Integration 62/62件が実テスト化され、`IT-MIGRATION-01〜05`が各専用DBでPASSする。
 - [x] migration Contract E2E 3/3件が各job内でPASSする。
 - [x] fresh/upgrade/failureが相互の実行順・状態へ依存しない。
 - [x] 一般Seed snapshot差分0、新key期待値一致、Seed再実行後key差分0である。
@@ -76,7 +76,7 @@ wait
 - fresh: 全migration chainと更新Seedを適用し、既存DB Integration 56件 + `IT-MIGRATION-01`の57件がPASS、`E2E-MIGRATION-01`がPASSした。
 - upgrade: 旧migration + frozen pre-S10 Seedから一般snapshot/旧keyを別記録し、S-10 forward migration後と更新Seed再実行後を比較した。`IT-MIGRATION-02〜04` 3件、`E2E-MIGRATION-02` 1件がPASSし、一般snapshot差分0、新key全件DB SHA-256再計算一致、Seed再実行後general/key差分0だった。
 - failure: repositoryのmigration SQLを直接読み、normalization、collision/backfill準備、key/index、import table、RLS/grant完了の5区間へ失敗を注入した。各migration transaction失敗後にcolumns/constraints/indexes/policies/Seed一般値/key snapshotがbaselineへ完全一致し、`IT-MIGRATION-05`と`E2E-MIGRATION-03`がPASSした。RLS区間だけtest harnessが最終`COMMIT`直前へfailpointを注入し、production migrationは変更していない。
-- 合算DB Integrationは61/61件、migration Contract E2Eは3/3件PASS。3 jobの同時並行実行もexit 0で、相互に異なるDB/connectionを維持した。
+- 合算DB Integrationは62/62件、migration Contract E2Eは3/3件PASS。3 jobの同時並行実行もexit 0で、相互に異なるDB/connectionを維持した。
 - 回帰: S-10 Unit 32/32、非DB 161/161、`npm run lint`、`npm run typecheck`、検証用Supabase環境変数を明示した`npm run build`がPASSした。buildは既存middleware matcher警告のみ。
 - E2E-CONTRACT-01〜10はTask 016までTODOのまま変更していない。
 
@@ -88,7 +88,7 @@ wait
 - lifecycle監査: 既存DB確認後だけ`CREATE DATABASE ... TEMPLATE template0`を実行し、作成成功後のbootstrap/migration/test途中失敗は`finally`から自身のquoted database nameだけをforce dropする。URL/SQL値はargv、strict database-name regex、identifier quote、literal escapeを使い、migration/seedはrepository原文を`-f`で利用する。各npm jobと各Vitestは別process、各queryは別`psql` connectionである。
 - failure監査: production migration原文を利用する5 failpointを維持し、最終RLS区間だけtest harnessが原文の最終`COMMIT`直前へfailpointを注入する。rollback snapshotをcolumns/constraints/indexes/policies/data/keyに加え、schema owner/ACL、relation RLS/ACL、function定義/owner/ACL/search config、trigger、collationまで拡張した。拡張catalog SQLは実DBで構文・評価PASS。
 - upgrade監査: general snapshotは公開cardのID/本文/skill/pattern/illustration、deck、relation、件数を比較し、key snapshotは全公開cardのID/keyを比較する。さらに100件すべてをDB helperとは独立したTypeScript NFKC/SHA-256実装で再計算し、個別期待値一致を検証する。
-- test pattern監査: `vitest list`の実測はfresh 57件（既存56 + MIGRATION-01）、upgrade 3件、failure 1件で、合算61件・重複0。E2Eは各job 1件ずつで合算3件。E2E-CONTRACT TODO 10件と他jobの`runIf`はpatternへ混入しない。
-- 3 job/並行実行はtask-executor証跡で全exit 0、DB Integration 61/61、migration E2E 3/3。品質担当sandboxでのfresh再実走は`vite-node`配下の子`psql`接続制約によりprovision前admin queryで停止したため、新規修正はpure URL probe、実`psql` redirect再現、catalog SQL probe、compile/lintで補完した。
-- URL guard・snapshot・独立SHA-256照合の修正後、primary agent環境で3 jobを再実走した。fresh 57件 + E2E 1件、upgrade 3件 + E2E 1件、failure 1件 + E2E 1件がすべてPASSし、各runnerは専用DBのdropを完了してexit 0となった。
+- test pattern監査: `vitest list`の実測はfresh 58件（既存57 + MIGRATION-01）、upgrade 3件、failure 1件で、合算62件・重複0。E2Eはfresh 11件（通常10 + MIGRATION-01）、upgrade 1件、failure 1件で合算13件・重複0。
+- 3 job/並行実行はtask-executor証跡で全exit 0、DB Integration 62/62、migration E2E 3/3。品質担当sandboxでのfresh再実走は`vite-node`配下の子`psql`接続制約によりprovision前admin queryで停止したため、新規修正はpure URL probe、実`psql` redirect再現、catalog SQL probe、compile/lintで補完した。
+- URL guard・snapshot・独立SHA-256照合の修正後、primary agent環境で3 jobを再実走した。fresh 58件 + E2E 11件、upgrade 3件 + E2E 1件、failure 1件 + E2E 1件がすべてPASSし、各runnerは専用DBのdropを完了してexit 0となった。
 - 回帰: S-10 Unit 32/32、非DB 161/161、lint（90 files）、typecheck、必要envを明示したproduction build、`git diff --check`がPASS。buildは既存middleware matcher警告のみ。

@@ -43,7 +43,7 @@ const JOB_DATABASE_ENV = {
 	failure: "S10_FAILURE_DATABASE_URL",
 } as const satisfies Record<S10DatabaseJob, string>;
 const JOB_TEST_PATTERN = {
-	fresh: "E2E-MIGRATION-01",
+	fresh: "^(?!.*E2E-MIGRATION-0[2-3])",
 	upgrade: "E2E-MIGRATION-02",
 	failure: "E2E-MIGRATION-03",
 } as const satisfies Record<S10DatabaseJob, string>;
@@ -85,6 +85,10 @@ const FROZEN_PRE_S10_SEED = path.join(
 	REPOSITORY_ROOT,
 	"specs/stories/S-10-ai-card-import-foundation/tests/fixtures/pre-s10-seed.sql"
 );
+
+export async function runS10CurrentSeed(databaseUrl: string): Promise<void> {
+	await runS10PsqlFile(databaseUrl, CURRENT_SEED);
+}
 const INTEGRATION_TEST_FILE =
 	"../specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.int.test.ts";
 const CONTRACT_E2E_FILE =

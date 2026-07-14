@@ -125,11 +125,11 @@ describe("AI import error mapper", () => {
 			mapAiImportError(
 				{
 					code: "P1007",
-					detail: { cardId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", cardText: "secret" },
+					detail: { cardId: "01901901-9d3d-7cc2-98c8-3b4a13f994a2", cardText: "secret" },
 				},
 				"corr"
 			).detail
-		).toEqual({ cardId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" });
+		).toEqual({ cardId: "01901901-9d3d-7cc2-98c8-3b4a13f994a2" });
 		expect(
 			mapAiImportError({ code: "P1008", detail: { idempotencyKey: "never-return" } }, "corr")
 		).toEqual({ code: "CONFLICT", httpStatus: 409 });

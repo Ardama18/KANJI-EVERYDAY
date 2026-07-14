@@ -54,7 +54,7 @@ npm --prefix frontend run typecheck
 
 ## 完了条件
 
-- [x] DB Integration累計22/61件（Phase 2の6 + Phase 3の16）が実テスト化されPASSする。
+- [x] DB Integration累計22/62件（Phase 2の6 + Phase 3の16）が実テスト化されPASSする。
 - [x] current + 4 queueのactive cardを直接DMLでも副作用0で拒否する。
 - [x] invalid JSON値は無視し、session INSERT/UPDATE競合でもguardを取りこぼさない。
 - [x] content 4列だけreview resetし、失敗statementではreview stateを維持する。

@@ -704,7 +704,7 @@ AS $$
     CASE WHEN jsonb_typeof(queues.value) = 'array' THEN queues.value ELSE '[]'::jsonb END
   ) AS entry(value)
   WHERE jsonb_typeof(entry.value) = 'string'
-    AND (entry.value #>> '{}') ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+    AND (entry.value #>> '{}') ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 $$;
 
 CREATE FUNCTION public.lock_study_session_cards()
@@ -1008,7 +1008,7 @@ BEGIN
 
   IF deck_value ? 'id' THEN
     IF jsonb_typeof(deck_value -> 'id') <> 'string' OR
-       (deck_value ->> 'id') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' THEN
+       (deck_value ->> 'id') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
       PERFORM public.ai_raise_import_error(
         'VALIDATION_ERROR', jsonb_build_object('field', 'deck.id', 'rule', 'uuid')
       );
@@ -1097,8 +1097,8 @@ BEGIN
        item_pattern NOT IN ('R1', 'W1') OR
        char_length(front_value) NOT BETWEEN 1 AND 200 OR
        char_length(back_value) NOT BETWEEN 1 AND 200 OR
-       (item_pattern = 'R1' AND front_value !~ '[㐀-䶿一-鿿𠀀-𫠟々〇〆]') OR
-       (item_pattern = 'W1' AND back_value !~ '[㐀-䶿一-鿿𠀀-𫠟々〇〆]') THEN
+       (item_pattern = 'R1' AND front_value !~ '[㐀-䶿一-鿿豈-﫿𠀀-𮹟丽-𪘀𰀀-𲎯々〇〆]') OR
+       (item_pattern = 'W1' AND back_value !~ '[㐀-䶿一-鿿豈-﫿𠀀-𮹟丽-𪘀𰀀-𲎯々〇〆]') THEN
       PERFORM public.ai_raise_import_error(
         'VALIDATION_ERROR', jsonb_build_object('field', 'items', 'rule', 'content')
       );
@@ -1130,7 +1130,7 @@ BEGIN
       IF NOT (image_value ? 'uploadId') OR
          (SELECT count(*) FROM jsonb_object_keys(image_value)) <> 2 OR
          jsonb_typeof(image_value -> 'uploadId') <> 'string' OR
-         (image_value ->> 'uploadId') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' THEN
+         (image_value ->> 'uploadId') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
         PERFORM public.ai_raise_import_error(
           'VALIDATION_ERROR', jsonb_build_object('field', 'items.image.uploadId', 'rule', 'uuid')
         );
@@ -1169,7 +1169,10 @@ BEGIN
         'displayName', tag_display, 'normalizedName', tag_normalized
       ));
     END LOOP;
-    SELECT coalesce(jsonb_agg(tags.value ORDER BY tags.value ->> 'normalizedName'), '[]'::jsonb)
+    SELECT coalesce(
+      jsonb_agg(tags.value ORDER BY convert_to(tags.value ->> 'normalizedName', 'UTF8')),
+      '[]'::jsonb
+    )
     INTO prepared_tags
     FROM jsonb_array_elements(prepared_tags) AS tags(value);
 
@@ -1229,7 +1232,10 @@ BEGIN
     ORDER BY (value ->> 'ordinal')::integer
   LOOP
     SELECT coalesce(
-      string_agg(to_jsonb(tags.value ->> 'normalizedName')::text, ',' ORDER BY tags.value ->> 'normalizedName'),
+      string_agg(
+        to_jsonb(tags.value ->> 'normalizedName')::text,
+        ',' ORDER BY convert_to(tags.value ->> 'normalizedName', 'UTF8')
+      ),
       ''
     ) INTO canonical_tags
     FROM jsonb_array_elements(prepared_item -> 'tags') AS tags(value);
@@ -1949,6 +1955,7 @@ BEGIN
         error_detail=jsonb_build_object('itemId',locked_item.client_item_id),failed_at=statement_timestamp()
       WHERE id=p_item_id;
       batch_summary := public.ai_recount_import_batch(p_owner_user_id,p_batch_id);
+      PERFORM public.ai_disable_internal_context();
       RETURN jsonb_build_object(
         'itemId',p_item_id,'batchId',p_batch_id,'status','failed',
         'errorCode','DUPLICATE_EXISTING','batchStatus',batch_summary->>'status'
@@ -1985,6 +1992,7 @@ BEGIN
     PERFORM public.ai_raise_import_error('CONFLICT');
   END IF;
   batch_summary := public.ai_recount_import_batch(p_owner_user_id,p_batch_id);
+  PERFORM public.ai_disable_internal_context();
   RETURN jsonb_build_object(
     'itemId',p_item_id,'batchId',p_batch_id,'status','finalized','cardId',created_card_id,
     'batchStatus',batch_summary->>'status'
@@ -2302,8 +2310,8 @@ BEGIN
      next_pattern NOT IN ('R1','W1') OR next_skill NOT IN ('reading','writing') OR
      char_length(next_front) NOT BETWEEN 1 AND 200 OR
      char_length(next_back) NOT BETWEEN 1 AND 200 OR
-     (next_pattern = 'R1' AND next_front !~ '[㐀-䶿一-鿿𠀀-𫠟々〇〆]') OR
-     (next_pattern = 'W1' AND next_back !~ '[㐀-䶿一-鿿𠀀-𫠟々〇〆]') THEN
+     (next_pattern = 'R1' AND next_front !~ '[㐀-䶿一-鿿豈-﫿𠀀-𮹟丽-𪘀𰀀-𲎯々〇〆]') OR
+     (next_pattern = 'W1' AND next_back !~ '[㐀-䶿一-鿿豈-﫿𠀀-𮹟丽-𪘀𰀀-𲎯々〇〆]') THEN
     PERFORM public.ai_raise_import_error('VALIDATION_ERROR');
   END IF;
   IF (locked_card.skill,locked_card.pattern,locked_card.front_text,locked_card.back_text)
@@ -2817,6 +2825,7 @@ BEGIN
     UPDATE public.ai_import_items
     SET status = 'processing', illustration_reservation_key = p_reservation_key
     WHERE id = p_item_id;
+    PERFORM public.ai_recount_import_batch(p_owner_user_id, p_batch_id);
   ELSE
     effective_status := CASE WHEN p_source = 'app_ai' THEN 'reserved' ELSE 'exempt' END;
   END IF;

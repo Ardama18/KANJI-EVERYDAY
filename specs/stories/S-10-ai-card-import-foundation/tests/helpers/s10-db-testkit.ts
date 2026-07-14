@@ -66,8 +66,13 @@ export const S10_ACTORS = {
 export class S10DatabaseCommandError extends Error {
 	readonly exitCode: number | null;
 
-	constructor(exitCode: number | null) {
-		super("S-10 database command failed; inspect the isolated test database logs");
+	constructor(exitCode: number | null, diagnostic?: string) {
+		const detail = diagnostic?.trim();
+		super(
+			detail === undefined || detail.length === 0
+				? "S-10 database command failed; inspect the isolated test database logs"
+				: `S-10 database command failed: ${detail.slice(0, 2000)}`
+		);
 		this.name = "S10DatabaseCommandError";
 		this.exitCode = exitCode;
 	}
@@ -300,10 +305,10 @@ export async function runS10Psql(databaseUrl: string, sql: string): Promise<stri
 				env: { ...process.env, PGAPPNAME: "s10-ai-card-import-tests" },
 				maxBuffer: 10 * 1024 * 1024,
 			},
-			(error, stdout) => {
+			(error, stdout, stderr) => {
 				if (error !== null) {
 					const exitCode = typeof error.code === "number" ? error.code : null;
-					reject(new S10DatabaseCommandError(exitCode));
+					reject(new S10DatabaseCommandError(exitCode, stderr));
 					return;
 				}
 				resolve(stdout);

@@ -195,6 +195,8 @@ resolved_seed_cards AS (
 		cards.card_key
 	FROM public.cards AS cards
 	INNER JOIN seed_cards ON seed_cards.card_key = cards.card_key
+	WHERE cards.visibility = 'public'
+		AND cards.owner_user_id IS NULL
 )
 INSERT INTO public.deck_cards (
 	deck_id,

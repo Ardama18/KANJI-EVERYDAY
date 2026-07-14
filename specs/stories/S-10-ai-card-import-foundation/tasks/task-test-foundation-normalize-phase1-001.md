@@ -30,7 +30,7 @@ TypeScript/SQLが共有するUnicode・canonical vectorと、owner A/B/anon/serv
 
 - [x] fixtureへ固定White_Space全点、U+FEFF、NFKC、case、BMP外、結合文字、U+001F、generation/import差分vectorを定義する。
 - [x] `UT-NORM-01〜05`をfixture駆動の失敗テストへ置換する。
-- [x] VitestがS-10のUnit/Integration/E2E 3ファイルを検出し、TODO inventoryが32/61/13であることを確認する。
+- [x] VitestがS-10のUnit/Integration/E2E 3ファイルを検出し、TODO inventoryが32/62/13であることを確認する。
 
 ```bash
 npm --prefix frontend run test:s10:unit -- -t "UT-NORM"

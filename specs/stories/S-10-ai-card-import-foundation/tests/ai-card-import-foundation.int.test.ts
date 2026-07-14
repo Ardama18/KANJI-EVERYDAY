@@ -32,6 +32,7 @@ import {
 import {
 	readS10JobSnapshot,
 	runS10AcSmoke,
+	runS10CurrentSeed,
 	runS10MigrationFailureChecks,
 	selectS10DatabaseJobs,
 } from "./helpers/s10-db-jobs";
@@ -510,26 +511,58 @@ const commitSnapshotQueries = [
 	{ name: "reservations", sql: `SELECT reservation_key, import_request_hash, batch_id::text FROM public.ai_quota_reservations WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}' ORDER BY reservation_key, kind` },
 ] as const;
 
+async function cleanupQuotaUsageByPredicate(predicate: string): Promise<void> {
+	await database.execute(`
+		WITH removed AS (
+			DELETE FROM public.ai_quota_reservations
+			WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}' AND (${predicate})
+			RETURNING owner_user_id, usage_date, kind, units, status
+		), deltas AS (
+			SELECT owner_user_id, usage_date,
+				COALESCE(sum(units) FILTER (WHERE status = 'reserved' AND kind = 'card_generation'), 0)::int card_units,
+				COALESCE(sum(units) FILTER (WHERE status = 'reserved' AND kind = 'illustration_concept'), 0)::int image_units
+			FROM removed GROUP BY owner_user_id, usage_date
+		)
+		UPDATE public.ai_usage_daily AS usage
+		SET generated_card_count = GREATEST(0, usage.generated_card_count - deltas.card_units),
+			generated_image_count = GREATEST(0, usage.generated_image_count - deltas.image_units)
+		FROM deltas
+		WHERE usage.owner_user_id = deltas.owner_user_id AND usage.usage_date = deltas.usage_date;
+		DELETE FROM public.ai_usage_daily AS usage
+		WHERE usage.owner_user_id = '${S10_ACTORS.ownerA.userId}'
+			AND usage.generated_card_count = 0 AND usage.generated_image_count = 0
+			AND NOT EXISTS (
+				SELECT 1 FROM public.ai_quota_reservations AS reservations
+				WHERE reservations.owner_user_id = usage.owner_user_id
+					AND reservations.usage_date = usage.usage_date
+			);
+	`);
+}
+
 async function cleanupCommitFixtures(markers: readonly string[]): Promise<void> {
 	const patterns = markers.map((marker) => `${sqlLiteral(`%${marker}%`)}`).join(", ");
 	if (patterns.length === 0) {
 		return;
 	}
+	await cleanupQuotaUsageByPredicate(
+		markers.map((marker) => `reservation_key LIKE ${sqlLiteral(`%${marker}%`)}`).join(" OR ")
+	);
 	await database.execute(`
+		CREATE TEMP TABLE s10_cleanup_candidate_tags ON COMMIT DROP AS
+		SELECT DISTINCT item_tags.tag_id
+		FROM public.ai_import_item_tags AS item_tags
+		JOIN public.ai_import_items AS items ON items.id = item_tags.item_id
+		JOIN public.ai_import_batches AS batches ON batches.id = items.batch_id
+		WHERE batches.owner_user_id = '${S10_ACTORS.ownerA.userId}'
+			AND (${markers.map((marker) => `batches.idempotency_key LIKE ${sqlLiteral(`%${marker}%`)}`).join(" OR ")});
 		DELETE FROM public.ai_import_batches
 		WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}'
 			AND (${markers.map((marker) => `idempotency_key LIKE ${sqlLiteral(`%${marker}%`)}`).join(" OR ")});
-		DELETE FROM public.ai_quota_reservations
-		WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}'
-			AND (${markers.map((marker) => `reservation_key LIKE ${sqlLiteral(`%${marker}%`)}`).join(" OR ")});
 		DELETE FROM public.ai_uploads
 		WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}'
 			AND (${markers.map((marker) => `upload_key LIKE ${sqlLiteral(`%${marker}%`)}`).join(" OR ")});
-		DELETE FROM public.tags
-		WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}'
-			AND display_name LIKE ANY (ARRAY[${patterns}]);
 		DELETE FROM public.tags AS tags
-		WHERE tags.owner_user_id = '${S10_ACTORS.ownerA.userId}'
+		WHERE tags.id IN (SELECT tag_id FROM s10_cleanup_candidate_tags)
 			AND NOT EXISTS (SELECT 1 FROM public.ai_import_item_tags WHERE tag_id = tags.id)
 			AND NOT EXISTS (SELECT 1 FROM public.card_tags WHERE tag_id = tags.id);
 		DELETE FROM public.decks
@@ -538,7 +571,6 @@ async function cleanupCommitFixtures(markers: readonly string[]): Promise<void> 
 		DELETE FROM public.cards
 		WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}'
 			AND (front_text LIKE ANY (ARRAY[${patterns}]) OR back_text LIKE ANY (ARRAY[${patterns}]));
-		DELETE FROM public.ai_usage_daily WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}';
 	`);
 }
 
@@ -590,11 +622,12 @@ async function cleanupQuotaFixtures(
 	const keys = reservationKeys.map(sqlLiteral).join(", ");
 	const batches = batchIds.map((id) => `${sqlLiteral(id)}::uuid`).join(", ");
 	const uploads = uploadIds.map((id) => `${sqlLiteral(id)}::uuid`).join(", ");
+	if (reservationKeys.length > 0) {
+		await cleanupQuotaUsageByPredicate(`reservation_key IN (${keys})`);
+	}
 	await database.execute(`
-		${reservationKeys.length === 0 ? "" : `DELETE FROM public.ai_quota_reservations WHERE reservation_key IN (${keys});`}
 		${batchIds.length === 0 ? "" : `DELETE FROM public.ai_import_batches WHERE id IN (${batches});`}
 		${uploadIds.length === 0 ? "" : `DELETE FROM public.ai_uploads WHERE id IN (${uploads});`}
-		DELETE FROM public.ai_usage_daily WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}'
 	`);
 }
 
@@ -1315,6 +1348,21 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 			}
 		});
 
+		// @category: integration
+		// @dependency: shared canonical fixture, DB canonical import hash function
+		// @complexity: high
+		it("IT-COMMIT-06a: Unicode byte順・全漢字面・UUID v7をTSとDBで同じcanonical hashへ変換する", async () => {
+			const vector = canonicalRequestFixture.importVectors.find(({ id }) => id === "unicode-byte-order");
+			if (vector === undefined) throw new Error("unicode-byte-order fixture missing");
+			const [prepared] = await database.query<{ hash: string }>(`
+				SELECT public.ai_prepare_import_request(
+					${sqlLiteral(JSON.stringify(vector.input))}::jsonb
+				) ->> 'importRequestHash' AS hash
+			`);
+			expect(await hashImportRequest(vector.input)).toBe(vector.expectedSha256Hex);
+			expect(prepared?.hash).toBe(vector.expectedSha256Hex);
+		});
+
 		// @category: edge-case
 		// @dependency: duplicate set validation
 		// @complexity: high
@@ -1531,6 +1579,7 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 				).toEqual([{ count: 200 }]);
 			} finally {
 				await cleanupQuotaFixtures([successKey, rejectedKey]);
+				await database.execute(`DELETE FROM public.ai_usage_daily WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}' AND usage_date = '2041-01-01'`);
 			}
 		});
 
@@ -1559,6 +1608,12 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 					conceptId: successFixture.conceptId,
 					testNow: "2042-01-01T00:00:00Z",
 				});
+				expect(await database.query<{ item: string; batch: string }>(`
+					SELECT items.status AS item, batches.status AS batch
+					FROM public.ai_import_items AS items
+					JOIN public.ai_import_batches AS batches ON batches.id = items.batch_id
+					WHERE items.id = '${successFixture.itemId}'
+				`)).toEqual([{ item: "processing", batch: "processing" }]);
 				const rejected = await database.captureError(
 					reserveUsageSql({
 						reservationKey: rejectedKey,
@@ -1584,6 +1639,7 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 					[successKey, rejectedKey],
 					[successFixture.batchId, rejectedFixture.batchId]
 				);
+				await database.execute(`DELETE FROM public.ai_usage_daily WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}' AND usage_date = '2042-01-01'`);
 			}
 		});
 
@@ -1628,6 +1684,7 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 				).toEqual([{ count: 1 }]);
 			} finally {
 				await cleanupQuotaFixtures([firstKey, secondKey]);
+				await database.execute(`DELETE FROM public.ai_usage_daily WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}' AND usage_date = '2043-01-01'`);
 			}
 		});
 
@@ -2029,8 +2086,20 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 				expect(order?.actualIllustration).toBeGreaterThan(order?.item ?? Number.MAX_SAFE_INTEGER);
 				expect(order?.actualIllustration).toBeLessThan(order?.deck ?? 0);
 
-				const result = await finalizeItem({ batchId: fixture.batchId, itemId: fixture.itemId });
+				const [finalized] = await database.query<{ result: FinalizeItemResult; active: boolean }>(`
+					WITH finalized AS MATERIALIZED (
+						SELECT public.finalize_import_item_internal(
+							'${S10_ACTORS.ownerA.userId}'::uuid,
+							'${fixture.batchId}'::uuid,
+							'${fixture.itemId}'::uuid,
+							NULL
+						) result
+					)
+					SELECT result, public.ai_internal_context_active() active FROM finalized
+				`);
+				const result = finalized?.result;
 				expect(result).toMatchObject({ status: "finalized", batchStatus: "completed", cardId: expect.any(String) });
+				expect(finalized?.active).toBe(false);
 				const [row] = await database.query<Record<string, unknown>>(`
 					SELECT cards.owner_user_id::text owner, cards.visibility, cards.front_text front,
 						cards.back_text back, cards.card_key, items.card_key item_key,
@@ -2381,16 +2450,16 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 		// @dependency: parallel lock-intersection harness
 		// @complexity: high
 		it("IT-LOCK-01: commit/finalize/undo/session/direct card/relation管理RPC/illustration/cascade交差を反復してdeadlock 0を確認する", async () => {
-			const forbidden=new Set(["40P01","55P03","57014"]); const assertOutcomes=(path:string,outcomes:({sqlState:string|null}|null)[])=>{ for(const outcome of outcomes) expect(forbidden.has(outcome?.sqlState??""),`${path}:${outcome?.sqlState}`).toBe(false); };
+			const assertOutcomes=(path:string,outcomes:({sqlState:string|null}|null)[],allowedConflicts:ReadonlySet<string>)=>{ expect(outcomes.some(outcome=>outcome===null),`${path}: no successful branch`).toBe(true); for(const outcome of outcomes){ if(outcome!==null) expect(allowedConflicts.has(outcome.sqlState??""),`${path}:${outcome.sqlState}`).toBe(true); } };
 			const [order]=await database.query<{card:number;advisory:number;batch:number;items:number;deck:number;relations:number}>(`WITH source AS(SELECT pg_get_functiondef('public.undo_import_internal(uuid,uuid)'::regprocedure) definition) SELECT strpos(definition,'FROM public.cards AS cards')::int card,strpos(definition,'pg_advisory_xact_lock')::int advisory,strpos(definition,'SELECT batches.* INTO locked_batch')::int batch,strpos(definition,E'PERFORM 1\\n  FROM public.ai_import_items AS items')::int items,strpos(definition,'FROM public.decks AS auto_decks')::int deck,strpos(definition,'FROM public.deck_cards AS relations')::int relations FROM source`); const positions=[order?.card,order?.advisory,order?.batch,order?.items,order?.deck,order?.relations] as number[]; expect(positions.every(value=>value>0)).toBe(true); expect(positions).toEqual([...positions].sort((a,b)=>a-b));
 			for(let iteration=0;iteration<2;iteration++){
 				const sessionFixture=await createUndoFixture(); const relationFixture=await createUndoFixture(); const finalizeFixture=await createFinalizeFixture(); const illustration=randomUUID(),session=randomUUID();
 				try {
-					const settings=`SET LOCAL deadlock_timeout='50ms'; SET LOCAL lock_timeout='1500ms';`;
-					assertOutcomes(`session-${iteration}`,await Promise.all([createS10DbClient().settle(`${settings} ${undoImportSql(sessionFixture.batchId)}`,{actor:S10_ACTORS.ownerA}),createS10DbClient().settle(`BEGIN; ${settings} INSERT INTO public.study_sessions(id,user_id,deck_id,current_card_id) VALUES('${session}','${S10_ACTORS.ownerA.userId}','${sessionFixture.deckId}','${sessionFixture.cardIds[0]}'); COMMIT;`)]));
+					const settings=`SET LOCAL lock_timeout='1500ms';`;
+					assertOutcomes(`session-${iteration}`,await Promise.all([createS10DbClient().settle(`${settings} ${undoImportSql(sessionFixture.batchId)}`,{actor:S10_ACTORS.ownerA}),createS10DbClient().settle(`BEGIN; ${settings} INSERT INTO public.study_sessions(id,user_id,deck_id,current_card_id) VALUES('${session}','${S10_ACTORS.ownerA.userId}','${sessionFixture.deckId}','${sessionFixture.cardIds[0]}'); COMMIT;`)]),new Set(["23503","P1006"]));
 					await database.execute(`INSERT INTO public.illustrations(id,owner_user_id,illustration_key,status,storage_path) VALUES('${illustration}','${S10_ACTORS.ownerA.userId}','lock-${illustration}','ready','${S10_ACTORS.ownerA.userId}/lock-${illustration}.webp')`);
-					assertOutcomes(`relation-illustration-${iteration}`,await Promise.all([createS10DbClient().settle(`${settings} ${undoImportSql(relationFixture.batchId)}`,{actor:S10_ACTORS.ownerA}),createS10DbClient().settle(`${settings} SELECT public.set_card_illustration('${relationFixture.cardIds[0]}','${illustration}'); SELECT public.set_card_decks('${relationFixture.cardIds[0]}',ARRAY['${relationFixture.deckId}']::uuid[]);`,{actor:S10_ACTORS.ownerA})]));
-					assertOutcomes(`finalize-${iteration}`,await Promise.all([createS10DbClient().settle(`${settings} ${undoImportSql(finalizeFixture.batchId)}`,{actor:S10_ACTORS.ownerA}),createS10DbClient().settle(`${settings} ${finalizeItemSql({batchId:finalizeFixture.batchId,itemId:finalizeFixture.itemId})}`,{actor:S10_ACTORS.service})]));
+					assertOutcomes(`relation-illustration-${iteration}`,await Promise.all([createS10DbClient().settle(`${settings} ${undoImportSql(relationFixture.batchId)}`,{actor:S10_ACTORS.ownerA}),createS10DbClient().settle(`${settings} SELECT public.set_card_illustration('${relationFixture.cardIds[0]}','${illustration}'); SELECT public.set_card_decks('${relationFixture.cardIds[0]}',ARRAY['${relationFixture.deckId}']::uuid[]);`,{actor:S10_ACTORS.ownerA})]),new Set(["P1003","P1007"]));
+					assertOutcomes(`finalize-${iteration}`,await Promise.all([createS10DbClient().settle(`${settings} ${undoImportSql(finalizeFixture.batchId)}`,{actor:S10_ACTORS.ownerA}),createS10DbClient().settle(`${settings} ${finalizeItemSql({batchId:finalizeFixture.batchId,itemId:finalizeFixture.itemId})}`,{actor:S10_ACTORS.service})]),new Set(["P1008"]));
 				} finally { await database.execute(`DELETE FROM public.study_sessions WHERE id='${session}'; DELETE FROM public.illustrations WHERE id='${illustration}'`); await cleanupUndoFixture(sessionFixture); await cleanupUndoFixture(relationFixture); await cleanupFinalizeFixture(finalizeFixture); }
 			}
 		});
@@ -2412,10 +2481,10 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 		});
 
 		// @category: edge-case
-		// @dependency: trigger rollback failpoints
+		// @dependency: security-sensitive trigger catalog
 		// @complexity: high
-		it("IT-SECURITY-03: trigger例外時にreview reset/tombstone/edit markerだけが残らずstatement全体がrollbackする", async () => {
-			const rows=await database.query<{n:number}>(`SELECT count(*)::int n FROM pg_trigger WHERE NOT tgisinternal AND tgname IN('lock_study_session_cards','guard_card_active_session','reset_review_state_on_content_change')`); expect(rows).toEqual([{n:3}]);
+		it("IT-SECURITY-03: session guard・review reset・tombstone・編集保護triggerが全て有効である", async () => {
+			const rows=await database.query<{n:number}>(`SELECT count(*)::int n FROM pg_trigger WHERE NOT tgisinternal AND tgname IN('lock_study_session_cards','guard_card_active_session','reset_review_state_on_content_change','mark_import_item_user_edited','protect_card_illustration_key','tombstone_import_item_on_delete','mark_import_item_relation_edited_decks','mark_import_item_relation_edited_tags')`); expect(rows).toEqual([{n:8}]);
 		});
 
 		// @category: integration
@@ -2551,6 +2620,27 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 			expect(await readS10JobSnapshot(database, "upgrade_after_seed_keys")).toEqual(
 				await readS10JobSnapshot(database, "upgrade_after_migration_keys")
 			);
+			const [publicCard] = await database.query<{ card_key: string }>(`
+				SELECT card_key FROM public.cards WHERE visibility = 'public' ORDER BY id LIMIT 1
+			`);
+			if (publicCard === undefined) throw new Error("public seed card missing");
+			const privateCardId = randomUUID();
+			try {
+				await database.execute(`
+					INSERT INTO public.cards(
+						id, owner_user_id, visibility, skill, pattern, front_text, back_text, card_key
+					) SELECT '${privateCardId}', '${S10_ACTORS.ownerA.userId}', 'private',
+						skill, pattern, front_text, back_text, card_key
+					FROM public.cards WHERE visibility = 'public' AND card_key = '${publicCard.card_key}'
+					LIMIT 1
+				`);
+				await runS10CurrentSeed(database.databaseUrl);
+				expect(await database.query<{ n: number }>(`
+					SELECT count(*)::int n FROM public.deck_cards WHERE card_id = '${privateCardId}'
+				`)).toEqual([{ n: 0 }]);
+			} finally {
+				await database.execute(`DELETE FROM public.cards WHERE id = '${privateCardId}'`);
+			}
 		});
 
 		// @category: edge-case

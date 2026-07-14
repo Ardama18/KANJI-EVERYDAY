@@ -21,8 +21,8 @@
 | AC-04, 04a, 04b, 04c preview・冪等commit | requirements AC-04、design canonical/HMAC/idempotency lock、ADR-007 signed preview | `canonical-request.ts`、`preview-token.ts`、`commit_import_internal` | UT-HASH-01〜07、UT-HMAC-01〜07、IT-COMMIT-03/04/06 | E2E-CONTRACT-03, 10 |
 | AC-05, 05a, 05b, 05c JST quota・免除・再送・非返却 | requirements AC-05、design quota reservation/JST clock、ADR-007 trusted source policy | `reserve_provider_usage(_internal)`、`ai_usage_daily`、`ai_quota_reservations` | IT-QUOTA-01〜08、IT-UPLOAD-01〜03、IT-FAIL-01/02 | E2E-CONTRACT-03, 04, 05, 07 |
 | AC-06, 06a, 06b, 06c Stage 1 rollback・commit/finalize atomicity | requirements AC-06、design two-stage transaction/failpoints、ADR-007 atomic primitives | `schema.ts`、`commit_import_internal`、`finalize_import_item_internal`、transaction failpoints | UT-SCHEMA-01〜10、IT-COMMIT-01/02/06〜09、IT-FINALIZE-01/03/05 | E2E-CONTRACT-01, 03, 05, 06 |
-| AC-07, 07a, 07b, 07c active session・undo | requirements AC-07、design symmetric guard/undo lock、ADR-007 management boundary | `ai_assert_card_inactive`、card guard triggers、`undo_import`、delete tombstone | IT-GUARD-01〜04、IT-UNDO-01〜04、IT-SECURITY-03 | E2E-CONTRACT-08, 09, 10 |
-| AC-08, 08a, 08b review reset/keep | requirements AC-08、design content-change trigger、ADR-007 parent/teacher management | review reset trigger、`update_imported_card`、`set_card_{decks,tags,illustration}` | IT-REVIEW-01〜03、IT-OWNER-04、IT-SECURITY-03 | E2E-CONTRACT-08, 10 |
+| AC-07, 07a, 07b, 07c active session・undo | requirements AC-07、design symmetric guard/undo lock、ADR-007 management boundary | `ai_assert_card_inactive`、card guard triggers、`undo_import`、delete tombstone | IT-GUARD-01〜04、IT-UNDO-01〜04 | E2E-CONTRACT-08, 09, 10 |
+| AC-08, 08a, 08b review reset/keep | requirements AC-08、design content-change trigger、ADR-007 parent/teacher management | review reset trigger、`update_imported_card`、`set_card_{decks,tags,illustration}` | IT-REVIEW-01〜03、IT-OWNER-04 | E2E-CONTRACT-08, 10 |
 | AC-09, 09a, 09b, 09c RLS・所有者整合 | requirements AC-09、design RLS matrix/owner trigger/ACL、ADR-007 trusted adapter | table RLS、card_tags/deck_cards owner trigger、service wrapper/internal ACL | IT-RLS-01〜07、IT-OWNER-01〜04、IT-SECURITY-01〜03 | E2E-CONTRACT-01, 05, 08, 10 |
 | AC-10, 10a, 10b fresh/upgrade/rollback | requirements AC-10、design transactional migration、ADR-007 forward-only rollout | 全migration chain、S-10 forward migration、seed、failure-injection harness | IT-MIGRATION-01〜05 | E2E-MIGRATION-01〜03 |
 
@@ -49,12 +49,12 @@
 |---|---|---|
 | Red | `npm --prefix frontend run typecheck`（E2E置換直後） | FAIL: `helpers/s10-contract-workflow` 未実装 |
 | Unit | `npm --prefix frontend run test:s10:unit` | 32/32 PASS |
-| DB Integration | `S10_TEST_DATABASE_URL=... npm --prefix frontend run test:s10:integration` + 独立3 job | 61/61 PASS（通常56 + job 5） |
+| DB Integration | `S10_TEST_DATABASE_URL=... npm --prefix frontend run test:s10:integration` + 独立3 job | 62/62 PASS（通常57 + job 5） |
 | Contract E2E | `S10_TEST_DATABASE_URL=... npm --prefix frontend run test:s10:e2e` + 独立3 job | 13/13 PASS（通常10 + job 3） |
 | Fresh | `npm --prefix frontend run test:s10:fresh` | PASS（Integration 57、migration E2E 1） |
 | Upgrade | `npm --prefix frontend run test:s10:upgrade` | PASS（Integration 3、migration E2E 1） |
 | Failure injection | `npm --prefix frontend run test:s10:failure` | PASS（Integration 1、migration E2E 1） |
-| Existing tests | `S10_TEST_DATABASE_URL=... npm --prefix frontend run test -- --maxWorkers=1 --minWorkers=1` | inventory 445（47 files）、通常437/437 PASS、独立job条件付き8 skip（独立jobで8/8 PASS） |
+| Existing tests | `S10_TEST_DATABASE_URL=... npm --prefix frontend run test -- --maxWorkers=1 --minWorkers=1` | inventory 446（47 files）、通常438/438 PASS、独立job条件付き8 skip（独立jobで8/8 PASS） |
 | Static / build | `npm --prefix frontend run lint && npm --prefix frontend run typecheck && npm --prefix frontend run build` | PASS |
 | TODO inventory | `rg -n "it\\.todo|test\\.todo" specs/stories/S-10-ai-card-import-foundation/tests/*.ts` | 0件 |
 

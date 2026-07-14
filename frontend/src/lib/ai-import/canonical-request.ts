@@ -145,11 +145,12 @@ function canonicalizeImage(
 }
 
 function compareCanonicalText(left: string, right: string): number {
-	if (left < right) {
-		return -1;
+	const leftBytes = new TextEncoder().encode(left);
+	const rightBytes = new TextEncoder().encode(right);
+	const sharedLength = Math.min(leftBytes.length, rightBytes.length);
+	for (let index = 0; index < sharedLength; index += 1) {
+		const difference = (leftBytes[index] ?? 0) - (rightBytes[index] ?? 0);
+		if (difference !== 0) return difference;
 	}
-	if (left > right) {
-		return 1;
-	}
-	return 0;
+	return leftBytes.length - rightBytes.length;
 }

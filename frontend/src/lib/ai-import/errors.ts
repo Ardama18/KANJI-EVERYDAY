@@ -1,3 +1,5 @@
+import { isCanonicalUuid } from "./uuid";
+
 export const AI_IMPORT_ERROR_CODES = [
 	"VALIDATION_ERROR",
 	"DUPLICATE_IN_REQUEST",
@@ -40,7 +42,6 @@ const SQL_STATE_CONTRACTS: Readonly<Record<string, ErrorContract>> = Object.free
 });
 
 const DUPLICATE_EXISTING_CONSTRAINT = "cards_private_owner_card_key_uidx";
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const SAFE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/u;
 const SAFE_PATH_PATTERN = /^\$?[A-Za-z0-9_.\[\]-]+$/u;
 const SAFE_RULE_PATTERN = /^[a-z0-9_]+$/u;
@@ -138,7 +139,7 @@ function safeCorrelationId(value: string): string {
 }
 
 function safeUuid(value: unknown): string | undefined {
-	return typeof value === "string" && UUID_PATTERN.test(value) ? value.toLowerCase() : undefined;
+	return typeof value === "string" && isCanonicalUuid(value) ? value.toLowerCase() : undefined;
 }
 
 function safeBoundedText(value: unknown, maxLength: number): string | undefined {

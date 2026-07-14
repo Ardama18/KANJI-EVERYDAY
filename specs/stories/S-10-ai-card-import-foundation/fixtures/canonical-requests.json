@@ -191,6 +191,29 @@
       },
       "canonicalJson": "{\"deck\":{\"id\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"},\"items\":[{\"clientItemId\":\"item-2\",\"conceptId\":\"concept-1\",\"pattern\":\"W1\",\"front\":\"かんじ\",\"back\":\"漢字\",\"tags\":[\"grade 3\",\"国語\"],\"image\":{\"mode\":\"ai\"}},{\"clientItemId\":\"item-1\",\"conceptId\":\"concept-1\",\"pattern\":\"R1\",\"front\":\"漢字\",\"back\":\"かんじ\",\"tags\":[\"grade 3\",\"国語\"],\"image\":{\"mode\":\"none\"}}]}",
       "expectedSha256Hex": "bb9d4c36fc5885e4063206adbb57a0c76838c7334f68f502c5016466d21d8734"
+    },
+    {
+      "id": "unicode-byte-order",
+      "input": {
+        "deck": {
+          "id": "01901901-9d3d-7cc2-98c8-3b4a13f994a2"
+        },
+        "items": [
+          {
+            "clientItemId": "unicode-order",
+            "conceptId": "unicode-order",
+            "pattern": "R1",
+            "front": "丽",
+            "back": "かな",
+            "tags": ["𱍐", "é", "z", ""],
+            "image": {
+              "mode": "none"
+            }
+          }
+        ]
+      },
+      "canonicalJson": "{\"deck\":{\"id\":\"01901901-9d3d-7cc2-98c8-3b4a13f994a2\"},\"items\":[{\"clientItemId\":\"unicode-order\",\"conceptId\":\"unicode-order\",\"pattern\":\"R1\",\"front\":\"丽\",\"back\":\"かな\",\"tags\":[\"z\",\"é\",\"\",\"𱍐\"],\"image\":{\"mode\":\"none\"}}]}",
+      "expectedSha256Hex": "5bec50700d01c0351963279ea0a5bd05190f66fc0a0bfd65f609479f468f089c"
     }
   ],
   "hashSeparation": {

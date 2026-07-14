@@ -491,7 +491,7 @@ undo_import(p_batch_id uuid) returns jsonb
 | session DML | session row（暗黙） | queue/current card UUID昇順 | card UUID昇順 | — | — | — | — | — |
 | upload登録 | — | — | owner+upload-key | — | — | upload/path | — | — |
 
-internal flag経路ではedit/tombstone relation triggerをskipし、cascade deleteを含むundo/finalizeが逆順lockを追加しない。card guardはsession rowをlockせずadvisory protocolで判定し、session側はcard rowの存在・ownerをlock後に再検証する。`deadlock_timeout`を短くしたcommit/finalize/undo/session/direct card/relation管理RPC/illustration/cascade交差試験を反復し、deadlock 0と不変条件を確認する。
+internal flag経路ではedit/tombstone relation triggerをskipし、cascade deleteを含むundo/finalizeが逆順lockを追加しない。card guardはsession rowをlockせずadvisory protocolで判定し、session側はcard rowの存在・ownerをlock後に再検証する。非特権actorでも設定可能な短い`lock_timeout`を使ってcommit/finalize/undo/session/direct card/relation管理RPC/illustration/cascade交差試験を反復し、deadlock 0と不変条件を確認する。
 
 ## 9. active-session、review reset、編集印
 

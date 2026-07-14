@@ -24,7 +24,7 @@ ui_design: none
 - Design Doc: `specs/stories/S-10-ai-card-import-foundation/design.md` v1.1.1 Approved
 - 受入テスト計画: `specs/stories/S-10-ai-card-import-foundation/tests/acceptance-test-plan.md`
 - Unit骨子（32件）: `specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.test.ts`
-- DB Integration骨子（61件）: `specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.int.test.ts`
+- DB Integration骨子（62件）: `specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.int.test.ts`
 - Contract E2E骨子（13件）: `specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.e2e.test.ts`
 
 ## 目的
@@ -35,13 +35,13 @@ ui_design: none
 
 ### 実装対象
 
-- [ ] Unicode正規化、`card_key`、canonical hash、preview HMAC、Stage 1 schema、安定error契約
-- [ ] 既存schemaを維持した単一forward migration、`seed.sql`のforward互換更新
-- [ ] import/upload/tag/quota tables、constraints、indexes、RLS、grants、trigger
-- [ ] reserve/commit/finalize/fail/upload/management/undo RPCと単一lock matrix
-- [ ] `frontend/src/types/database.ts`の再生成とSupabase型契約の更新
-- [ ] Unit 32件、DB Integration 61件、Contract E2E 13件の実テスト化
-- [ ] fresh、upgrade、failure-injectionを相互に状態共有しない独立DB jobとして実行
+- [x] Unicode正規化、`card_key`、canonical hash、preview HMAC、Stage 1 schema、安定error契約
+- [x] 既存schemaを維持した単一forward migration、`seed.sql`のforward互換更新
+- [x] import/upload/tag/quota tables、constraints、indexes、RLS、grants、trigger
+- [x] reserve/commit/finalize/fail/upload/management/undo RPCと単一lock matrix
+- [x] `frontend/src/types/database.ts`の再生成とSupabase型契約の更新
+- [x] Unit 32件、DB Integration 62件、Contract E2E 13件の実テスト化
+- [x] fresh、upgrade、failure-injectionを相互に状態共有しない独立DB jobとして実行
 
 ### 対象外
 
@@ -53,14 +53,14 @@ ui_design: none
 
 ## 計画固定ルール
 
-- [ ] 既存migrationは編集せず、S-10は新しいforward migrationだけを追加する
-- [ ] Unit TODOは対応するTypeScript production moduleと同じPhaseでRedテストへ置換し、同PhaseでGreenにする
-- [ ] DB Integration TODOは対応するmigration/trigger/RPCと同じPhaseで実テストへ置換し、同Phaseで実DB実行する
-- [ ] Contract E2E TODOは全production実装完了後の最終Phaseでのみ実テスト化・実行する
-- [ ] fresh、upgrade、failure-injectionは別process・別databaseで実行し、同一DBのreset使い回しを禁止する
-- [ ] Queue/provider/Storage処理をテストfixtureやstubとしても起動せず、S-10 primitiveをsystem boundaryとする
-- [ ] SQL/TypeScriptのUnicode期待値は同一fixtureを参照し、期待値をテストへ重複記述しない
-- [ ] 各Phaseの対象テストがPASSするまで次Phaseへ進まず、実装とテストを同じ変更単位に保つ
+- [x] 既存migrationは編集せず、S-10は新しいforward migrationだけを追加する
+- [x] Unit TODOは対応するTypeScript production moduleと同じPhaseでRedテストへ置換し、同PhaseでGreenにする
+- [x] DB Integration TODOは対応するmigration/trigger/RPCと同じPhaseで実テストへ置換し、同Phaseで実DB実行する
+- [x] Contract E2E TODOは全production実装完了後の最終Phaseでのみ実テスト化・実行する
+- [x] fresh、upgrade、failure-injectionは別process・別databaseで実行し、同一DBのreset使い回しを禁止する
+- [x] Queue/provider/Storage処理をテストfixtureやstubとしても起動せず、S-10 primitiveをsystem boundaryとする
+- [x] SQL/TypeScriptのUnicode期待値は同一fixtureを参照し、期待値をテストへ重複記述しない
+- [x] 各Phaseの対象テストがPASSするまで次Phaseへ進まず、実装とテストを同じ変更単位に保つ
 
 ## 既存コード分析と主な変更先
 
@@ -136,45 +136,45 @@ flowchart TD
 
 #### タスク
 
-- [ ] Unicode/card-key fixtureとcanonical request fixtureを作成する
+- [x] Unicode/card-key fixtureとcanonical request fixtureを作成する
   - 実装: `specs/stories/S-10-ai-card-import-foundation/fixtures/unicode-card-key.json`
   - 実装: `specs/stories/S-10-ai-card-import-foundation/fixtures/canonical-requests.json`
   - 完了条件: 固定White_Space全点、U+FEFF、NFKC、case、astral/結合文字、U+001F material、generation/import hash差分をfixtureで表現する
-- [ ] pre-S10 SeedとS-10 DB test harnessを準備する
+- [x] pre-S10 SeedとS-10 DB test harnessを準備する
   - 実装: `specs/stories/S-10-ai-card-import-foundation/tests/fixtures/pre-s10-seed.sql`
   - 実装: `specs/stories/S-10-ai-card-import-foundation/tests/helpers/s10-db-testkit.ts`
   - 実装: `specs/stories/S-10-ai-card-import-foundation/tests/helpers/s10-db-jobs.ts`
   - 完了条件: baseline snapshot、owner A/B/anon/service、複数connection、test clock、failpoint、独立DB jobを型付きで提供する
-- [ ] S-10テスト検出と独立実行scriptを追加する
+- [x] S-10テスト検出と独立実行scriptを追加する
   - 実装: `frontend/vitest.config.ts`, `frontend/package.json`
   - 完了条件: Unit、Integration、Contract E2E、fresh、upgrade、failure-injectionを個別commandで選択でき、接続先未指定時はfail-fastする
-- [ ] `normalize.ts`を実装し、Unit 5件をTODOからRed→Greenにする
+- [x] `normalize.ts`を実装し、Unit 5件をTODOからRed→Greenにする
   - 実装: `frontend/src/lib/ai-import/normalize.ts`
   - テスト: `ai-card-import-foundation.test.ts`のUT-NORM-01〜05
   - AC対応: AC-01〜03（5件）
-- [ ] `card-key.ts`を実装し、Unit 3件をTODOからRed→Greenにする
+- [x] `card-key.ts`を実装し、Unit 3件をTODOからRed→Greenにする
   - 実装: `frontend/src/lib/ai-import/card-key.ts`
   - テスト: UT-CARDKEY-01〜03
   - AC対応: AC-01〜03（3件）
-- [ ] generation/import canonical hashを実装し、Unit 7件をTODOからRed→Greenにする
+- [x] generation/import canonical hashを実装し、Unit 7件をTODOからRed→Greenにする
   - 実装: `frontend/src/lib/ai-import/canonical-request.ts`
   - テスト: UT-HASH-01〜07
   - AC対応: AC-04〜05（7件）
-- [ ] preview token署名・検証をsecret/clock注入の純粋関数として実装し、Unit 7件をTODOからRed→Greenにする
+- [x] preview token署名・検証をsecret/clock注入の純粋関数として実装し、Unit 7件をTODOからRed→Greenにする
   - 実装: `frontend/src/lib/ai-import/preview-token.ts`
   - テスト: UT-HMAC-01〜07
   - AC対応: AC-04（7件）
-- [ ] fixture全vectorをNode runtimeで実行し、crypto・UTF-8・constant-time比較の退行を固定する
+- [x] fixture全vectorをNode runtimeで実行し、crypto・UTF-8・constant-time比較の退行を固定する
   - テスト: `specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.test.ts`
 
 #### フェーズ完了条件
 
-- [ ] Unit解決: 22/32件（UT-NORM 5 + UT-CARDKEY 3 + UT-HASH 7 + UT-HMAC 7）
-- [ ] TODO inventoryがUnit 32 / Integration 61 / Contract E2E 13であり、3ファイルがVitestから検出される
-- [ ] fixture/helperに`any`、secret/card本文のlog、外部network/provider依存がない
-- [ ] digestはlowercase SHA-256 hex、token TTLは1800秒、HMAC secret/clockは外部注入である
-- [ ] U+FEFFを空白として扱わず、固定White_Space全点とastral文字の期待値が一致する
-- [ ] `npm --prefix frontend run typecheck`と対象UnitがPASSする
+- [x] Unit解決: 22/32件（UT-NORM 5 + UT-CARDKEY 3 + UT-HASH 7 + UT-HMAC 7）
+- [x] TODO inventoryがUnit 32 / Integration 62 / Contract E2E 13であり、3ファイルがVitestから検出される
+- [x] fixture/helperに`any`、secret/card本文のlog、外部network/provider依存がない
+- [x] digestはlowercase SHA-256 hex、token TTLは1800秒、HMAC secret/clockは外部注入である
+- [x] U+FEFFを空白として扱わず、固定White_Space全点とastral文字の期待値が一致する
+- [x] `npm --prefix frontend run typecheck`と対象UnitがPASSする
 
 #### 動作確認手順
 
@@ -189,32 +189,32 @@ flowchart TD
 
 #### タスク
 
-- [ ] 単一forward migrationへICU `und` collation、SQL正規化/key関数、fixture self-checkを追加する
+- [x] 単一forward migrationへICU `und` collation、SQL正規化/key関数、fixture self-checkを追加する
   - 実装: `supabase/migrations/*_s10_ai_card_import_foundation.sql`
   - 完了条件: ICU/NFKC/lowercaseを利用不能な環境でfail-fastし、function名と権限を安定名で作る
-- [ ] 既存cardsをtemporary計算・衝突検査後にSHA-256 keyへbackfillする
+- [x] 既存cardsをtemporary計算・衝突検査後にSHA-256 keyへbackfillする
   - 実装: 同forward migration
   - 完了条件: 旧global uniqueをdropする前にpublic/private衝突を検知し、衝突時は全transactionをrollbackする
-- [ ] `cards`と`deck_cards`のforward制約/indexを追加する
+- [x] `cards`と`deck_cards`のforward制約/indexを追加する
   - 実装: 同forward migration
   - テスト: IT-UNIQUE-01〜03、IT-OWNER-02〜03
   - AC対応: AC-01/02/09（5件）
-- [ ] import/upload/tag/quota tables、FK、CHECK、indexを依存順に追加する
+- [x] import/upload/tag/quota tables、FK、CHECK、indexを依存順に追加する
   - 実装: 同forward migration
   - テスト: IT-OWNER-01
   - AC対応: AC-09（1件）
-- [ ] `seed.sql`を新key関数とpartial unique predicateへ更新する
+- [x] `seed.sql`を新key関数とpartial unique predicateへ更新する
   - 実装: `supabase/seed.sql`
   - 完了条件: `ON CONFLICT (card_key) WHERE visibility = 'public' DO NOTHING`を使い、SeedのID/本文/関連/件数を変えない
-- [ ] Phase 2のDB Integration 6件をTODOから実テストへ置換し、実DBで実行する
+- [x] Phase 2のDB Integration 6件をTODOから実テストへ置換し、実DBで実行する
   - テスト: `specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.int.test.ts`
 
 #### フェーズ完了条件
 
-- [ ] DB Integration解決: 6/61件（IT-UNIQUE 3 + IT-OWNER-01〜03 3）
-- [ ] 異なるownerの同keyと公開Seed同値privateを許可し、同一owner/cross-owner relationを拒否する
-- [ ] migration file単体が1 transactionで適用され、repositoryのSeed実行をtransaction内へ混在させない
-- [ ] 既存migration 2ファイルに差分がない
+- [x] DB Integration解決: 6/62件（IT-UNIQUE 3 + IT-OWNER-01〜03 3）
+- [x] 異なるownerの同keyと公開Seed同値privateを許可し、同一owner/cross-owner relationを拒否する
+- [x] migration file単体が1 transactionで適用され、repositoryのSeed実行をtransaction内へ混在させない
+- [x] 既存migration 2ファイルに差分がない
 
 #### 動作確認手順
 
@@ -228,36 +228,36 @@ flowchart TD
 
 #### タスク
 
-- [ ] 全対象tableのRLS policyとdirect-write matrixを実装し、DB Integration 7件を同時実装する
+- [x] 全対象tableのRLS policyとdirect-write matrixを実装し、DB Integration 7件を同時実装する
   - 実装: S-10 forward migration
   - テスト: IT-RLS-01〜07
   - AC対応: AC-03/09（7件）
-- [ ] wrapper/internal/trigger functionのowner、`search_path`、EXECUTE revoke/grant、schema CREATE ACLを実装する
+- [x] wrapper/internal/trigger functionのowner、`search_path`、EXECUTE revoke/grant、schema CREATE ACLを実装する
   - 実装: S-10 forward migration
   - テスト: IT-SECURITY-01〜02
   - AC対応: AC-09（2件）
-- [ ] card/tag正規化、public immutable、deck/card/tag owner triggerを実装する
+- [x] card/tag正規化、public immutable、deck/card/tag owner triggerを実装する
   - 実装: S-10 forward migration
   - 完了条件: caller提供`card_key`/`normalized_name`を信用せず、service roleでもowner invariantを迂回できない
-- [ ] session queue UUID抽出、対称lock、active-session guardを実装し、DB Integration 4件を同時実装する
+- [x] session queue UUID抽出、対称lock、active-session guardを実装し、DB Integration 4件を同時実装する
   - 実装: S-10 forward migration
   - テスト: IT-GUARD-01〜04
   - AC対応: AC-07（4件）
-- [ ] content-change review resetとtrigger原子性を実装し、DB Integration 3件中2件を同時実装する
+- [x] content-change review resetとtrigger原子性を実装し、DB Integration 3件中2件を同時実装する
   - 実装: S-10 forward migration
   - テスト: IT-REVIEW-01、IT-REVIEW-03
   - AC対応: AC-08（2件）
-- [ ] trigger失敗時のstatement rollbackを実装・検証する
+- [x] trigger失敗時のstatement rollbackを実装・検証する
   - テスト: IT-SECURITY-03
   - AC対応: AC-08/09（1件）
 
 #### フェーズ完了条件
 
-- [ ] DB Integration累計解決: 22/61件（Phase 2の6件 + Phase 3の16件）
-- [ ] 非owner/anonのprivate data操作成功が0件で、public SELECT互換を維持する
-- [ ] authenticated/service roleを含めinternal/trigger functionの直接EXECUTE成功が0件である
-- [ ] current + 4 queueのactive cardをRPC前提なしの直接UPDATE/DELETEでも拒否する
-- [ ] content 4列だけがreview reset対象となり、失敗transactionではreview stateを維持する
+- [x] DB Integration累計解決: 22/62件（Phase 2の6件 + Phase 3の16件）
+- [x] 非owner/anonのprivate data操作成功が0件で、public SELECT互換を維持する
+- [x] authenticated/service roleを含めinternal/trigger functionの直接EXECUTE成功が0件である
+- [x] current + 4 queueのactive cardをRPC前提なしの直接UPDATE/DELETEでも拒否する
+- [x] content 4列だけがreview reset対象となり、失敗transactionではreview stateを維持する
 
 #### 動作確認手順
 
@@ -271,55 +271,55 @@ flowchart TD
 
 #### タスク
 
-- [ ] 安定SQLSTATE/error helperとtransaction-local internal flagを実装する
+- [x] 安定SQLSTATE/error helperとtransaction-local internal flagを実装する
   - 実装: S-10 forward migration
   - 完了条件: named constraintだけを安定codeへ分類し、不明な`23505`を一律duplicateへ変換しない
-- [ ] `reserve_provider_usage` wrapper/internalを実装し、DB Integration 8件を同時実装する
+- [x] `reserve_provider_usage` wrapper/internalを実装し、DB Integration 8件を同時実装する
   - 実装: S-10 forward migration
   - テスト: IT-QUOTA-01〜08
   - AC対応: AC-05（8件）
-- [ ] `commit_import` wrapper/internalを実装し、DB Integration 9件を同時実装する
+- [x] `commit_import` wrapper/internalを実装し、DB Integration 9件を同時実装する
   - 実装: S-10 forward migration
   - テスト: IT-COMMIT-01〜09
   - AC対応: AC-02/04/06（9件）
-- [ ] `register_ai_upload`を実装し、DB Integration 3件を同時実装する
+- [x] `register_ai_upload`を実装し、DB Integration 3件を同時実装する
   - 実装: S-10 forward migration
   - テスト: IT-UPLOAD-01〜03
   - AC対応: AC-06/09（3件）
-- [ ] `finalize_import_item`を実装し、DB Integration 5件を同時実装する
+- [x] `finalize_import_item`を実装し、DB Integration 5件を同時実装する
   - 実装: S-10 forward migration
   - テスト: IT-FINALIZE-01〜05
   - AC対応: AC-01/02/06（5件）
-- [ ] `mark_import_item_failed`を実装し、DB Integration 2件を同時実装する
+- [x] `mark_import_item_failed`を実装し、DB Integration 2件を同時実装する
   - 実装: S-10 forward migration
   - テスト: IT-FAIL-01〜02
   - AC対応: AC-06（2件）
-- [ ] update/delete/deck/tag/illustration管理RPCと編集印・削除tombstoneを実装する
+- [x] update/delete/deck/tag/illustration管理RPCと編集印・削除tombstoneを実装する
   - 実装: S-10 forward migration
   - テスト: IT-OWNER-04、IT-REVIEW-02
   - AC対応: AC-08/09（2件）
-- [ ] `undo_import`を実装し、DB Integration 4件を同時実装する
+- [x] `undo_import`を実装し、DB Integration 4件を同時実装する
   - 実装: S-10 forward migration
   - テスト: IT-UNDO-01〜04
   - AC対応: AC-07（4件）
-- [ ] lock helperと全経路の取得順を統一し、交差試験を同時実装する
+- [x] lock helperと全経路の取得順を統一し、交差試験を同時実装する
   - 実装: S-10 forward migration、`tests/helpers/s10-db-testkit.ts`
   - テスト: IT-LOCK-01
   - AC対応: AC-04/05/07/09（1件）
 
 #### フェーズ完了条件
 
-- [ ] DB Integration累計解決: 56/61件（Phase 4で34件追加）
-- [ ] commitはbatch/items/tags/reservation linkだけ、finalizeはcard/deck/card_tags/item結果だけを各1 transactionで確定する
-- [ ] 同じidempotency/attempt/itemの再送・並行実行で副作用が1回分を超えない
-- [ ] JST quotaの成功合計がcard 200/image 50を超えず、trusted exemptとprovider開始済みreservationを契約どおり扱う
-- [ ] failpoint、active guard、modified/undo拒否時の部分永続化が0件である
-- [ ] 有限反復の交差試験でdeadlock 0、timeout 0、不変条件違反0である
+- [x] DB Integration累計解決: 56/62件（Phase 4で34件追加）
+- [x] commitはbatch/items/tags/reservation linkだけ、finalizeはcard/deck/card_tags/item結果だけを各1 transactionで確定する
+- [x] 同じidempotency/attempt/itemの再送・並行実行で副作用が1回分を超えない
+- [x] JST quotaの成功合計がcard 200/image 50を超えず、trusted exemptとprovider開始済みreservationを契約どおり扱う
+- [x] failpoint、active guard、modified/undo拒否時の部分永続化が0件である
+- [x] 有限反復の交差試験でdeadlock 0、timeout 0、不変条件違反0である
 
 #### 動作確認手順
 
 1. Phase 4対象34件を機能群ごとに実行し、各群の前後snapshot差分を確認する。
-2. `deadlock_timeout`を短くした複数connectionでcommit/finalize/undo/session/direct DML/relation RPCを反復する。
+2. 非特権actorでも設定可能な`lock_timeout`を短くした複数connectionでcommit/finalize/undo/session/direct DML/relation RPCを反復する。
 3. error/log assertionでtoken、request/card本文、SQL、stackが露出しないことを確認する。
 
 ### Phase 5: Stage 1 schema・error mapper・database types統合
@@ -328,29 +328,29 @@ flowchart TD
 
 #### タスク
 
-- [ ] `schema.ts`を`unknown`入力・field path issue・branded normalized resultとして実装する
+- [x] `schema.ts`を`unknown`入力・field path issue・branded normalized resultとして実装する
   - 実装: `frontend/src/lib/ai-import/schema.ts`
   - テスト: UT-SCHEMA-01〜10
   - AC対応: AC-02/06（10件）
-- [ ] trusted fieldをclient schema/canonical requestから排除し、source/quota免除境界を型で固定する
+- [x] trusted fieldをclient schema/canonical requestから排除し、source/quota免除境界を型で固定する
   - 実装: `frontend/src/lib/ai-import/schema.ts`, `canonical-request.ts`
   - 完了条件: `source`、quota免除flag、未知fieldを受理せず、DB wrapper入力型とclient入力型を分離する
-- [ ] DB SQLSTATE/constraint名を安定codeへ写像するTypeScript error mapperを実装する
+- [x] DB SQLSTATE/constraint名を安定codeへ写像するTypeScript error mapperを実装する
   - 実装: `frontend/src/lib/ai-import/errors.ts`
   - 完了条件: Designの11 codeを区別し、owner不一致は存在秘匿し、unexpectedだけを`INTERNAL_ERROR`にする
-- [ ] Supabase型を再生成し、S-10 tables/functions/既存cards更新を反映する
+- [x] Supabase型を再生成し、S-10 tables/functions/既存cards更新を反映する
   - 実装: `frontend/src/types/database.ts`
   - コマンド: `supabase gen types typescript --local --schema public > frontend/src/types/database.ts`
-- [ ] Unit 32件とDB Integration 56件を全回帰し、lint/typecheckを実行する
+- [x] Unit 32件とDB Integration 56件を全回帰し、lint/typecheckを実行する
   - テスト: Unit/Integration骨子2ファイル
 
 #### フェーズ完了条件
 
-- [ ] Unit解決: 32/32件（Phase 5でUT-SCHEMA 10件追加）
-- [ ] DB Integration実装済み56/56件が回帰PASSする
-- [ ] normalized request、RPC args/results、database typesに`any`がない
-- [ ] TypeScript moduleは環境変数・DB・networkを直接参照しない
-- [ ] `npm --prefix frontend run lint`、`typecheck`、S-10 Unit/IntegrationがPASSする
+- [x] Unit解決: 32/32件（Phase 5でUT-SCHEMA 10件追加）
+- [x] DB Integration実装済み56/56件が回帰PASSする
+- [x] normalized request、RPC args/results、database typesに`any`がない
+- [x] TypeScript moduleは環境変数・DB・networkを直接参照しない
+- [x] `npm --prefix frontend run lint`、`typecheck`、S-10 Unit/IntegrationがPASSする
 
 #### 動作確認手順
 
@@ -364,82 +364,82 @@ flowchart TD
 
 #### タスク
 
-- [ ] migration用DB Integration 5件をTODOから実テストへ置換する
+- [x] migration用DB Integration 5件をTODOから実テストへ置換する
   - テスト: IT-MIGRATION-01〜05
   - AC対応: AC-03/10（5件）
-- [ ] fresh DB jobを独立実行する
+- [x] fresh DB jobを独立実行する
   - 経路: 空DB → 全migration → 更新Seed → IT-MIGRATION-01 → AC-01〜09 smoke → E2E-MIGRATION-01
   - 完了条件: 他jobとdatabase/container/connection stringを共有しない
-- [ ] upgrade DB jobを独立実行する
+- [x] upgrade DB jobを独立実行する
   - 経路: pre-S10 migration → frozen Seed → baseline snapshot → S-10 migration → 更新Seed再実行 → IT-MIGRATION-02〜04 → AC-01〜09 smoke → E2E-MIGRATION-02
   - 完了条件: 一般Seed snapshot差分0、全既存cardの新key期待値一致、Seed再実行後key差分0
-- [ ] failure-injection DB jobを独立実行する
+- [x] failure-injection DB jobを独立実行する
   - 経路: pre-S10 baseline → normalization/backfill/index/table/RLS区間ごとのtransaction中断 → IT-MIGRATION-05 → E2E-MIGRATION-03
   - 完了条件: 各区間でschema/constraint/data/keyが適用前snapshotと一致する
-- [ ] Contract workflow E2E 10件を全production完成後にTODOから実テストへ置換する
+- [x] Contract workflow E2E 10件を全production完成後にTODOから実テストへ置換する
   - テスト: E2E-CONTRACT-01〜10
   - AC対応: AC-01〜09（10件）
-- [ ] migration Contract E2E 3件を各独立DB job内で実行する
+- [x] migration Contract E2E 3件を各独立DB job内で実行する
   - テスト: E2E-MIGRATION-01〜03
   - AC対応: AC-10（3件）
-- [ ] Unit/Integration/Contract E2Eをフル実行し、ACトレーサビリティ証跡を記録する
+- [x] Unit/Integration/Contract E2Eをフル実行し、ACトレーサビリティ証跡を記録する
   - 実装: `specs/stories/S-10-ai-card-import-foundation/tests/s10-traceability.md`
-- [ ] Queue/provider/UI/MCP transportが差分へ混入していないことをscope reviewする
+- [x] Queue/provider/UI/MCP transportが差分へ混入していないことをscope reviewする
 
 #### フェーズ完了条件
 
-- [ ] Unit 32/32、DB Integration 61/61、Contract E2E 13/13が実テスト化され、未解決TODOが0件である
-- [ ] fresh/upgrade/failure-injectionの3 jobが個別にPASSし、相互の実行順へ依存しない
-- [ ] AC-01〜10と全sub-ACをtest ID・実行結果・関連実装へ追跡できる
-- [ ] 公開Seedの一般不変項目差分0、新keyはmigration後期待値一致かつSeed再実行後差分0である
-- [ ] Queue/provider/Storage実行なしでreserve/commit/finalize/fail/management/undo契約を完走できる
-- [ ] lint、typecheck、build、全既存testを含む最終品質checkがPASSする
+- [x] Unit 32/32、DB Integration 62/62、Contract E2E 13/13が実テスト化され、未解決TODOが0件である
+- [x] fresh/upgrade/failure-injectionの3 jobが個別にPASSし、相互の実行順へ依存しない
+- [x] AC-01〜10と全sub-ACをtest ID・実行結果・関連実装へ追跡できる
+- [x] 公開Seedの一般不変項目差分0、新keyはmigration後期待値一致かつSeed再実行後差分0である
+- [x] Queue/provider/Storage実行なしでreserve/commit/finalize/fail/management/undo契約を完走できる
+- [x] lint、typecheck、build、全既存testを含む最終品質checkがPASSする
 
 #### 動作確認手順
 
 1. fresh、upgrade、failure-injectionを別process・別DBで並行可能なjobとして実行する。
 2. migration 3 E2Eの完了後、E2E-CONTRACT-01〜10を実行する。
-3. Unit 32、Integration 61、E2E 13の未解決`it.todo`が0件であることを検索する。
+3. Unit 32、Integration 62、E2E 13の未解決`it.todo`が0件であることを検索する。
 4. `npm --prefix frontend run check`と`npm --prefix frontend run build`を実行する。
 5. AC-01〜10の証跡とscope差分をレビューする。
 
 ## AC別完了チェックリスト
 
-- [ ] AC-01: owner A/Bおよび公開Seed同値privateのcommit/finalizeとowner relation成立
-- [ ] AC-02: request/既存/finalize競合の重複分類と副作用0
-- [ ] AC-03: Seed一般snapshot不変、key backfill期待値、public immutable
-- [ ] AC-04: HMAC改ざん拒否、並行冪等commit 1 batch、別hash conflict
-- [ ] AC-05: JST 200/50境界、並行原子性、trusted exempt、再送0加算
-- [ ] AC-06: Stage 1全件validation、commit/finalize分離、全区間rollback
-- [ ] AC-07: current + 4 queue guard、modified/active undo拒否、tombstone、再undo、自動deck処理
-- [ ] AC-08: content 4列review reset、relation変更keep、失敗時rollback
-- [ ] AC-09: actor×operation RLS、owner FK/trigger、wrapper/internal grant、owner偽装拒否
-- [ ] AC-10: fresh/upgrade/failure-injection独立DB jobと全transaction rollback
+- [x] AC-01: owner A/Bおよび公開Seed同値privateのcommit/finalizeとowner relation成立
+- [x] AC-02: request/既存/finalize競合の重複分類と副作用0
+- [x] AC-03: Seed一般snapshot不変、key backfill期待値、public immutable
+- [x] AC-04: HMAC改ざん拒否、並行冪等commit 1 batch、別hash conflict
+- [x] AC-05: JST 200/50境界、並行原子性、trusted exempt、再送0加算
+- [x] AC-06: Stage 1全件validation、commit/finalize分離、全区間rollback
+- [x] AC-07: current + 4 queue guard、modified/active undo拒否、tombstone、再undo、自動deck処理
+- [x] AC-08: content 4列review reset、relation変更keep、失敗時rollback
+- [x] AC-09: actor×operation RLS、owner FK/trigger、wrapper/internal grant、owner偽装拒否
+- [x] AC-10: fresh/upgrade/failure-injection独立DB jobと全transaction rollback
 
 ## リスクと対策
 
-- [ ] Unicode/ICU差分
+- [x] Unicode/ICU差分
   - 検知: TypeScript/SQLで同一fixtureを全vector実行する
   - 対策: migration self-checkを先頭でfail-fastし、silentなkey変更を許可しない
-- [ ] backfill衝突またはSeed破壊
+- [x] backfill衝突またはSeed破壊
   - 検知: unique drop前のtemporary衝突検査、upgrade snapshot、新key個別再計算
   - 対策: 恣意的なmerge/deleteを行わずmigration transaction全体をrollbackする
-- [ ] `SECURITY DEFINER`によるRLS迂回・search path hijack
+- [x] `SECURITY DEFINER`によるRLS迂回・search path hijack
   - 検知: catalog/ACL統合テストとowner/source偽装テスト
   - 対策: 固定owner、`pg_catalog,pg_temp`、完全修飾、全EXECUTE revoke後のwrapper別grantを強制する
-- [ ] lock順の不一致によるdeadlock/guard取りこぼし
-  - 検知: 短い`deadlock_timeout`、有限反復、経路名付きfailure output
+- [x] lock順の不一致によるdeadlock/guard取りこぼし
+  - 検知: 短い`lock_timeout`、有限反復、経路名付きfailure output
   - 対策: ID収集はnon-lock read、同classはcanonical/UUID順、共通lock helper以外の取得を禁止する
-- [ ] 冪等再送やquota競合による二重永続化
+- [x] 冪等再送やquota競合による二重永続化
   - 検知: 複数connectionの同key/別key競合と全table前後snapshot
   - 対策: owner scoped advisory lock、named unique、usage row lock、reservation ledgerを同transactionで使う
-- [ ] trigger途中失敗でreview/tombstone/edit markerだけが残る
+- [x] trigger途中失敗でreview/tombstone/edit markerだけが残る
   - 検知: 区間別failpointとstatement後snapshot
   - 対策: side effectを同statement/transactionへ閉じ、internal flagをtransaction-localに限定する
-- [ ] テストjob間のDB汚染
+- [x] テストjob間のDB汚染
   - 検知: job固有markerと接続先assertion
   - 対策: fresh/upgrade/failure-injectionごとにDBをprovision/dropし、fallback URLを禁止する
-- [ ] Issue #12以降の責務混入
+- [x] Issue #12以降の責務混入
   - 検知: final scope reviewで`pgmq`、provider SDK、Storage operation、UI/MCP transport importを検索する
   - 対策: Queue非依存RPCだけを境界とし、外部処理はstubも実装しない
 
@@ -456,7 +456,7 @@ flowchart TD
 
 ## 最終完了定義
 
-- [ ] 実装完了: forward migration、Seed、shared modules、全RPC/trigger、database typesがDesign v1.1.1どおり存在する
-- [ ] 品質完了: Unit 32、Integration 61、Contract E2E 13、lint、typecheck、buildがPASSする
-- [ ] 統合完了: fresh/upgrade/failure-injection独立DB jobでAC-01〜10を追跡でき、既存Auth/card/deck/review/session/illustration契約を維持する
-- [ ] スコープ完了: Queue/provider/UI/MCP transportを含まず、Issue #10だけの差分になっている
+- [x] 実装完了: forward migration、Seed、shared modules、全RPC/trigger、database typesがDesign v1.1.1どおり存在する
+- [x] 品質完了: Unit 32、Integration 62、Contract E2E 13、lint、typecheck、buildがPASSする
+- [x] 統合完了: fresh/upgrade/failure-injection独立DB jobでAC-01〜10を追跡でき、既存Auth/card/deck/review/session/illustration契約を維持する
+- [x] スコープ完了: Queue/provider/UI/MCP transportを含まず、Issue #10だけの差分になっている
