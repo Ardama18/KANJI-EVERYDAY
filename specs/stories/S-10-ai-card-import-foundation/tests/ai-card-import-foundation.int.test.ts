@@ -837,8 +837,8 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 					VALUES ('${S10_ACTORS.ownerA.userId}'::uuid, '${cardId}'::uuid, '${ownerBTagId}'::uuid)
 				`);
 				expect(tagMismatch).toEqual({
-					sqlState: "23503",
-					constraint: "card_tags_tag_owner_fkey",
+					sqlState: "P1003",
+					constraint: null,
 				});
 
 				const cardMismatch = await database.captureError(`
@@ -846,8 +846,8 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 					VALUES ('${S10_ACTORS.ownerB.userId}'::uuid, '${cardId}'::uuid, '${ownerBTagId}'::uuid)
 				`);
 				expect(cardMismatch).toEqual({
-					sqlState: "23503",
-					constraint: "card_tags_card_owner_fkey",
+					sqlState: "P1003",
+					constraint: null,
 				});
 
 				const updateMismatch = await database.captureError(`
@@ -856,8 +856,8 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 					WHERE card_id = '${cardId}'::uuid AND tag_id = '${ownerATagId}'::uuid
 				`);
 				expect(updateMismatch).toEqual({
-					sqlState: "23503",
-					constraint: "card_tags_tag_owner_fkey",
+					sqlState: "P1003",
+					constraint: null,
 				});
 
 				const serviceMismatch = await database.captureError(`
@@ -974,7 +974,46 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 		// @category: integration
 		// @dependency: relation grants, set_card_* RPC
 		// @complexity: high
-		it.todo("IT-OWNER-04: authenticatedのrelation直接writeを拒否しSELECT互換とowner管理RPCだけを許可する");
+		it("IT-OWNER-04: authenticatedのrelation直接writeを拒否しSELECT互換とowner管理RPCだけを許可する", async () => {
+			const fixture=await createFinalizeFixture(); const deck=randomUUID(),tag=randomUUID(),illustration=randomUUID();
+			try {
+				const finalized=await finalizeItem({batchId:fixture.batchId,itemId:fixture.itemId}); const card=finalized.cardId;
+				if(card===undefined) throw new Error("finalized card missing");
+				await database.execute(`INSERT INTO public.decks(id,owner_user_id,name) VALUES('${deck}','${S10_ACTORS.ownerA.userId}','manage-${fixture.marker}'); INSERT INTO public.tags(id,owner_user_id,display_name,normalized_name) VALUES('${tag}','${S10_ACTORS.ownerA.userId}','manage-${fixture.marker.slice(-8)}','ignored'); INSERT INTO public.illustrations(id,owner_user_id,illustration_key,status,storage_path) VALUES('${illustration}','${S10_ACTORS.ownerA.userId}','manage-${fixture.marker}','ready','${S10_ACTORS.ownerA.userId}/${fixture.marker}.webp')`);
+				for(const sql of [`DELETE FROM public.deck_cards WHERE deck_id='${fixture.deckId}' AND card_id='${card}'`,`INSERT INTO public.card_tags(owner_user_id,card_id,tag_id) VALUES('${S10_ACTORS.ownerA.userId}','${card}','${tag}')`]) expect((await database.captureError(sql,{actor:S10_ACTORS.ownerA})).sqlState).toBe("42501");
+				expect((await database.captureError(`UPDATE public.cards SET illustration_key='forbidden' WHERE id='${card}'`,{actor:S10_ACTORS.ownerA})).sqlState).toBe("42501");
+
+				const [before]=await database.query<{updated:string;key:string}>(`SELECT updated_at::text updated,card_key key FROM public.cards WHERE id='${card}'`);
+				if(before===undefined) throw new Error("management card missing");
+				await database.execute(`INSERT INTO public.review_states(user_id,card_id,due_date,level,last_rating) VALUES('${S10_ACTORS.ownerA.userId}','${card}',current_date,3,'good')`);
+				await database.query(`SELECT public.update_imported_card('${card}','{"frontText":"管理 ${fixture.marker}"}'::jsonb,'${before.updated}'::timestamptz) result`,{actor:S10_ACTORS.ownerA});
+				const [updated]=await database.query<{updated:string;key:string;edited:boolean;reviews:number}>(`SELECT cards.updated_at::text updated,cards.card_key key,(items.user_edited_at IS NOT NULL) edited,(SELECT count(*)::int FROM public.review_states WHERE card_id=cards.id) reviews FROM public.cards cards JOIN public.ai_import_items items ON items.result_card_id=cards.id WHERE cards.id='${card}'`);
+				expect(updated).toMatchObject({edited:true,reviews:0}); expect(updated?.key).not.toBe(before.key);
+				if(updated===undefined) throw new Error("updated management card missing");
+				const validationSnapshot=await database.query<Record<string,unknown>>(`SELECT cards.front_text,cards.back_text,cards.card_key,cards.updated_at::text,items.user_edited_at::text FROM public.cards AS cards JOIN public.ai_import_items AS items ON items.result_card_id=cards.id WHERE cards.id='${card}'`);
+				for(const frontText of ["　 \t", "漢".repeat(201), "alphabet only"]){ const patch=sqlLiteral(JSON.stringify({frontText})); expect((await database.captureError(`SELECT public.update_imported_card('${card}',${patch}::jsonb,'${updated.updated}'::timestamptz)`,{actor:S10_ACTORS.ownerA})).sqlState).toBe("P1000"); }
+				const invalidWritingPatch=sqlLiteral(JSON.stringify({pattern:"W1",skill:"writing",backText:"alphabet only"}));
+				expect((await database.captureError(`SELECT public.update_imported_card('${card}',${invalidWritingPatch}::jsonb,'${updated.updated}'::timestamptz)`,{actor:S10_ACTORS.ownerA})).sqlState).toBe("P1000");
+				expect(await database.query<Record<string,unknown>>(`SELECT cards.front_text,cards.back_text,cards.card_key,cards.updated_at::text,items.user_edited_at::text FROM public.cards AS cards JOIN public.ai_import_items AS items ON items.result_card_id=cards.id WHERE cards.id='${card}'`)).toEqual(validationSnapshot);
+				const normalizedPatch=sqlLiteral(JSON.stringify({frontText:" \u3000漢\u00a0字\t "}));
+				await database.query(`SELECT public.update_imported_card('${card}',${normalizedPatch}::jsonb,'${updated.updated}'::timestamptz)`,{actor:S10_ACTORS.ownerA});
+				const [normalized]=await database.query<{front:string;key:string;expectedKey:string;updated:string}>(`SELECT front_text front,card_key key,public.ai_compute_card_key(pattern,front_text,back_text) "expectedKey",updated_at::text updated FROM public.cards WHERE id='${card}'`);
+				expect(normalized).toMatchObject({front:"漢 字"}); expect(normalized?.key).toBe(normalized?.expectedKey);
+				expect((await database.captureError(`SELECT public.update_imported_card('${card}','{"backText":"stale"}'::jsonb,'${before.updated}'::timestamptz)`,{actor:S10_ACTORS.ownerA})).sqlState).toBe("P1008");
+				expect((await database.captureError(`SELECT public.update_imported_card('${card}','{"backText":"hidden"}'::jsonb,'${normalized?.updated}'::timestamptz)`,{actor:S10_ACTORS.ownerB})).sqlState).toBe("P1003");
+				for(const sql of [`SELECT public.set_card_decks('${card}',ARRAY['${deck}']::uuid[])`,`SELECT public.set_card_tags('${card}',ARRAY['${tag}']::uuid[])`,`SELECT public.set_card_illustration('${card}','${illustration}')`]) await database.query(sql,{actor:S10_ACTORS.ownerA});
+				expect(await database.query<{decks:number;tags:number;illustration:string}>(`SELECT (SELECT count(*)::int FROM public.deck_cards WHERE card_id='${card}') decks,(SELECT count(*)::int FROM public.card_tags WHERE card_id='${card}') tags,illustration_key illustration FROM public.cards WHERE id='${card}'`,{actor:S10_ACTORS.ownerA})).toEqual([{decks:1,tags:1,illustration:`manage-${fixture.marker}`}]);
+				expect((await database.captureError(`SELECT public.set_card_illustration('${card}',NULL); UPDATE public.cards SET illustration_key='leaked' WHERE id='${card}'`,{actor:S10_ACTORS.ownerA})).sqlState).toBe("42501");
+				expect(await database.query<{key:string;contexts:number}>(`SELECT illustration_key key,(SELECT count(*)::int FROM s10_private.management_mutation_context) contexts FROM public.cards WHERE id='${card}'`)).toEqual([{key:`manage-${fixture.marker}`,contexts:0}]);
+				for(const sql of [`SELECT public.set_card_decks('${card}',ARRAY['${deck}']::uuid[])`,`SELECT public.set_card_tags('${card}',ARRAY['${tag}']::uuid[])`,`SELECT public.set_card_illustration('${card}','${illustration}')`,`SELECT public.delete_private_card('${card}','${updated?.updated}'::timestamptz)`]) expect((await database.captureError(sql,{actor:S10_ACTORS.service})).sqlState).toBe("42501");
+				expect((await database.captureError(`SELECT public.set_card_decks('${card}',ARRAY['${deck}']::uuid[])`,{actor:S10_ACTORS.ownerB})).sqlState).toBe("P1003");
+				expect((await database.captureError(`SELECT public.set_card_decks_internal('${S10_ACTORS.ownerA.userId}','${card}',ARRAY['${deck}']::uuid[])`,{actor:S10_ACTORS.ownerA})).sqlState).toBe("42501");
+
+				const [order]=await database.query<{card:number;advisory:number;item:number;target:number}>(`WITH source AS(SELECT pg_get_functiondef('public.set_card_decks_internal(uuid,uuid,uuid[])'::regprocedure) definition) SELECT strpos(definition,'SELECT cards.* INTO locked_card')::int card,strpos(definition,'pg_advisory_xact_lock')::int advisory,strpos(definition,'FROM public.ai_import_items AS items')::int item,strpos(definition,'FROM public.decks AS target_decks')::int target FROM source`);
+				expect([order?.card,order?.advisory,order?.item,order?.target].every(value=>value!==undefined&&value>0)).toBe(true); expect([order?.card,order?.advisory,order?.item,order?.target]).toEqual([...( [order?.card,order?.advisory,order?.item,order?.target] as number[])].sort((a,b)=>a-b));
+				expect(await database.query<{bad:number}>(`WITH expected(signature,authenticated_execute,service_execute) AS (VALUES ('public.update_imported_card(uuid,jsonb,timestamptz)',true,false),('public.delete_private_card(uuid,timestamptz)',true,false),('public.set_card_decks(uuid,uuid[])',true,false),('public.set_card_tags(uuid,uuid[])',true,false),('public.set_card_illustration(uuid,uuid)',true,false),('public.update_imported_card_internal(uuid,uuid,jsonb,timestamptz)',false,false),('public.delete_private_card_internal(uuid,uuid,timestamptz)',false,false),('public.set_card_decks_internal(uuid,uuid,uuid[])',false,false),('public.set_card_tags_internal(uuid,uuid,uuid[])',false,false),('public.set_card_illustration_internal(uuid,uuid,uuid)',false,false)) SELECT count(*) FILTER(WHERE has_function_privilege('authenticated',signature,'EXECUTE') IS DISTINCT FROM authenticated_execute OR has_function_privilege('service_role',signature,'EXECUTE') IS DISTINCT FROM service_execute OR has_function_privilege('anon',signature,'EXECUTE'))::int bad FROM expected`)).toEqual([{bad:0}]);
+			} finally { await database.execute(`DELETE FROM public.illustrations WHERE id='${illustration}'; DELETE FROM public.tags WHERE id='${tag}'; DELETE FROM public.decks WHERE id='${deck}'`); await cleanupFinalizeFixture(fixture); }
+		});
 	});
 
 	describe("commit・冪等性・Stage 1原子性 (AC-02/04/06)", () => {
@@ -2002,17 +2041,17 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 					(SELECT finalized_count::int FROM public.ai_import_batches WHERE id='${fixture.batchId}') finalized
 				`)).toEqual([{cards:1,decks:1,tags:1,finalized:1}]);
 
-				await finalizeItem({ batchId: imageFixture.batchId, itemId: imageFixture.itemId, illustrationId: imageFixture.illustrationId });
+				const imageResult = await finalizeItem({ batchId: imageFixture.batchId, itemId: imageFixture.itemId, illustrationId: imageFixture.illustrationId });
+				if (imageResult.cardId === undefined) throw new Error("image result card missing");
+				const changedIllustrationId = randomUUID();
 				const changedIllustrationKey = `changed-${imageFixture.marker}`;
+				await database.execute(`INSERT INTO public.illustrations(id,owner_user_id,illustration_key,status,storage_path) VALUES('${changedIllustrationId}','${S10_ACTORS.ownerA.userId}','${changedIllustrationKey}','ready','${S10_ACTORS.ownerA.userId}/${changedIllustrationKey}.webp')`);
 				const updater = createS10DbClient();
 				const retry = createS10DbClient();
 				const updating = updater.execute(`
-					BEGIN;
-					UPDATE public.cards SET illustration_key='${changedIllustrationKey}'
-					WHERE id=(SELECT result_card_id FROM public.ai_import_items WHERE id='${imageFixture.itemId}');
+					SELECT public.set_card_illustration('${imageResult.cardId}','${changedIllustrationId}');
 					SELECT pg_sleep(0.15);
-					COMMIT;
-				`);
+				`, { actor: S10_ACTORS.ownerA });
 				await new Promise((resolve) => setTimeout(resolve, 25));
 				const retryError = await retry.captureError(finalizeItemSql({
 					batchId: imageFixture.batchId,
@@ -2156,7 +2195,27 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 		// @category: integration
 		// @dependency: relation management RPC
 		// @complexity: high
-		it.todo("IT-REVIEW-02: illustration/tag/deckだけの変更はreview_statesを完全一致で維持する");
+		it("IT-REVIEW-02: illustration/tag/deckだけの変更はreview_statesを完全一致で維持する", async () => {
+			const fixture=await createFinalizeFixture("ai"); const deck=randomUUID(),tag=randomUUID(),illustration=randomUUID(),session=randomUUID();
+			try {
+				const result=await finalizeItem({batchId:fixture.batchId,itemId:fixture.itemId,illustrationId:fixture.illustrationId}); const card=result.cardId;
+				if(card===undefined) throw new Error("review fixture card missing");
+				await database.execute(`INSERT INTO public.decks(id,owner_user_id,name) VALUES('${deck}','${S10_ACTORS.ownerA.userId}','review-${fixture.marker}'); INSERT INTO public.tags(id,owner_user_id,display_name,normalized_name) VALUES('${tag}','${S10_ACTORS.ownerA.userId}','review-${fixture.marker.slice(-8)}','ignored'); INSERT INTO public.illustrations(id,owner_user_id,illustration_key,status,storage_path) VALUES('${illustration}','${S10_ACTORS.ownerA.userId}','review-${fixture.marker}','ready','${S10_ACTORS.ownerA.userId}/review-${fixture.marker}.webp'); INSERT INTO public.review_states(user_id,card_id,level,due_date,last_rating,retry_today_count,last_reviewed_at) VALUES('${S10_ACTORS.ownerA.userId}','${card}',4,current_date+3,'hard',2,now()-interval '1 day')`);
+				const reviewSql=`SELECT user_id::text,card_id::text,level,due_date::text,last_rating,retry_today_count,last_reviewed_at::text FROM public.review_states WHERE card_id='${card}'`;
+				const before=await database.query<Record<string,unknown>>(reviewSql);
+				await database.query(`SELECT public.set_card_decks('${card}',ARRAY['${fixture.deckId}','${deck}']::uuid[])`,{actor:S10_ACTORS.ownerA});
+				await database.query(`SELECT public.set_card_tags('${card}',ARRAY['${tag}']::uuid[])`,{actor:S10_ACTORS.ownerA});
+				await database.query(`SELECT public.set_card_illustration('${card}','${illustration}')`,{actor:S10_ACTORS.ownerA});
+				expect(await database.query<Record<string,unknown>>(reviewSql)).toEqual(before);
+				expect(await database.query<{edited:boolean}>(`SELECT user_edited_at IS NOT NULL edited FROM public.ai_import_items WHERE id='${fixture.itemId}'`)).toEqual([{edited:true}]);
+				await database.execute(`INSERT INTO public.study_sessions(id,user_id,deck_id,current_card_id) VALUES('${session}','${S10_ACTORS.ownerA.userId}','${deck}','${card}')`);
+				const relations=await captureS10Snapshot(database,[{name:"decks",sql:`SELECT deck_id::text FROM public.deck_cards WHERE card_id='${card}' ORDER BY deck_id`},{name:"tags",sql:`SELECT tag_id::text FROM public.card_tags WHERE card_id='${card}' ORDER BY tag_id`},{name:"card",sql:`SELECT illustration_key FROM public.cards WHERE id='${card}'`}]);
+				for(const sql of [`SELECT public.set_card_decks('${card}',ARRAY['${fixture.deckId}']::uuid[])`,`SELECT public.set_card_tags('${card}',ARRAY[]::uuid[])`,`SELECT public.set_card_illustration('${card}',NULL)`]) expect((await database.captureError(sql,{actor:S10_ACTORS.ownerA})).sqlState).toBe("P1006");
+				const [activeCard]=await database.query<{updated:string}>(`SELECT updated_at::text updated FROM public.cards WHERE id='${card}'`);
+				for(const sql of [`SELECT public.update_imported_card('${card}','{"backText":"blocked"}'::jsonb,'${activeCard?.updated}'::timestamptz)`,`SELECT public.delete_private_card('${card}','${activeCard?.updated}'::timestamptz)`]) expect((await database.captureError(sql,{actor:S10_ACTORS.ownerA})).sqlState).toBe("P1006");
+				expect(await captureS10Snapshot(database,[{name:"decks",sql:`SELECT deck_id::text FROM public.deck_cards WHERE card_id='${card}' ORDER BY deck_id`},{name:"tags",sql:`SELECT tag_id::text FROM public.card_tags WHERE card_id='${card}' ORDER BY tag_id`},{name:"card",sql:`SELECT illustration_key FROM public.cards WHERE id='${card}'`}])).toEqual(relations);
+			} finally { await database.execute(`DELETE FROM public.study_sessions WHERE id='${session}'; DELETE FROM public.illustrations WHERE id='${illustration}'; DELETE FROM public.tags WHERE id='${tag}'; DELETE FROM public.decks WHERE id='${deck}'`); await cleanupFinalizeFixture(fixture); }
+		});
 
 		// @category: edge-case
 		// @dependency: cards update transaction
@@ -2173,7 +2232,18 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 		// @category: integration
 		// @dependency: delete tombstone trigger, FK SET NULL
 		// @complexity: high
-		it.todo("IT-UNDO-02: 個別削除をdeleted tombstoneへ記録しresult FK SET NULL後も由来を保持してundoではskipする");
+		it("IT-UNDO-02: 個別削除をdeleted tombstoneへ記録しresult FK SET NULL後も由来を保持してundoではskipする", async () => {
+			const rpcFixture=await createFinalizeFixture(); const directFixture=await createFinalizeFixture();
+			try {
+				const rpc=await finalizeItem({batchId:rpcFixture.batchId,itemId:rpcFixture.itemId}); const direct=await finalizeItem({batchId:directFixture.batchId,itemId:directFixture.itemId});
+				if(rpc.cardId===undefined||direct.cardId===undefined) throw new Error("delete fixture card missing");
+				const [rpcCard]=await database.query<{updated:string}>(`SELECT updated_at::text updated FROM public.cards WHERE id='${rpc.cardId}'`);
+				await database.query(`SELECT public.delete_private_card('${rpc.cardId}','${rpcCard?.updated}'::timestamptz) result`,{actor:S10_ACTORS.ownerA});
+				await database.execute(`DELETE FROM public.cards WHERE id='${direct.cardId}'`,{actor:S10_ACTORS.ownerA});
+				for(const [fixture,card] of [[rpcFixture,rpc.cardId],[directFixture,direct.cardId]] as const){ expect(await database.query<Record<string,unknown>>(`SELECT status,result_card_id,deleted_card_id::text deleted_card,(deleted_at IS NOT NULL) deleted,(user_edited_at IS NOT NULL) edited FROM public.ai_import_items WHERE id='${fixture.itemId}'`)).toEqual([{status:"deleted",result_card_id:null,deleted_card:card,deleted:true,edited:false}]); }
+				expect(await database.query<{n:number}>(`SELECT count(*)::int n FROM public.cards WHERE id IN('${rpc.cardId}','${direct.cardId}')`)).toEqual([{n:0}]);
+			} finally { await cleanupFinalizeFixture(rpcFixture); await cleanupFinalizeFixture(directFixture); }
+		});
 
 		// @category: edge-case
 		// @dependency: undo_result idempotency
