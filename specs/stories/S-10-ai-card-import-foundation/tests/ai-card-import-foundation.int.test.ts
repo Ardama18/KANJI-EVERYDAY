@@ -223,17 +223,180 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 		// @category: integration
 		// @dependency: card_tags composite foreign keys and trigger
 		// @complexity: high
-		it.todo("IT-OWNER-01: card/tag/relation ownerが一致するcard_tagsだけを許可しINSERT/UPDATE偽装を拒否する");
+		it("IT-OWNER-01: card/tag/relation ownerが一致するcard_tagsだけを許可しINSERT/UPDATE偽装を拒否する", async () => {
+			const cardId = randomUUID();
+			const ownerATagId = randomUUID();
+			const ownerBTagId = randomUUID();
+			const marker = `s10-owner-card-tag-${randomUUID()}`;
+			try {
+				await database.execute(`
+					INSERT INTO public.cards (
+						id, owner_user_id, visibility, skill, pattern, front_text, back_text, card_key
+					)
+					VALUES (
+						'${cardId}'::uuid,
+						'${S10_ACTORS.ownerA.userId}'::uuid,
+						'private', 'reading', 'R1', ${sqlLiteral(marker)}, 'owner back', 'ignored'
+					);
+					INSERT INTO public.tags (id, owner_user_id, display_name, normalized_name)
+					VALUES
+						('${ownerATagId}'::uuid, '${S10_ACTORS.ownerA.userId}'::uuid, '　ＡＢＣ　', 'caller-a'),
+						('${ownerBTagId}'::uuid, '${S10_ACTORS.ownerB.userId}'::uuid, 'Owner B', 'caller-b');
+				`);
+
+				const normalizedTags = await database.query<{
+					display_name: string;
+					normalized_name: string;
+				}>(`
+					SELECT display_name, normalized_name
+					FROM public.tags
+					WHERE id = '${ownerATagId}'::uuid
+				`);
+				expect(normalizedTags).toEqual([{ display_name: "ABC", normalized_name: "abc" }]);
+
+				await database.execute(`
+					INSERT INTO public.card_tags (owner_user_id, card_id, tag_id)
+					VALUES ('${S10_ACTORS.ownerA.userId}'::uuid, '${cardId}'::uuid, '${ownerATagId}'::uuid)
+				`);
+
+				const tagMismatch = await database.captureError(`
+					INSERT INTO public.card_tags (owner_user_id, card_id, tag_id)
+					VALUES ('${S10_ACTORS.ownerA.userId}'::uuid, '${cardId}'::uuid, '${ownerBTagId}'::uuid)
+				`);
+				expect(tagMismatch).toEqual({
+					sqlState: "23503",
+					constraint: "card_tags_tag_owner_fkey",
+				});
+
+				const cardMismatch = await database.captureError(`
+					INSERT INTO public.card_tags (owner_user_id, card_id, tag_id)
+					VALUES ('${S10_ACTORS.ownerB.userId}'::uuid, '${cardId}'::uuid, '${ownerBTagId}'::uuid)
+				`);
+				expect(cardMismatch).toEqual({
+					sqlState: "23503",
+					constraint: "card_tags_card_owner_fkey",
+				});
+
+				const updateMismatch = await database.captureError(`
+					UPDATE public.card_tags
+					SET tag_id = '${ownerBTagId}'::uuid
+					WHERE card_id = '${cardId}'::uuid AND tag_id = '${ownerATagId}'::uuid
+				`);
+				expect(updateMismatch).toEqual({
+					sqlState: "23503",
+					constraint: "card_tags_tag_owner_fkey",
+				});
+
+				const serviceMismatch = await database.captureError(`
+					INSERT INTO public.card_tags (owner_user_id, card_id, tag_id)
+					VALUES ('${S10_ACTORS.ownerA.userId}'::uuid, '${cardId}'::uuid, '${ownerBTagId}'::uuid)
+				`, { actor: S10_ACTORS.service });
+				expect(serviceMismatch).toEqual({ sqlState: "42501", constraint: null });
+			} finally {
+				await database.execute(`
+					DELETE FROM public.cards WHERE id = '${cardId}'::uuid;
+					DELETE FROM public.tags WHERE id IN ('${ownerATagId}'::uuid, '${ownerBTagId}'::uuid)
+				`);
+			}
+		});
 
 		// @category: integration
 		// @dependency: deck_cards owner trigger
 		// @complexity: high
-		it.todo("IT-OWNER-02: owner deckへpublic cardまたは同一owner private cardだけを関連付けられる");
+		it("IT-OWNER-02: owner deckへpublic cardまたは同一owner private cardだけを関連付けられる", async () => {
+			const deckId = randomUUID();
+			const privateCardId = randomUUID();
+			const publicCards = await database.query<{ id: string }>(`
+				SELECT id FROM public.cards WHERE visibility = 'public' ORDER BY id LIMIT 1
+			`);
+			const publicCard = publicCards[0];
+			if (publicCard === undefined) {
+				throw new Error("S-10 integration database requires the repository Seed");
+			}
+			try {
+				await database.execute(`
+					INSERT INTO public.decks (id, owner_user_id, name)
+					VALUES ('${deckId}'::uuid, '${S10_ACTORS.ownerA.userId}'::uuid, 'S10 owner deck');
+					INSERT INTO public.cards (
+						id, owner_user_id, visibility, skill, pattern, front_text, back_text, card_key
+					)
+					VALUES (
+						'${privateCardId}'::uuid, '${S10_ACTORS.ownerA.userId}'::uuid,
+						'private', 'reading', 'R1', ${sqlLiteral(`s10-owner-deck-${privateCardId}`)}, 'back', 'ignored'
+					);
+				`);
+				await database.execute(`
+					INSERT INTO public.deck_cards (deck_id, card_id)
+					VALUES
+						('${deckId}'::uuid, '${publicCard.id}'::uuid),
+						('${deckId}'::uuid, '${privateCardId}'::uuid)
+				`);
+				const rows = await database.query<{ relation_count: number }>(`
+					SELECT count(*)::int AS relation_count
+					FROM public.deck_cards WHERE deck_id = '${deckId}'::uuid
+				`);
+				expect(rows).toEqual([{ relation_count: 2 }]);
+			} finally {
+				await database.execute(`
+					DELETE FROM public.decks WHERE id = '${deckId}'::uuid;
+					DELETE FROM public.cards WHERE id = '${privateCardId}'::uuid
+				`);
+			}
+		});
 
 		// @category: edge-case
 		// @dependency: deck_cards owner trigger
 		// @complexity: high
-		it.todo("IT-OWNER-03: deck_cards INSERT/UPDATEのcross-owner private card差替えをservice roleでも拒否する");
+		it("IT-OWNER-03: deck_cards INSERT/UPDATEのcross-owner private card差替えをservice roleでも拒否する", async () => {
+			const deckId = randomUUID();
+			const ownerACardId = randomUUID();
+			const ownerBCardId = randomUUID();
+			try {
+				await database.execute(`
+					INSERT INTO public.decks (id, owner_user_id, name)
+					VALUES ('${deckId}'::uuid, '${S10_ACTORS.ownerA.userId}'::uuid, 'S10 cross-owner deck');
+					INSERT INTO public.cards (
+						id, owner_user_id, visibility, skill, pattern, front_text, back_text, card_key
+					)
+					VALUES
+						('${ownerACardId}'::uuid, '${S10_ACTORS.ownerA.userId}'::uuid, 'private', 'reading', 'R1', ${sqlLiteral(`owner-a-${ownerACardId}`)}, 'back', 'ignored-a'),
+						('${ownerBCardId}'::uuid, '${S10_ACTORS.ownerB.userId}'::uuid, 'private', 'reading', 'R1', ${sqlLiteral(`owner-b-${ownerBCardId}`)}, 'back', 'ignored-b')
+				`);
+
+				const insertMismatch = await database.captureError(`
+					INSERT INTO public.deck_cards (deck_id, card_id)
+					VALUES ('${deckId}'::uuid, '${ownerBCardId}'::uuid)
+				`);
+				expect(insertMismatch).toEqual({ sqlState: "P1003", constraint: null });
+
+				await database.execute(`
+					INSERT INTO public.deck_cards (deck_id, card_id)
+					VALUES ('${deckId}'::uuid, '${ownerACardId}'::uuid)
+				`);
+				const updateMismatch = await database.captureError(`
+					UPDATE public.deck_cards
+					SET card_id = '${ownerBCardId}'::uuid
+					WHERE deck_id = '${deckId}'::uuid AND card_id = '${ownerACardId}'::uuid
+				`);
+				expect(updateMismatch).toEqual({ sqlState: "P1003", constraint: null });
+
+				const serviceMismatch = await database.captureError(`
+					INSERT INTO public.deck_cards (deck_id, card_id)
+					VALUES ('${deckId}'::uuid, '${ownerBCardId}'::uuid)
+				`, { actor: S10_ACTORS.service });
+				expect(serviceMismatch).toEqual({ sqlState: "42501", constraint: null });
+
+				const rows = await database.query<{ card_id: string }>(`
+					SELECT card_id FROM public.deck_cards WHERE deck_id = '${deckId}'::uuid
+				`);
+				expect(rows).toEqual([{ card_id: ownerACardId }]);
+			} finally {
+				await database.execute(`
+					DELETE FROM public.decks WHERE id = '${deckId}'::uuid;
+					DELETE FROM public.cards WHERE id IN ('${ownerACardId}'::uuid, '${ownerBCardId}'::uuid)
+				`);
+			}
+		});
 
 		// @category: integration
 		// @dependency: relation grants, set_card_* RPC
