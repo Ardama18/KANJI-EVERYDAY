@@ -117,6 +117,15 @@ interface MarkFailedResult {
 	batchStatus: "processing" | "completed";
 }
 
+interface UndoImportResult {
+	batchId: string;
+	status: "undone";
+	deletedCardCount: number;
+	deletedSkipCount: number;
+	autoDeckStatus: "deleted" | "retained" | "not_applicable";
+	autoDeckId: string | null;
+}
+
 interface FinalizeFixture {
 	marker: string;
 	deckId: string;
@@ -125,6 +134,15 @@ interface FinalizeFixture {
 	conceptId: string;
 	uploadId?: string;
 	illustrationId?: string;
+}
+
+interface UndoFixture {
+	marker: string;
+	batchId: string;
+	deckId: string;
+	itemIds: string[];
+	cardIds: string[];
+	reservationKey: string;
 }
 
 interface CommitFixture {
@@ -268,6 +286,17 @@ async function markFailed(params: MarkFailedParams): Promise<MarkFailedResult> {
 	return result;
 }
 
+function undoImportSql(batchId: string, internal = false): string {
+	return internal
+		? `SELECT public.undo_import_internal('${S10_ACTORS.ownerA.userId}'::uuid,'${batchId}'::uuid) AS result`
+		: `SELECT public.undo_import('${batchId}'::uuid) AS result`;
+}
+
+async function undoImport(batchId: string): Promise<UndoImportResult> {
+	const rows=await database.query<{result:UndoImportResult}>(undoImportSql(batchId),{actor:S10_ACTORS.ownerA});
+	const result=rows[0]?.result; if(result===undefined) throw new Error("undo result missing"); return result;
+}
+
 async function createStorageObject(params: {
 	path: string;
 	ownerUserId?: string;
@@ -357,6 +386,34 @@ async function cleanupFinalizeFixture(fixture: FinalizeFixture): Promise<void> {
 	await database.execute(`DELETE FROM public.illustrations WHERE illustration_key LIKE ${sqlLiteral(`%${fixture.marker}%`)}`);
 	await cleanupUploadFixtures(fixture.marker);
 }
+
+async function createUndoFixture(autoDeck=false,itemCount=2): Promise<UndoFixture> {
+	const marker=`undo-${randomUUID()}`;
+	const items=Array.from({length:itemCount},(_,index)=>({clientItemId:`item-${index}-${marker}`,conceptId:`concept-${index}-${marker}`,pattern:"R1" as const,front:`漢字 ${index} ${marker}`,back:`かんじ ${index} ${marker}`,tags:[`共有 ${marker.slice(-8)}`],image:{mode:"none" as const}}));
+	const commitFixture=await createCommitFixture({marker,deck:autoDeck?{create:{name:`auto-${marker}`}}:undefined,items});
+	await createCommitReservation(commitFixture);
+	const committed=await commitImport({source:"app_ai",idempotencyKey:commitFixture.idempotencyKey,importRequestHash:commitFixture.importRequestHash,request:commitFixture.request,cardReservationKey:commitFixture.reservationKey});
+	const rows=await database.query<{id:string}>(`SELECT id::text FROM public.ai_import_items WHERE batch_id='${committed.batchId}' ORDER BY ordinal`);
+	const cardIds:string[]=[];
+	for(const row of rows){ const result=await finalizeItem({batchId:committed.batchId,itemId:row.id}); if(result.cardId===undefined) throw new Error("undo fixture card missing"); cardIds.push(result.cardId); }
+	const [batch]=await database.query<{deck:string}>(`SELECT target_deck_id::text deck FROM public.ai_import_batches WHERE id='${committed.batchId}'`);
+	if(batch===undefined) throw new Error("undo fixture batch missing");
+	return {marker,batchId:committed.batchId,deckId:batch.deck,itemIds:rows.map(row=>row.id),cardIds,reservationKey:commitFixture.reservationKey};
+}
+
+async function cleanupUndoFixture(fixture: UndoFixture): Promise<void> {
+	await cleanupCommitFixtures([fixture.marker]);
+}
+
+const undoSnapshotQueries=(fixture:UndoFixture)=>[
+	{name:"batch",sql:`SELECT status,target_deck_id::text,auto_created_deck_id::text,undo_result,undone_at FROM public.ai_import_batches WHERE id='${fixture.batchId}'`},
+	{name:"items",sql:`SELECT id::text,status,result_card_id::text,deleted_card_id::text,user_edited_at,undone_at FROM public.ai_import_items WHERE batch_id='${fixture.batchId}' ORDER BY id`},
+	{name:"cards",sql:`SELECT id::text,front_text FROM public.cards WHERE id=ANY(ARRAY[${fixture.cardIds.map(id=>`'${id}'::uuid`).join(",")}]) ORDER BY id`},
+	{name:"deckCards",sql:`SELECT deck_id::text,card_id::text FROM public.deck_cards WHERE card_id=ANY(ARRAY[${fixture.cardIds.map(id=>`'${id}'::uuid`).join(",")}]) ORDER BY deck_id,card_id`},
+	{name:"cardTags",sql:`SELECT card_id::text,tag_id::text FROM public.card_tags WHERE card_id=ANY(ARRAY[${fixture.cardIds.map(id=>`'${id}'::uuid`).join(",")}]) ORDER BY card_id,tag_id`},
+	{name:"itemTags",sql:`SELECT item_id::text,tag_id::text FROM public.ai_import_item_tags WHERE item_id=ANY(ARRAY[${fixture.itemIds.map(id=>`'${id}'::uuid`).join(",")}]) ORDER BY item_id,tag_id`},
+	{name:"quota",sql:`SELECT reservation_key,batch_id::text,status,units FROM public.ai_quota_reservations WHERE reservation_key='${fixture.reservationKey}'`},
+] as const;
 
 const finalizeSnapshotQueries = (fixture: FinalizeFixture) => [
 	{ name: "cards", sql: `SELECT id::text, illustration_key FROM public.cards WHERE owner_user_id='${S10_ACTORS.ownerA.userId}' AND (front_text LIKE '%${fixture.marker}%' OR back_text LIKE '%${fixture.marker}%') ORDER BY id` },
@@ -2227,7 +2284,31 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 		// @category: integration
 		// @dependency: undo_import
 		// @complexity: high
-		it.todo("IT-UNDO-01: 非owner undoをnot-found相当、編集済みitemをCARD_MODIFIEDとしてbatch全体を副作用0で拒否する");
+		it("IT-UNDO-01: 非owner undoをnot-found相当、編集済みitemをCARD_MODIFIEDとしてbatch全体を副作用0で拒否する", async () => {
+			const edited=await createUndoFixture(); const active=await createUndoFixture(); const session=randomUUID();
+			try {
+				const [contextOrder]=await database.query<{enable:number;disable:number}>(`WITH source AS(SELECT pg_get_functiondef('public.undo_import_internal(uuid,uuid)'::regprocedure) definition) SELECT strpos(definition,'ai_enable_internal_context')::int enable,strpos(definition,'ai_disable_internal_context')::int disable FROM source`);
+				expect(contextOrder?.enable).toBeGreaterThan(0); expect(contextOrder?.disable).toBeGreaterThan(contextOrder?.enable??0);
+				const untouched=await captureS10Snapshot(database,undoSnapshotQueries(edited));
+				expect((await database.captureError(undoImportSql(edited.batchId),{actor:S10_ACTORS.ownerB})).sqlState).toBe("P1003");
+				expect(await captureS10Snapshot(database,undoSnapshotQueries(edited))).toEqual(untouched);
+				const [card]=await database.query<{updated:string}>(`SELECT updated_at::text updated FROM public.cards WHERE id='${edited.cardIds[0]}'`);
+				await database.query(`SELECT public.update_imported_card('${edited.cardIds[0]}','{"frontText":"編集済 漢字"}'::jsonb,'${card?.updated}'::timestamptz)`,{actor:S10_ACTORS.ownerA});
+				const editedSnapshot=await captureS10Snapshot(database,undoSnapshotQueries(edited));
+				const modified=await database.captureError(undoImportSql(edited.batchId),{actor:S10_ACTORS.ownerA}); expect(modified.sqlState).toBe("P1007"); expect(modified.detail).toContain(edited.cardIds[0]);
+				expect(await captureS10Snapshot(database,undoSnapshotQueries(edited))).toEqual(editedSnapshot);
+				await database.execute(`INSERT INTO public.study_sessions(id,user_id,deck_id,current_card_id) VALUES('${session}','${S10_ACTORS.ownerA.userId}','${active.deckId}','${active.cardIds[1]}')`);
+				const activeSnapshot=await captureS10Snapshot(database,undoSnapshotQueries(active));
+				expect((await database.captureError(undoImportSql(active.batchId),{actor:S10_ACTORS.ownerA})).sqlState).toBe("P1006");
+				expect(await captureS10Snapshot(database,undoSnapshotQueries(active))).toEqual(activeSnapshot);
+				await database.execute(`DELETE FROM public.study_sessions WHERE id='${session}'`);
+				expect(await database.query<{edited:boolean}>(`SELECT user_edited_at IS NOT NULL edited FROM public.ai_import_items WHERE batch_id='${active.batchId}' ORDER BY id`)).toEqual([{edited:false},{edited:false}]);
+				for(const failpoint of ["undo_after_relations","undo_after_cards","undo_after_items","undo_after_tags","undo_after_auto_deck"]){ const before=await captureS10Snapshot(database,undoSnapshotQueries(active)); expect((await database.captureError(undoImportSql(active.batchId),{actor:S10_ACTORS.ownerA,failpoint})).sqlState).toBe("P1008"); expect(await captureS10Snapshot(database,undoSnapshotQueries(active))).toEqual(before); await database.execute(`DO $test$ BEGIN BEGIN PERFORM set_config('app.s10_failpoint','${failpoint}',true); PERFORM public.undo_import_internal('${S10_ACTORS.ownerA.userId}'::uuid,'${active.batchId}'::uuid); RAISE EXCEPTION 'expected failpoint'; EXCEPTION WHEN SQLSTATE 'P1008' THEN NULL; END; IF public.ai_internal_context_active() IS DISTINCT FROM false THEN RAISE EXCEPTION 'undo internal context leaked after ${failpoint}'; END IF; END $test$`); expect(await captureS10Snapshot(database,undoSnapshotQueries(active))).toEqual(before); }
+				const beforeLeak=await captureS10Snapshot(database,undoSnapshotQueries(active)); expect((await database.captureError(`${undoImportSql(active.batchId)}; UPDATE public.cards SET illustration_key='leaked' WHERE id='${edited.cardIds[1]}'`,{actor:S10_ACTORS.ownerA})).sqlState).toBe("42501"); expect(await captureS10Snapshot(database,undoSnapshotQueries(active))).toEqual(beforeLeak); expect(await database.query<{n:number}>(`SELECT count(*)::int n FROM s10_private.management_mutation_context`)).toEqual([{n:0}]);
+				const [undone]=await database.query<{active:boolean;result:UndoImportResult}>(`WITH result AS MATERIALIZED(SELECT public.undo_import_internal('${S10_ACTORS.ownerA.userId}'::uuid,'${active.batchId}'::uuid) result) SELECT public.ai_internal_context_active() active,result FROM result`); expect(undone?.active).toBe(false); expect(undone?.result.status).toBe("undone"); expect(await database.query<{edited:boolean}>(`SELECT user_edited_at IS NOT NULL edited FROM public.ai_import_items WHERE batch_id='${active.batchId}' ORDER BY id`)).toEqual([{edited:false},{edited:false}]);
+				expect((await database.captureError(undoImportSql(active.batchId,true),{actor:S10_ACTORS.ownerA})).sqlState).toBe("42501");
+			} finally { await database.execute(`DELETE FROM public.study_sessions WHERE id='${session}'`); await cleanupUndoFixture(edited); await cleanupUndoFixture(active); }
+		});
 
 		// @category: integration
 		// @dependency: delete tombstone trigger, FK SET NULL
@@ -2248,12 +2329,37 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 		// @category: edge-case
 		// @dependency: undo_result idempotency
 		// @complexity: high
-		it.todo("IT-UNDO-03: 既にundoneのbatchへ再実行すると保存済みundo_resultを返し副作用を増やさない");
+		it("IT-UNDO-03: 既にundoneのbatchへ再実行すると保存済みundo_resultを返し副作用を増やさない", async () => {
+			const fixture=await createUndoFixture(); const otherCard=randomUUID();
+			try {
+				const [shared]=await database.query<{tag:string}>(`SELECT tag_id::text tag FROM public.ai_import_item_tags WHERE item_id='${fixture.itemIds[0]}' LIMIT 1`);
+				if(shared===undefined) throw new Error("shared undo tag missing");
+				await database.execute(`INSERT INTO public.cards(id,owner_user_id,visibility,skill,pattern,front_text,back_text,card_key) VALUES('${otherCard}','${S10_ACTORS.ownerA.userId}','private','reading','R1','他 漢字 ${otherCard}','other','ignored'); INSERT INTO public.card_tags(owner_user_id,card_id,tag_id) VALUES('${S10_ACTORS.ownerA.userId}','${otherCard}','${shared.tag}')`);
+				const publicBefore=await database.query<{n:number}>(`SELECT count(*)::int n FROM public.cards WHERE visibility='public'`); const usageBefore=await database.query<Record<string,unknown>>(`SELECT * FROM public.ai_usage_daily WHERE owner_user_id='${S10_ACTORS.ownerA.userId}' ORDER BY usage_date`);
+				const first=await undoImport(fixture.batchId); expect(first).toMatchObject({status:"undone",deletedCardCount:2,deletedSkipCount:0,autoDeckStatus:"not_applicable",autoDeckId:null});
+				const after=await captureS10Snapshot(database,undoSnapshotQueries(fixture)); const second=await undoImport(fixture.batchId); expect(second).toEqual(first); expect(await captureS10Snapshot(database,undoSnapshotQueries(fixture))).toEqual(after);
+				expect(await database.query<Record<string,unknown>>(`SELECT status,result_card_id,undone_at IS NOT NULL undone FROM public.ai_import_items WHERE batch_id='${fixture.batchId}' ORDER BY id`)).toEqual([{status:"undone",result_card_id:null,undone:true},{status:"undone",result_card_id:null,undone:true}]);
+				expect(await database.query<{card:number;tag:number;itemTags:number;quota:number}>(`SELECT (SELECT count(*)::int FROM public.cards WHERE id='${otherCard}') card,(SELECT count(*)::int FROM public.tags WHERE id='${shared.tag}') tag,(SELECT count(*)::int FROM public.ai_import_item_tags WHERE item_id=ANY(ARRAY['${fixture.itemIds[0]}','${fixture.itemIds[1]}']::uuid[])) "itemTags",(SELECT count(*)::int FROM public.ai_quota_reservations WHERE reservation_key='${fixture.reservationKey}' AND batch_id='${fixture.batchId}') quota`)).toEqual([{card:1,tag:1,itemTags:0,quota:1}]);
+				expect(await database.query<{n:number}>(`SELECT count(*)::int n FROM public.cards WHERE visibility='public'`)).toEqual(publicBefore); expect(await database.query<Record<string,unknown>>(`SELECT * FROM public.ai_usage_daily WHERE owner_user_id='${S10_ACTORS.ownerA.userId}' ORDER BY usage_date`)).toEqual(usageBefore);
+			} finally { await database.execute(`DELETE FROM public.cards WHERE id='${otherCard}'`); await cleanupUndoFixture(fixture); }
+		});
 
 		// @category: integration
 		// @dependency: auto deck cleanup
 		// @complexity: high
-		it.todo("IT-UNDO-04: auto-created deckはundo後空なら削除、他cardが残れば維持しtarget/auto FKをNULL化して履歴を守る");
+		it("IT-UNDO-04: auto-created deckはundo後空なら削除、他cardが残れば維持しtarget/auto FKをNULL化して履歴を守る", async () => {
+			const empty=await createUndoFixture(true); const retained=await createUndoFixture(true); const other=randomUUID();
+			try {
+				await database.execute(`INSERT INTO public.cards(id,owner_user_id,visibility,skill,pattern,front_text,back_text,card_key) VALUES('${other}','${S10_ACTORS.ownerA.userId}','private','reading','R1','保持 漢字 ${other}','other','ignored'); INSERT INTO public.deck_cards(deck_id,card_id) VALUES('${retained.deckId}','${other}')`);
+				const [deletedCard]=await database.query<{updated:string}>(`SELECT updated_at::text updated FROM public.cards WHERE id='${retained.cardIds[0]}'`); await database.query(`SELECT public.delete_private_card('${retained.cardIds[0]}','${deletedCard?.updated}'::timestamptz)`,{actor:S10_ACTORS.ownerA});
+				const deleted=await undoImport(empty.batchId); const kept=await undoImport(retained.batchId);
+				expect(deleted).toMatchObject({deletedCardCount:2,deletedSkipCount:0,autoDeckStatus:"deleted",autoDeckId:empty.deckId}); expect(kept).toMatchObject({deletedCardCount:1,deletedSkipCount:1,autoDeckStatus:"retained",autoDeckId:retained.deckId});
+				expect(await database.query<Record<string,unknown>>(`SELECT target_deck_id,auto_created_deck_id FROM public.ai_import_batches WHERE id='${empty.batchId}'`)).toEqual([{target_deck_id:null,auto_created_deck_id:null}]);
+				expect(await database.query<Record<string,unknown>>(`SELECT target_deck_id::text,auto_created_deck_id::text FROM public.ai_import_batches WHERE id='${retained.batchId}'`)).toEqual([{target_deck_id:retained.deckId,auto_created_deck_id:retained.deckId}]);
+				expect(await database.query<Record<string,unknown>>(`SELECT status,deleted_card_id::text deleted,result_card_id FROM public.ai_import_items WHERE id='${retained.itemIds[0]}'`)).toEqual([{status:"deleted",deleted:retained.cardIds[0],result_card_id:null}]);
+				expect(await database.query<{empty:number;retained:number;other:number}>(`SELECT (SELECT count(*)::int FROM public.decks WHERE id='${empty.deckId}') empty,(SELECT count(*)::int FROM public.decks WHERE id='${retained.deckId}') retained,(SELECT count(*)::int FROM public.cards WHERE id='${other}') other`)).toEqual([{empty:0,retained:1,other:1}]);
+			} finally { await database.execute(`DELETE FROM public.cards WHERE id='${other}'`); await cleanupUndoFixture(empty); await cleanupUndoFixture(retained); }
+		});
 	});
 
 	describe("lock交差・trigger security・migration (AC-03/09/10)", () => {
@@ -2262,7 +2368,20 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 		// @category: integration
 		// @dependency: parallel lock-intersection harness
 		// @complexity: high
-		it.todo("IT-LOCK-01: commit/finalize/undo/session/direct card/relation管理RPC/illustration/cascade交差を反復してdeadlock 0を確認する");
+		it("IT-LOCK-01: commit/finalize/undo/session/direct card/relation管理RPC/illustration/cascade交差を反復してdeadlock 0を確認する", async () => {
+			const forbidden=new Set(["40P01","55P03","57014"]); const assertOutcomes=(path:string,outcomes:({sqlState:string|null}|null)[])=>{ for(const outcome of outcomes) expect(forbidden.has(outcome?.sqlState??""),`${path}:${outcome?.sqlState}`).toBe(false); };
+			const [order]=await database.query<{card:number;advisory:number;batch:number;items:number;deck:number;relations:number}>(`WITH source AS(SELECT pg_get_functiondef('public.undo_import_internal(uuid,uuid)'::regprocedure) definition) SELECT strpos(definition,'FROM public.cards AS cards')::int card,strpos(definition,'pg_advisory_xact_lock')::int advisory,strpos(definition,'SELECT batches.* INTO locked_batch')::int batch,strpos(definition,E'PERFORM 1\\n  FROM public.ai_import_items AS items')::int items,strpos(definition,'FROM public.decks AS auto_decks')::int deck,strpos(definition,'FROM public.deck_cards AS relations')::int relations FROM source`); const positions=[order?.card,order?.advisory,order?.batch,order?.items,order?.deck,order?.relations] as number[]; expect(positions.every(value=>value>0)).toBe(true); expect(positions).toEqual([...positions].sort((a,b)=>a-b));
+			for(let iteration=0;iteration<2;iteration++){
+				const sessionFixture=await createUndoFixture(); const relationFixture=await createUndoFixture(); const finalizeFixture=await createFinalizeFixture(); const illustration=randomUUID(),session=randomUUID();
+				try {
+					const settings=`SET LOCAL deadlock_timeout='50ms'; SET LOCAL lock_timeout='1500ms';`;
+					assertOutcomes(`session-${iteration}`,await Promise.all([createS10DbClient().settle(`${settings} ${undoImportSql(sessionFixture.batchId)}`,{actor:S10_ACTORS.ownerA}),createS10DbClient().settle(`BEGIN; ${settings} INSERT INTO public.study_sessions(id,user_id,deck_id,current_card_id) VALUES('${session}','${S10_ACTORS.ownerA.userId}','${sessionFixture.deckId}','${sessionFixture.cardIds[0]}'); COMMIT;`)]));
+					await database.execute(`INSERT INTO public.illustrations(id,owner_user_id,illustration_key,status,storage_path) VALUES('${illustration}','${S10_ACTORS.ownerA.userId}','lock-${illustration}','ready','${S10_ACTORS.ownerA.userId}/lock-${illustration}.webp')`);
+					assertOutcomes(`relation-illustration-${iteration}`,await Promise.all([createS10DbClient().settle(`${settings} ${undoImportSql(relationFixture.batchId)}`,{actor:S10_ACTORS.ownerA}),createS10DbClient().settle(`${settings} SELECT public.set_card_illustration('${relationFixture.cardIds[0]}','${illustration}'); SELECT public.set_card_decks('${relationFixture.cardIds[0]}',ARRAY['${relationFixture.deckId}']::uuid[]);`,{actor:S10_ACTORS.ownerA})]));
+					assertOutcomes(`finalize-${iteration}`,await Promise.all([createS10DbClient().settle(`${settings} ${undoImportSql(finalizeFixture.batchId)}`,{actor:S10_ACTORS.ownerA}),createS10DbClient().settle(`${settings} ${finalizeItemSql({batchId:finalizeFixture.batchId,itemId:finalizeFixture.itemId})}`,{actor:S10_ACTORS.service})]));
+				} finally { await database.execute(`DELETE FROM public.study_sessions WHERE id='${session}'; DELETE FROM public.illustrations WHERE id='${illustration}'`); await cleanupUndoFixture(sessionFixture); await cleanupUndoFixture(relationFixture); await cleanupFinalizeFixture(finalizeFixture); }
+			}
+		});
 
 		// @category: integration
 		// @dependency: SECURITY DEFINER catalog assertions

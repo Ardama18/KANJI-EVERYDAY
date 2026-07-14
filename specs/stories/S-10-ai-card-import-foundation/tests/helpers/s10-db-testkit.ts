@@ -40,6 +40,10 @@ export interface S10DbClient {
 		sql: string,
 		context?: S10ExecutionContext
 	): Promise<S10DatabaseErrorDiagnostic>;
+	settle(
+		sql: string,
+		context?: S10ExecutionContext
+	): Promise<S10DatabaseErrorDiagnostic | null>;
 }
 
 export const S10_ACTORS = {
@@ -101,6 +105,12 @@ export function createS10DbClient(databaseUrl = requireS10TestDatabaseUrl()): S1
 			context?: S10ExecutionContext
 		): Promise<S10DatabaseErrorDiagnostic> {
 			return await capturePsqlError(databaseUrl, buildContextSql(sql, context));
+		},
+		async settle(
+			sql: string,
+			context?: S10ExecutionContext
+		): Promise<S10DatabaseErrorDiagnostic | null> {
+			return await settlePsql(databaseUrl, buildContextSql(sql, context));
 		},
 	};
 }
@@ -288,6 +298,33 @@ async function capturePsqlError(
 					});
 				}
 				resolve(diagnostic);
+			}
+		);
+	});
+}
+
+async function settlePsql(
+	databaseUrl: string,
+	sql: string
+): Promise<S10DatabaseErrorDiagnostic | null> {
+	return await new Promise((resolve) => {
+		execFile(
+			"psql",
+			[databaseUrl, "-v", "ON_ERROR_STOP=1", "-v", "VERBOSITY=verbose", "-X", "-A", "-t", "-q", "-c", sql],
+			{
+				encoding: "utf8",
+				env: { ...process.env, PGAPPNAME: "s10-ai-card-import-tests" },
+				maxBuffer: 10 * 1024 * 1024,
+			},
+			(error, _stdout, stderr) => {
+				if (error === null) {
+					resolve(null);
+					return;
+				}
+				resolve({
+					sqlState: /ERROR:\s+([0-9A-Z]{5}):/u.exec(stderr)?.[1] ?? null,
+					constraint: /CONSTRAINT NAME:\s+([^\s]+)/u.exec(stderr)?.[1] ?? null,
+				});
 			}
 		);
 	});

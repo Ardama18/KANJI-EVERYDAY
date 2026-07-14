@@ -842,6 +842,17 @@ BEGIN
 END;
 $$;
 
+CREATE FUNCTION public.ai_disable_internal_context()
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+BEGIN
+  PERFORM set_config('app.s10_internal_token', '', true);
+END;
+$$;
+
 CREATE FUNCTION public.ai_internal_context_active()
 RETURNS boolean
 LANGUAGE sql
@@ -849,7 +860,7 @@ STABLE
 SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $$
-  SELECT current_setting('app.s10_internal_token', true) = secrets.token
+  SELECT COALESCE(current_setting('app.s10_internal_token', true) = secrets.token, false)
   FROM s10_private.internal_context_secret AS secrets
   WHERE secrets.singleton
 $$;
@@ -2435,6 +2446,233 @@ RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg
 DECLARE actor_id uuid; BEGIN IF current_setting('request.jwt.claim.role',true) IS DISTINCT FROM 'authenticated' THEN PERFORM public.ai_raise_import_error('UNAUTHORIZED'); END IF; actor_id:=NULLIF(current_setting('request.jwt.claim.sub',true),'')::uuid; IF actor_id IS NULL THEN PERFORM public.ai_raise_import_error('UNAUTHORIZED'); END IF; RETURN public.set_card_illustration_internal(actor_id,p_card_id,p_illustration_id); END;
 $$;
 
+CREATE FUNCTION public.undo_import_internal(
+  p_owner_user_id uuid,
+  p_batch_id uuid
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE initial_batch public.ai_import_batches%ROWTYPE;
+DECLARE locked_batch public.ai_import_batches%ROWTYPE;
+DECLARE candidate_card_ids uuid[] := '{}'::uuid[];
+DECLARE current_card_ids uuid[] := '{}'::uuid[];
+DECLARE illustration_ids uuid[] := '{}'::uuid[];
+DECLARE candidate_tag_ids uuid[] := '{}'::uuid[];
+DECLARE candidate_card_id uuid;
+DECLARE candidate_illustration_id uuid;
+DECLARE modified_card_id uuid;
+DECLARE auto_deck_owner uuid;
+DECLARE deleted_card_count integer := 0;
+DECLARE deleted_skip_count integer := 0;
+DECLARE auto_deck_status text := 'not_applicable';
+DECLARE original_auto_deck_id uuid;
+DECLARE result jsonb;
+BEGIN
+  SELECT batches.* INTO initial_batch
+  FROM public.ai_import_batches AS batches
+  WHERE batches.id = p_batch_id;
+  IF NOT FOUND OR initial_batch.owner_user_id IS DISTINCT FROM p_owner_user_id THEN
+    PERFORM public.ai_raise_import_error('DECK_NOT_FOUND');
+  END IF;
+
+  SELECT COALESCE(array_agg(items.result_card_id ORDER BY items.result_card_id),'{}'::uuid[])
+  INTO candidate_card_ids
+  FROM public.ai_import_items AS items
+  WHERE items.batch_id = p_batch_id AND items.owner_user_id = p_owner_user_id
+    AND items.status = 'finalized' AND items.result_card_id IS NOT NULL;
+
+  FOREACH candidate_card_id IN ARRAY candidate_card_ids LOOP
+    PERFORM 1
+    FROM public.cards AS cards
+    WHERE cards.id = candidate_card_id AND cards.owner_user_id = p_owner_user_id
+      AND cards.visibility = 'private'
+    FOR UPDATE;
+  END LOOP;
+
+  FOREACH candidate_card_id IN ARRAY candidate_card_ids LOOP
+    PERFORM pg_advisory_xact_lock(hashtextextended(candidate_card_id::text,1010));
+  END LOOP;
+
+  SELECT COALESCE(array_agg(DISTINCT illustrations.id ORDER BY illustrations.id),'{}'::uuid[])
+  INTO illustration_ids
+  FROM public.cards AS cards
+  JOIN public.illustrations AS illustrations
+    ON illustrations.owner_user_id = p_owner_user_id
+   AND illustrations.illustration_key = cards.illustration_key
+  WHERE cards.id = ANY(candidate_card_ids);
+  FOREACH candidate_illustration_id IN ARRAY illustration_ids LOOP
+    PERFORM 1 FROM public.illustrations AS illustrations
+    WHERE illustrations.id = candidate_illustration_id
+    FOR UPDATE;
+  END LOOP;
+
+  SELECT batches.* INTO locked_batch
+  FROM public.ai_import_batches AS batches
+  WHERE batches.id = p_batch_id AND batches.owner_user_id = p_owner_user_id
+  FOR UPDATE;
+  IF NOT FOUND THEN PERFORM public.ai_raise_import_error('DECK_NOT_FOUND'); END IF;
+  IF locked_batch.status = 'undone' THEN
+    RETURN locked_batch.undo_result;
+  END IF;
+
+  PERFORM 1
+  FROM public.ai_import_items AS items
+  WHERE items.batch_id = p_batch_id AND items.owner_user_id = p_owner_user_id
+  ORDER BY items.id
+  FOR UPDATE;
+
+  SELECT COALESCE(array_agg(items.result_card_id ORDER BY items.result_card_id),'{}'::uuid[])
+  INTO current_card_ids
+  FROM public.ai_import_items AS items
+  WHERE items.batch_id = p_batch_id AND items.owner_user_id = p_owner_user_id
+    AND items.status = 'finalized' AND items.result_card_id IS NOT NULL;
+  IF current_card_ids IS DISTINCT FROM candidate_card_ids THEN
+    PERFORM public.ai_raise_import_error('CONFLICT');
+  END IF;
+
+  SELECT items.result_card_id INTO modified_card_id
+  FROM public.ai_import_items AS items
+  WHERE items.batch_id = p_batch_id AND items.owner_user_id = p_owner_user_id
+    AND items.status = 'finalized' AND items.user_edited_at IS NOT NULL
+  ORDER BY items.result_card_id
+  LIMIT 1;
+  IF modified_card_id IS NOT NULL THEN
+    PERFORM public.ai_raise_import_error(
+      'CARD_MODIFIED',jsonb_build_object('cardId',modified_card_id)
+    );
+  END IF;
+
+  FOREACH candidate_card_id IN ARRAY candidate_card_ids LOOP
+    PERFORM public.ai_assert_card_inactive(candidate_card_id,p_owner_user_id);
+  END LOOP;
+
+  original_auto_deck_id := locked_batch.auto_created_deck_id;
+  IF original_auto_deck_id IS NOT NULL THEN
+    SELECT auto_decks.owner_user_id INTO auto_deck_owner
+    FROM public.decks AS auto_decks
+    WHERE auto_decks.id = original_auto_deck_id
+    FOR UPDATE;
+    IF NOT FOUND OR auto_deck_owner IS DISTINCT FROM p_owner_user_id THEN
+      PERFORM public.ai_raise_import_error('DECK_NOT_FOUND');
+    END IF;
+  END IF;
+
+  PERFORM 1 FROM public.deck_cards AS relations
+  WHERE relations.card_id = ANY(candidate_card_ids)
+  ORDER BY relations.card_id,relations.deck_id FOR UPDATE;
+  PERFORM 1 FROM public.card_tags AS relations
+  WHERE relations.card_id = ANY(candidate_card_ids)
+  ORDER BY relations.card_id,relations.tag_id FOR UPDATE;
+  PERFORM 1 FROM public.ai_import_item_tags AS relations
+  JOIN public.ai_import_items AS items ON items.id = relations.item_id
+  WHERE items.batch_id = p_batch_id AND items.owner_user_id = p_owner_user_id
+  ORDER BY relations.item_id,relations.tag_id FOR UPDATE OF relations;
+
+  SELECT COALESCE(array_agg(DISTINCT relations.tag_id ORDER BY relations.tag_id),'{}'::uuid[])
+  INTO candidate_tag_ids
+  FROM public.ai_import_item_tags AS relations
+  JOIN public.ai_import_items AS items ON items.id = relations.item_id
+  WHERE items.batch_id = p_batch_id AND items.owner_user_id = p_owner_user_id;
+  PERFORM 1 FROM public.tags AS tags
+  WHERE tags.id = ANY(candidate_tag_ids) AND tags.owner_user_id = p_owner_user_id
+  ORDER BY tags.id FOR UPDATE;
+
+  SELECT count(*) INTO deleted_skip_count
+  FROM public.ai_import_items AS items
+  WHERE items.batch_id = p_batch_id AND items.owner_user_id = p_owner_user_id
+    AND items.status = 'deleted';
+
+  PERFORM public.ai_enable_internal_context();
+
+  DELETE FROM public.deck_cards AS relations
+  WHERE relations.card_id = ANY(candidate_card_ids)
+    AND relations.deck_id = locked_batch.target_deck_id;
+  DELETE FROM public.card_tags AS relations
+  WHERE relations.card_id = ANY(candidate_card_ids)
+    AND relations.tag_id = ANY(candidate_tag_ids);
+  IF current_setting('app.s10_failpoint',true) = 'undo_after_relations' THEN
+    PERFORM public.ai_raise_import_error('CONFLICT');
+  END IF;
+
+  UPDATE public.ai_import_items AS items
+  SET status='undone',result_card_id=NULL,deleted_card_id=NULL,
+      undone_at=statement_timestamp()
+  WHERE items.batch_id=p_batch_id AND items.owner_user_id=p_owner_user_id
+    AND items.status <> 'deleted';
+  IF current_setting('app.s10_failpoint',true) = 'undo_after_items' THEN
+    PERFORM public.ai_raise_import_error('CONFLICT');
+  END IF;
+
+  DELETE FROM public.cards AS cards
+  WHERE cards.id = ANY(candidate_card_ids) AND cards.owner_user_id=p_owner_user_id
+    AND cards.visibility='private';
+  GET DIAGNOSTICS deleted_card_count = ROW_COUNT;
+  IF current_setting('app.s10_failpoint',true) = 'undo_after_cards' THEN
+    PERFORM public.ai_raise_import_error('CONFLICT');
+  END IF;
+
+  DELETE FROM public.ai_import_item_tags AS relations
+  USING public.ai_import_items AS items
+  WHERE items.id=relations.item_id AND items.batch_id=p_batch_id
+    AND items.owner_user_id=p_owner_user_id;
+  DELETE FROM public.tags AS tags
+  WHERE tags.id = ANY(candidate_tag_ids) AND tags.owner_user_id=p_owner_user_id
+    AND NOT EXISTS(SELECT 1 FROM public.ai_import_item_tags AS links WHERE links.tag_id=tags.id)
+    AND NOT EXISTS(SELECT 1 FROM public.card_tags AS links WHERE links.tag_id=tags.id);
+  IF current_setting('app.s10_failpoint',true) = 'undo_after_tags' THEN
+    PERFORM public.ai_raise_import_error('CONFLICT');
+  END IF;
+
+  IF original_auto_deck_id IS NOT NULL THEN
+    IF EXISTS(SELECT 1 FROM public.deck_cards WHERE deck_id=original_auto_deck_id) THEN
+      auto_deck_status := 'retained';
+    ELSE
+      UPDATE public.ai_import_batches
+      SET target_deck_id=NULL,auto_created_deck_id=NULL
+      WHERE id=p_batch_id AND owner_user_id=p_owner_user_id;
+      DELETE FROM public.decks WHERE id=original_auto_deck_id
+        AND owner_user_id=p_owner_user_id;
+      auto_deck_status := 'deleted';
+    END IF;
+  END IF;
+  IF current_setting('app.s10_failpoint',true) = 'undo_after_auto_deck' THEN
+    PERFORM public.ai_raise_import_error('CONFLICT');
+  END IF;
+
+  result := jsonb_build_object(
+    'batchId',p_batch_id,'status','undone',
+    'deletedCardCount',deleted_card_count,'deletedSkipCount',deleted_skip_count,
+    'autoDeckStatus',auto_deck_status,'autoDeckId',original_auto_deck_id
+  );
+  UPDATE public.ai_import_batches
+  SET status='undone',undone_at=statement_timestamp(),undo_result=result
+  WHERE id=p_batch_id AND owner_user_id=p_owner_user_id;
+
+  PERFORM public.ai_disable_internal_context();
+  RETURN result;
+END;
+$$;
+
+CREATE FUNCTION public.undo_import(p_batch_id uuid)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE actor_id uuid;
+BEGIN
+  IF current_setting('request.jwt.claim.role',true) IS DISTINCT FROM 'authenticated' THEN
+    PERFORM public.ai_raise_import_error('UNAUTHORIZED');
+  END IF;
+  actor_id:=NULLIF(current_setting('request.jwt.claim.sub',true),'')::uuid;
+  IF actor_id IS NULL THEN PERFORM public.ai_raise_import_error('UNAUTHORIZED'); END IF;
+  RETURN public.undo_import_internal(actor_id,p_batch_id);
+END;
+$$;
+
 CREATE FUNCTION public.reserve_provider_usage_internal(
   p_owner_user_id uuid,
   p_reservation_key text,
@@ -2781,6 +3019,7 @@ ALTER FUNCTION public.lock_study_session_cards() OWNER TO s10_migration_owner;
 ALTER FUNCTION public.guard_card_active_session() OWNER TO s10_migration_owner;
 ALTER FUNCTION public.reset_review_state_on_content_change() OWNER TO s10_migration_owner;
 ALTER FUNCTION public.ai_enable_internal_context() OWNER TO s10_migration_owner;
+ALTER FUNCTION public.ai_disable_internal_context() OWNER TO s10_migration_owner;
 ALTER FUNCTION public.ai_internal_context_active() OWNER TO s10_migration_owner;
 ALTER FUNCTION public.ai_management_context_active() OWNER TO s10_migration_owner;
 ALTER FUNCTION public.ai_raise_import_error(text, jsonb) OWNER TO s10_migration_owner;
@@ -2800,6 +3039,8 @@ ALTER FUNCTION public.set_card_tags_internal(uuid, uuid, uuid[]) OWNER TO s10_mi
 ALTER FUNCTION public.set_card_tags(uuid, uuid[]) OWNER TO s10_migration_owner;
 ALTER FUNCTION public.set_card_illustration_internal(uuid, uuid, uuid) OWNER TO s10_migration_owner;
 ALTER FUNCTION public.set_card_illustration(uuid, uuid) OWNER TO s10_migration_owner;
+ALTER FUNCTION public.undo_import_internal(uuid, uuid) OWNER TO s10_migration_owner;
+ALTER FUNCTION public.undo_import(uuid) OWNER TO s10_migration_owner;
 ALTER FUNCTION public.ai_prepare_import_request(jsonb) OWNER TO s10_migration_owner;
 ALTER FUNCTION public.commit_import_internal(uuid, text, text, text, jsonb, text)
   OWNER TO s10_migration_owner;
@@ -2838,7 +3079,7 @@ REVOKE ALL ON FUNCTION public.ai_normalize_display_text(text),
   public.mark_import_item_relation_edited(),
   public.update_updated_at_column()
   FROM PUBLIC, anon, authenticated, service_role;
-REVOKE ALL ON FUNCTION public.ai_enable_internal_context(),
+REVOKE ALL ON FUNCTION public.ai_enable_internal_context(), public.ai_disable_internal_context(),
   public.ai_internal_context_active(), public.ai_management_context_active(),
   public.ai_raise_import_error(text, jsonb), public.ai_assert_card_inactive(uuid, uuid),
   public.ai_prepare_import_request(jsonb),
@@ -2852,6 +3093,7 @@ REVOKE ALL ON FUNCTION public.ai_enable_internal_context(),
   public.set_card_decks_internal(uuid, uuid, uuid[]),
   public.set_card_tags_internal(uuid, uuid, uuid[]),
   public.set_card_illustration_internal(uuid, uuid, uuid),
+  public.undo_import_internal(uuid, uuid),
   public.reserve_provider_usage_internal(
     uuid, text, text, text, text, integer, uuid, uuid, text, timestamptz
   )
@@ -2869,7 +3111,7 @@ REVOKE ALL ON FUNCTION public.finalize_import_item(uuid, uuid, uuid, uuid),
 REVOKE ALL ON FUNCTION public.update_imported_card(uuid, jsonb, timestamptz),
   public.delete_private_card(uuid, timestamptz),
   public.set_card_decks(uuid, uuid[]), public.set_card_tags(uuid, uuid[]),
-  public.set_card_illustration(uuid, uuid)
+  public.set_card_illustration(uuid, uuid), public.undo_import(uuid)
   FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.ai_normalize_display_text(text),
   public.ai_normalize_key_text(text), public.ai_compute_card_key(text, text, text)
@@ -2887,20 +3129,21 @@ GRANT EXECUTE ON FUNCTION public.finalize_import_item(uuid, uuid, uuid, uuid),
 GRANT EXECUTE ON FUNCTION public.update_imported_card(uuid, jsonb, timestamptz),
   public.delete_private_card(uuid, timestamptz),
   public.set_card_decks(uuid, uuid[]), public.set_card_tags(uuid, uuid[]),
-  public.set_card_illustration(uuid, uuid)
+  public.set_card_illustration(uuid, uuid), public.undo_import(uuid)
   TO authenticated;
 GRANT USAGE ON SCHEMA extensions TO authenticated, service_role;
 
 GRANT USAGE ON SCHEMA public, extensions, storage TO s10_migration_owner;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.cards TO s10_migration_owner;
-GRANT SELECT, INSERT, UPDATE ON public.decks TO s10_migration_owner;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.decks TO s10_migration_owner;
 GRANT SELECT, UPDATE ON public.illustrations TO s10_migration_owner;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.deck_cards, public.card_tags TO s10_migration_owner;
 GRANT SELECT ON public.study_sessions TO s10_migration_owner;
 GRANT SELECT, DELETE ON public.review_states TO s10_migration_owner;
 GRANT SELECT, INSERT, UPDATE ON public.ai_import_batches, public.ai_import_items,
   public.tags TO s10_migration_owner;
-GRANT SELECT, INSERT ON public.ai_import_item_tags TO s10_migration_owner;
+GRANT DELETE ON public.tags TO s10_migration_owner;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.ai_import_item_tags TO s10_migration_owner;
 GRANT SELECT, INSERT, UPDATE ON public.ai_uploads TO s10_migration_owner;
 GRANT SELECT, INSERT, UPDATE ON public.ai_usage_daily, public.ai_quota_reservations
   TO s10_migration_owner;
