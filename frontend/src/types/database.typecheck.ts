@@ -1,0 +1,71 @@
+import type { CommitImportWrapperArgs, NormalizedImportRequest } from "@/lib/ai-import/schema";
+import { buildCommitImportRpcArgs } from "@/lib/ai-import/schema";
+
+import type { Database, Json } from "./database";
+
+type Tables = Database["public"]["Tables"];
+type Functions = Database["public"]["Functions"];
+
+type RequiredS10Table =
+	| "ai_import_batches"
+	| "ai_import_items"
+	| "ai_uploads"
+	| "tags"
+	| "ai_import_item_tags"
+	| "card_tags"
+	| "ai_usage_daily"
+	| "ai_quota_reservations";
+
+type RequiredPublicWrapper =
+	| "commit_import"
+	| "reserve_provider_usage"
+	| "register_ai_upload"
+	| "finalize_import_item"
+	| "mark_import_item_failed"
+	| "update_imported_card"
+	| "delete_private_card"
+	| "set_card_decks"
+	| "set_card_tags"
+	| "set_card_illustration"
+	| "undo_import";
+
+type Assert<T extends true> = T;
+type AllTablesPresent = Assert<
+	Exclude<RequiredS10Table, keyof Tables> extends never ? true : false
+>;
+type AllWrappersPresent = Assert<
+	Exclude<RequiredPublicWrapper, keyof Functions> extends never ? true : false
+>;
+
+export type CardsRow = Tables["cards"]["Row"];
+export type CardsInsert = Tables["cards"]["Insert"];
+export type CardsUpdate = Tables["cards"]["Update"];
+export type CardsUpdatedAt = CardsRow["updated_at"];
+
+export type S10TableContract = {
+	readonly [Name in RequiredS10Table]: {
+		readonly Row: Tables[Name]["Row"];
+		readonly Insert: Tables[Name]["Insert"];
+		readonly Update: Tables[Name]["Update"];
+	};
+};
+
+export type S10WrapperContract = {
+	readonly [Name in RequiredPublicWrapper]: {
+		readonly Args: Functions[Name]["Args"];
+		readonly Returns: Functions[Name]["Returns"];
+	};
+};
+
+export function assertCommitImportArgs(
+	wrapperArgs: CommitImportWrapperArgs,
+	normalizedRequest: NormalizedImportRequest
+): Json {
+	const commitArgs: Functions["commit_import"]["Args"] = buildCommitImportRpcArgs({
+		...wrapperArgs,
+		request: normalizedRequest,
+	});
+	return commitArgs.p_request;
+}
+
+export type DatabaseTypeAssertions = [AllTablesPresent, AllWrappersPresent];

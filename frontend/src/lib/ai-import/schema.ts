@@ -1,3 +1,4 @@
+import type { Database, Json } from "@/types/database";
 import { IMPORT_REQUEST_LIMITS } from "./canonical-request";
 import { type CardPattern, computeCardKey } from "./card-key";
 import { normalizeDisplayText, normalizeForKey } from "./normalize";
@@ -141,6 +142,46 @@ export async function validateImportRequest(
 			[normalizedImportRequestBrand]: true,
 		},
 	};
+}
+
+export function buildCommitImportRpcArgs(
+	args: CommitImportWrapperArgs
+): Database["public"]["Functions"]["commit_import"]["Args"] {
+	return {
+		p_actor_user_id: args.context.actorUserId,
+		p_source: args.context.source,
+		p_idempotency_key: args.idempotencyKey,
+		p_import_request_hash: args.importRequestHash,
+		p_request: normalizedRequestJson(args.request),
+		p_card_reservation_key: args.cardReservationKey,
+	};
+}
+
+function normalizedRequestJson(request: NormalizedImportRequest): Json {
+	return {
+		deck: normalizedDeckJson(request.deck),
+		items: request.items.map((item) => ({
+			clientItemId: item.clientItemId,
+			conceptId: item.conceptId,
+			pattern: item.pattern,
+			front: item.front,
+			back: item.back,
+			tags: [...item.tags],
+			image: normalizedImageJson(item.image),
+		})),
+	};
+}
+
+function normalizedDeckJson(deck: NormalizedDeckInput): Json {
+	if ("id" in deck) return { id: deck.id };
+	if ("name" in deck) return { name: deck.name };
+	return { create: { name: deck.create.name } };
+}
+
+function normalizedImageJson(image: NormalizedImageInput): Json {
+	return image.mode === "upload"
+		? { mode: image.mode, uploadId: image.uploadId }
+		: { mode: image.mode };
 }
 
 function failure(
