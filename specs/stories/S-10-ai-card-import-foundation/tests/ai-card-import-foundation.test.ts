@@ -7,7 +7,7 @@
 //       generation reservation hash / canonical import hash
 // 制約: production module未実装のため、後続task-executorがfixtureとimportを追加して完成させる。
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
 	buildCardKeyMaterial,
@@ -21,6 +21,12 @@ import {
 	hashImportRequest,
 } from "@/lib/ai-import/canonical-request";
 import { normalizeDisplayText, normalizeForKey } from "@/lib/ai-import/normalize";
+import {
+	PREVIEW_TOKEN_TTL_SECONDS,
+	PreviewTokenError,
+	signPreviewToken,
+	verifyPreviewToken,
+} from "@/lib/ai-import/preview-token";
 import canonicalFixture from "../fixtures/canonical-requests.json";
 import unicodeFixture from "../fixtures/unicode-card-key.json";
 
@@ -37,6 +43,40 @@ function toCardKeyInput(value: { pattern: string; front: string; back: string })
 		throw new Error(`Invalid card-key fixture pattern: ${value.pattern}`);
 	}
 	return { pattern: value.pattern, front: value.front, back: value.back };
+}
+
+const PREVIEW_NOW = 2_000_000_000;
+const PREVIEW_SECRET = "phase-1-preview-test-secret";
+const PREVIEW_INPUT = {
+	userId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+	reservationKey: "reservation-preview-1",
+	importRequestHash: "1aa5e988b528e484630b37cbc1ba2746bda6f68d1ca0ba5c7a3aacd541f223a8",
+};
+
+function decodeTestBase64Url(value: string): string {
+	const base64 = value.replaceAll("-", "+").replaceAll("_", "/");
+	const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+	const binary = atob(padded);
+	return new TextDecoder().decode(Uint8Array.from(binary, (character) => character.charCodeAt(0)));
+}
+
+function encodeTestBase64Url(value: string): string {
+	const binary = Array.from(new TextEncoder().encode(value), (byte) =>
+		String.fromCharCode(byte)
+	).join("");
+	return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
+}
+
+async function expectSafePreviewFailure(
+	operation: () => Promise<unknown>,
+	forbiddenValues: readonly string[]
+): Promise<void> {
+	const error: unknown = await operation().catch((reason: unknown) => reason);
+	expect(error).toBeInstanceOf(PreviewTokenError);
+	const message = error instanceof Error ? error.message : String(error);
+	for (const value of forbiddenValues) {
+		expect(message).not.toContain(value);
+	}
 }
 
 describe("S-10 AIカード登録基盤 Unit契約", () => {
@@ -317,36 +357,118 @@ describe("S-10 AIカード登録基盤 Unit契約", () => {
 		// @category: core-functionality
 		// @dependency: preview-token.ts
 		// @complexity: high
-		it.todo("UT-HMAC-01: v1/userId/reservationKey/importRequestHash/expiresAtをcanonical payloadとして署名し1800秒TTLを設定する");
+		it("UT-HMAC-01: v1/userId/reservationKey/importRequestHash/expiresAtをcanonical payloadとして署名し1800秒TTLを設定する", async () => {
+			const token = await signPreviewToken(PREVIEW_INPUT, PREVIEW_SECRET, PREVIEW_NOW);
+			const [payloadPart] = token.split(".");
+			expect(payloadPart).toBeDefined();
+			expect(decodeTestBase64Url(payloadPart ?? "")).toBe(
+				JSON.stringify({
+					v: 1,
+					userId: PREVIEW_INPUT.userId,
+					reservationKey: PREVIEW_INPUT.reservationKey,
+					importRequestHash: PREVIEW_INPUT.importRequestHash,
+					expiresAt: PREVIEW_NOW + PREVIEW_TOKEN_TTL_SECONDS,
+				})
+			);
+			expect(token).toMatch(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u);
+			expect(PREVIEW_TOKEN_TTL_SECONDS).toBe(1800);
+		});
 
 		// @category: core-functionality
 		// @dependency: preview-token.ts
 		// @complexity: medium
-		it.todo("UT-HMAC-02: 正しいsecret・期待payload・期限内nowでbase64url tokenを検証できる");
+		it("UT-HMAC-02: 正しいsecret・期待payload・期限内nowでbase64url tokenを検証できる", async () => {
+			const token = await signPreviewToken(PREVIEW_INPUT, PREVIEW_SECRET, PREVIEW_NOW);
+			await expect(verifyPreviewToken(token, PREVIEW_INPUT, PREVIEW_SECRET, PREVIEW_NOW + 1)).resolves.toEqual(
+				{
+					v: 1,
+					...PREVIEW_INPUT,
+					expiresAt: PREVIEW_NOW + PREVIEW_TOKEN_TTL_SECONDS,
+				}
+			);
+		});
 
 		// @category: edge-case
 		// @dependency: preview-token.ts
 		// @complexity: high
-		it.todo("UT-HMAC-03: payloadまたは署名の1 byte改ざんと不正token形式/versionを拒否する");
+		it("UT-HMAC-03: payloadまたは署名の1 byte改ざんと不正token形式/versionを拒否する", async () => {
+			const token = await signPreviewToken(PREVIEW_INPUT, PREVIEW_SECRET, PREVIEW_NOW);
+			const [payloadPart = "", signaturePart = ""] = token.split(".");
+			const payloadJson = decodeTestBase64Url(payloadPart);
+			const versionToken = `${encodeTestBase64Url(payloadJson.replace('"v":1', '"v":2'))}.${signaturePart}`;
+			const changedPayload = `${payloadPart.slice(0, -1)}${payloadPart.endsWith("A") ? "B" : "A"}.${signaturePart}`;
+			const changedSignature = `${payloadPart}.${signaturePart.startsWith("A") ? "B" : "A"}${signaturePart.slice(1)}`;
+
+			for (const invalidToken of ["invalid", "a.b.c", versionToken, changedPayload, changedSignature]) {
+				await expectSafePreviewFailure(
+					() => verifyPreviewToken(invalidToken, PREVIEW_INPUT, PREVIEW_SECRET, PREVIEW_NOW),
+					[invalidToken, PREVIEW_SECRET, PREVIEW_INPUT.userId]
+				);
+			}
+		});
 
 		// @category: edge-case
 		// @dependency: preview-token.ts
 		// @complexity: medium
-		it.todo("UT-HMAC-04: userIdまたはreservationKey不一致を拒否する");
+		it("UT-HMAC-04: userIdまたはreservationKey不一致を拒否する", async () => {
+			const token = await signPreviewToken(PREVIEW_INPUT, PREVIEW_SECRET, PREVIEW_NOW);
+			for (const expected of [
+				{ ...PREVIEW_INPUT, userId: "bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee" },
+				{ ...PREVIEW_INPUT, reservationKey: "reservation-preview-2" },
+			]) {
+				await expectSafePreviewFailure(
+					() => verifyPreviewToken(token, expected, PREVIEW_SECRET, PREVIEW_NOW),
+					[token, PREVIEW_SECRET, expected.userId, expected.reservationKey]
+				);
+			}
+		});
 
 		// @category: edge-case
 		// @dependency: preview-token.ts
 		// @complexity: medium
-		it.todo("UT-HMAC-05: expiresAt境界は期限内最終秒を受理し、期限超過を拒否する");
+		it("UT-HMAC-05: expiresAt境界は期限内最終秒を受理し、期限超過を拒否する", async () => {
+			const token = await signPreviewToken(PREVIEW_INPUT, PREVIEW_SECRET, PREVIEW_NOW);
+			const expiresAt = PREVIEW_NOW + PREVIEW_TOKEN_TTL_SECONDS;
+			await expect(verifyPreviewToken(token, PREVIEW_INPUT, PREVIEW_SECRET, expiresAt)).resolves.toMatchObject({
+				expiresAt,
+			});
+			await expectSafePreviewFailure(
+				() => verifyPreviewToken(token, PREVIEW_INPUT, PREVIEW_SECRET, expiresAt + 1),
+				[token, PREVIEW_SECRET, PREVIEW_INPUT.importRequestHash]
+			);
+		});
 
 		// @category: edge-case
 		// @dependency: preview-token.ts
 		// @complexity: medium
-		it.todo("UT-HMAC-06: importRequestHash不一致と別secretを拒否する");
+		it("UT-HMAC-06: importRequestHash不一致と別secretを拒否する", async () => {
+			const token = await signPreviewToken(PREVIEW_INPUT, PREVIEW_SECRET, PREVIEW_NOW);
+			const otherHash = "0".repeat(64);
+			await expectSafePreviewFailure(
+				() => verifyPreviewToken(token, { ...PREVIEW_INPUT, importRequestHash: otherHash }, PREVIEW_SECRET, PREVIEW_NOW),
+				[token, PREVIEW_SECRET, otherHash]
+			);
+			await expectSafePreviewFailure(
+				() => verifyPreviewToken(token, PREVIEW_INPUT, "different-secret", PREVIEW_NOW),
+				[token, PREVIEW_SECRET, PREVIEW_INPUT.importRequestHash]
+			);
+		});
 
 		// @category: core-functionality
 		// @dependency: preview-token.ts, constant-time compare wrapper
 		// @complexity: high
-		it.todo("UT-HMAC-07: 署名比較wrapperが長さ違いを含めconstant-time primitiveを使用し、環境変数を参照しない");
+		it("UT-HMAC-07: 署名比較wrapperが長さ違いを含めconstant-time primitiveを使用し、環境変数を参照しない", async () => {
+			const verifySpy = vi.spyOn(globalThis.crypto.subtle, "verify");
+			const token = await signPreviewToken(PREVIEW_INPUT, PREVIEW_SECRET, PREVIEW_NOW);
+			await verifyPreviewToken(token, PREVIEW_INPUT, PREVIEW_SECRET, PREVIEW_NOW);
+			expect(verifySpy).toHaveBeenCalled();
+			const [payloadPart = "", signaturePart = ""] = token.split(".");
+			const shortSignatureToken = `${payloadPart}.${signaturePart.slice(1)}`;
+			await expectSafePreviewFailure(
+				() => verifyPreviewToken(shortSignatureToken, PREVIEW_INPUT, PREVIEW_SECRET, PREVIEW_NOW),
+				[shortSignatureToken, PREVIEW_SECRET, PREVIEW_INPUT.userId]
+			);
+			verifySpy.mockRestore();
+		});
 	});
 });
