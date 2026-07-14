@@ -14,18 +14,18 @@ adapter相当のpure schema/HMAC入力からQueue非依存DB primitiveと最終D
 
 ## 対象ファイル
 
-- [ ] `specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.e2e.test.ts`
-- [ ] `specs/stories/S-10-ai-card-import-foundation/tests/helpers/s10-db-testkit.ts`
-- [ ] `specs/stories/S-10-ai-card-import-foundation/tests/s10-traceability.md`
-- [ ] `frontend/package.json`（最終script調整が必要な場合のみ）
-- [ ] `specs/stories/S-10-ai-card-import-foundation/tasks/task-contract-e2e-phase6-016.md`（品質結果記録）
+- [x] `specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.e2e.test.ts`
+- [x] `specs/stories/S-10-ai-card-import-foundation/tests/helpers/s10-contract-workflow.ts`
+- [x] `specs/stories/S-10-ai-card-import-foundation/tests/s10-traceability.md`
+- [x] `frontend/package.json`（既存scriptで全gateを実行できるため変更不要）
+- [x] `specs/stories/S-10-ai-card-import-foundation/tasks/task-contract-e2e-phase6-016.md`（品質結果記録）
 
 ## 実装手順（TDD: Red-Green-Refactor）
 
 ### 1. Red Phase
 
-- [ ] `E2E-CONTRACT-01〜10`をTODOから実テストへ置換する。
-- [ ] owner A/B、Seed同値、app_ai、remote_mcp exempt、upload、finalize duplicate、JST quota、study/edit/reset、delete/undo、lock交差を最終snapshotで検証する。
+- [x] `E2E-CONTRACT-01〜10`をTODOから実テストへ置換する。
+- [x] owner A/B、Seed同値、app_ai、remote_mcp exempt、upload、finalize duplicate、JST quota、study/edit/reset、delete/undo、lock交差を最終snapshotで検証する。
 
 ```bash
 S10_TEST_DATABASE_URL="$S10_TEST_DATABASE_URL" npm --prefix frontend run test:s10:e2e -- -t "E2E-CONTRACT"
@@ -33,18 +33,18 @@ S10_TEST_DATABASE_URL="$S10_TEST_DATABASE_URL" npm --prefix frontend run test:s1
 
 ### 2. Green Phase
 
-- [ ] shared schema→canonical hash→preview HMAC→reserve/commit/finalize/fail/management/undoをsystem boundaryとしてworkflowを完走させる。
-- [ ] provider/Queue/Storageは起動せず、upload/illustrationは保存済みDB fixtureだけで契約を検証する。
-- [ ] 再送/並行/拒否の各caseでcodeだけでなく全table副作用とowner relationをassertする。
-- [ ] `s10-traceability.md`へAC-01〜10全sub-AC、requirements/design/ADR、production path、Unit/IT/E2E ID、実行command/resultを記録する。
+- [x] shared schema→canonical hash→preview HMAC→reserve/commit/finalize/fail/management/undoをsystem boundaryとしてworkflowを完走させる。
+- [x] provider/Queue/Storageは起動せず、upload/illustrationは保存済みDB fixtureだけで契約を検証する。
+- [x] 再送/並行/拒否の各caseでcodeだけでなく全table副作用とowner relationをassertする。
+- [x] `s10-traceability.md`へAC-01〜10全sub-AC、requirements/design/ADR、production path、Unit/IT/E2E ID、実行command/resultを記録する。
 
 ### 3. Refactor / Final quality gate
 
-- [ ] flakyなsleepを排除し、DB lock/状態待機を有限pollまたはtransaction同期へ置換する。
-- [ ] Unit/Integration/E2E 3骨子の未解決`it.todo`が0件であることを検索する。
-- [ ] fresh/upgrade/failureを再実行し、通常E2EのDBと共有していないことを確認する。
-- [ ] scope reviewで`pgmq|enqueue|provider SDK|Storage operation|app UI|Route Handler|MCP transport`の新規production差分が0件であることを確認する。
-- [ ] task-executorから `/quality-fixer frontend` を呼び、全修正後にlint/typecheck/test/buildを再実行して`status=approved`を得る。
+- [x] flakyなsleepを排除し、DB lock/状態待機をtransaction完了・複数connection完了で同期する。
+- [x] Unit/Integration/E2E 3骨子の未解決`it.todo`が0件であることを検索する。
+- [x] fresh/upgrade/failureを再実行し、通常E2EのDBと共有していないことを確認する。
+- [x] scope reviewで`pgmq|enqueue|provider SDK|Storage operation|app UI|Route Handler|MCP transport`の新規production差分が0件であることを確認する。
+- [x] task-executorから `/quality-fixer frontend` を呼び、全修正後にlint/typecheck/test/buildを再実行して`status=approved`を得る。
 
 ```bash
 npm --prefix frontend run test:s10:unit
@@ -63,16 +63,29 @@ git diff --name-only
 
 ## 完了条件
 
-- [ ] S-10受入Unit 32/32、DB Integration 61/61、Contract E2E 13/13がPASSし、3骨子のTODOが0件である。
-- [ ] fresh/upgrade/failure 3 jobが独立してPASSする。
-- [ ] AC-01〜10全sub-ACをtest ID・実装・実行結果へ追跡できる。
-- [ ] 公開Seed一般項目差分0、新keyは期待値一致かつSeed再実行後差分0である。
-- [ ] 全既存test、lint、typecheck、buildがPASSする。
-- [ ] Queue/provider/UI/MCP transportのproduction実装が差分にない。
-- [ ] `/quality-fixer frontend`の構造化結果が`status=approved`、動作確認レベルL3である。
+- [x] S-10受入Unit 32/32、DB Integration 61/61、Contract E2E 13/13がPASSし、3骨子のTODOが0件である。
+- [x] fresh/upgrade/failure 3 jobが独立してPASSする。
+- [x] AC-01〜10全sub-ACをtest ID・実装・実行結果へ追跡できる。
+- [x] 公開Seed一般項目差分0、新keyは期待値一致かつSeed再実行後差分0である。
+- [x] 全既存test、lint、typecheck、buildがPASSする。
+- [x] Queue/provider/UI/MCP transportのproduction実装が差分にない。
+- [x] `/quality-fixer frontend`の構造化結果が`status=approved`、動作確認レベルL3である。
 
 ## 注意事項
 
 - `/ship`、commit/push、merge、deploy、Issue closeはこのタスクの権限外。
 - 品質を通す目的でtest削除/skip/無意味assertionを行わない。
 
+## 実行結果（2026-07-14）
+
+- Red: E2E-CONTRACT-01〜10を実テストへ置換後、`npm run typecheck`が未実装の`helpers/s10-contract-workflow` importでexit 2となることを確認した。
+- Green: shared schema、generation/import canonical SHA-256、preview HMAC署名/検証、quota予約、commit、保存済みupload/illustration fixture、finalize、management/undo、全table snapshotを共有helperへ実装した。provider、Queue、Storage API、UI、Route、MCP transportは起動・追加していない。
+- Contract: 通常DBでE2E-CONTRACT 10/10 PASS。owner A/B、公開Seed同値、app_ai並行冪等、remote_mcp exempt、upload consumed、finalize duplicate、JST card 200/image 50、active guard/review、tombstone/undo、commit/finalize/session/undo/direct DML/relation lock交差を検証した。
+- S-10 inventory: Unit 32/32 PASS。DB Integrationは通常56件と独立job 5件の合算61/61 PASS。Contract E2Eは通常10件と独立job 3件の合算13/13 PASS。`it.todo|test.todo`は3骨子で0件。
+- 独立job: freshはIntegration 57件 + E2E-MIGRATION 1件、upgradeはIntegration 3件 + E2E-MIGRATION 1件、failureはIntegration 1件 + E2E-MIGRATION 1件がPASSし、各専用DBをdropした。
+- 全回帰: Vitest inventory 445件（47 files）。`S10_TEST_DATABASE_URL`を明示して1 workerで実行し、通常437/437 PASS、この通常runでは独立job条件付き8件skip、exit 0、Duration 31.08s。条件付き8件は独立fresh/upgrade/failure jobで8/8 PASSした。初回の全並列実行ではsandboxの同時DB接続が`Operation not permitted`となったため、test内容を変えずworker数だけ1へ固定して再実行した。
+- 静的品質: lint（90 files）、typecheck、production build、`git diff --check`がPASS。buildは既存middleware matcher警告のみ。
+- scope: production差分0。変更はContract E2E、test-only workflow helper、traceability、本task証跡だけである。
+- 独立quality review: `/quality-fixer frontend` で全10 workflowをAC/sub-AC、owner/RLS、HMAC/hash/reservation連結、JST quota再送、active guard、tombstone/undo、lock交差、cleanupの観点から再監査した。全public Seed snapshot、改ざん時全副作用0、upload/storage owner、batch/item終端集計、同一key再送、全active guard、実tag関係変更のreview keep、cleanup marker差分/反復、lock最終snapshotを補強した。
+- quality Green: 補強後の修正対象 `E2E-CONTRACT-06/08/10` は3/3 PASS、通常Contract E2Eは10/10 PASS（migration条件付き3 skip）、exit 0、Duration 3.59s。E2E-CONTRACT-09のcleanup 2回後readbackもbatch/reservation/card/deck/tag/illustration/upload/storage object残留0でPASSした。lint（90 files）、typecheck、Unit 32/32、Supabase検証用envを明示したproduction build、`git diff --check`もPASS。
+- quality判定: `status=approved`、動作確認レベルL3。test削除/skip/無意味assertion、production差分、commit/pushは0。
