@@ -67,6 +67,21 @@ interface CommitImportResult {
 	requestedImageCount: number;
 }
 
+interface RegisterUploadParams {
+	ownerUserId?: string;
+	uploadKey: string;
+	purpose?: string;
+	storagePath: string;
+	mimeType: string;
+	byteSize: number;
+	internal?: boolean;
+}
+
+interface RegisterUploadResult {
+	uploadId: string;
+	status: "ready";
+}
+
 interface CommitFixture {
 	marker: string;
 	deckId: string;
@@ -136,6 +151,61 @@ async function commitImport(params: CommitImportParams): Promise<CommitImportRes
 		throw new Error("commit import did not return a result");
 	}
 	return result;
+}
+
+function registerUploadSql(params: RegisterUploadParams): string {
+	const functionName = params.internal
+		? "public.register_ai_upload_internal"
+		: "public.register_ai_upload";
+	return `SELECT ${functionName}(
+		${sqlLiteral(params.ownerUserId ?? S10_ACTORS.ownerA.userId)}::uuid,
+		${sqlLiteral(params.uploadKey)},
+		${sqlLiteral(params.purpose ?? "card_illustration")},
+		${sqlLiteral(params.storagePath)},
+		${sqlLiteral(params.mimeType)},
+		${params.byteSize}::bigint
+	) AS result`;
+}
+
+async function registerUpload(params: RegisterUploadParams): Promise<RegisterUploadResult> {
+	const rows = await database.query<{ result: RegisterUploadResult }>(
+		registerUploadSql(params),
+		params.internal ? undefined : { actor: S10_ACTORS.service }
+	);
+	const result = rows[0]?.result;
+	if (result === undefined) {
+		throw new Error("upload registration did not return a result");
+	}
+	return result;
+}
+
+async function createStorageObject(params: {
+	path: string;
+	ownerUserId?: string;
+	mimeType: string;
+	byteSize: number;
+}): Promise<void> {
+	const ownerUserId = params.ownerUserId ?? S10_ACTORS.ownerA.userId;
+	await database.execute(`
+		INSERT INTO storage.objects (
+			id, bucket_id, name, owner, owner_id, metadata
+		) VALUES (
+			'${randomUUID()}'::uuid, 'illustrations', ${sqlLiteral(params.path)},
+			'${ownerUserId}'::uuid, ${sqlLiteral(ownerUserId)},
+			jsonb_build_object('mimetype', ${sqlLiteral(params.mimeType)}, 'size', ${params.byteSize})
+		)
+	`);
+}
+
+async function cleanupUploadFixtures(marker: string): Promise<void> {
+	await database.execute(`
+		DELETE FROM public.ai_uploads
+		WHERE upload_key LIKE ${sqlLiteral(`%${marker}%`)}
+			OR storage_path LIKE ${sqlLiteral(`%${marker}%`)};
+		SET LOCAL storage.allow_delete_query = 'true';
+		DELETE FROM storage.objects
+		WHERE bucket_id = 'illustrations' AND name LIKE ${sqlLiteral(`%${marker}%`)}
+	`);
 }
 
 async function createCommitFixture(options: {
@@ -1504,17 +1574,166 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 		// @category: integration
 		// @dependency: register_ai_upload
 		// @complexity: high
-		it.todo("IT-UPLOAD-01: 同owner/upload key/同metadata再送は同じready rowを返し、metadata差分はCONFLICTになる");
+		it("IT-UPLOAD-01: 同owner/upload key/同metadata再送は同じready rowを返し、metadata差分はCONFLICTになる", async () => {
+			const marker = randomUUID();
+			const params = {
+				uploadKey: `upload-${marker}`,
+				storagePath: `${S10_ACTORS.ownerA.userId}/${marker}.png`,
+				mimeType: "image/png",
+				byteSize: 1024,
+			};
+			try {
+				await createStorageObject({
+					path: params.storagePath,
+					mimeType: params.mimeType,
+					byteSize: params.byteSize,
+				});
+				const results = await Promise.all(
+					[createS10DbClient(), createS10DbClient()].map(async (client) => {
+						const rows = await client.query<{ result: RegisterUploadResult }>(
+							registerUploadSql(params),
+							{ actor: S10_ACTORS.service }
+						);
+						return rows[0]?.result;
+					})
+				);
+				expect(results[0]).toEqual(results[1]);
+				expect(await registerUpload(params)).toEqual(results[0]);
+				expect(await database.query<{ count: number }>(`
+					SELECT count(*)::int AS count FROM public.ai_uploads
+					WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}'
+						AND upload_key = ${sqlLiteral(params.uploadKey)}
+				`)).toEqual([{ count: 1 }]);
+
+				const mismatch = await database.captureError(
+					registerUploadSql({ ...params, byteSize: params.byteSize + 1 }),
+					{ actor: S10_ACTORS.service }
+				);
+				expect(mismatch.sqlState).toBe("P1008");
+			} finally {
+				await cleanupUploadFixtures(marker);
+			}
+		});
 
 		// @category: edge-case
 		// @dependency: register_ai_upload validation
 		// @complexity: high
-		it.todo("IT-UPLOAD-02: owner path prefix・Storage owner/存在・MIME allow list・1..10MiB境界を検証する");
+		it("IT-UPLOAD-02: owner path prefix・Storage owner/存在・MIME allow list・1..10MiB境界を検証する", async () => {
+			const marker = randomUUID();
+			try {
+				for (const [suffix, mimeType, byteSize] of [
+					["min", "image/jpeg", 1],
+					["max", "image/webp", 10 * 1024 * 1024],
+				] as const) {
+					const storagePath = `${S10_ACTORS.ownerA.userId}/${marker}-${suffix}`;
+					await createStorageObject({ path: storagePath, mimeType, byteSize });
+					expect(await registerUpload({
+						uploadKey: `upload-${marker}-${suffix}`,
+						storagePath,
+						mimeType,
+						byteSize,
+					})).toMatchObject({ status: "ready" });
+				}
+
+				const crossOwnerPath = `${S10_ACTORS.ownerA.userId}/${marker}-cross.png`;
+				const metadataMismatchPath = `${S10_ACTORS.ownerA.userId}/${marker}-metadata.png`;
+				await createStorageObject({
+					path: crossOwnerPath,
+					ownerUserId: S10_ACTORS.ownerB.userId ?? undefined,
+					mimeType: "image/png",
+					byteSize: 100,
+				});
+				await createStorageObject({
+					path: metadataMismatchPath,
+					mimeType: "image/png",
+					byteSize: 100,
+				});
+				for (const [suffix, override, expectedState] of [
+					["prefix", { storagePath: `${S10_ACTORS.ownerB.userId}/${marker}.png` }, "P1000"],
+					["missing", { storagePath: `${S10_ACTORS.ownerA.userId}/${marker}-missing.png` }, "P1003"],
+					["owner", { storagePath: crossOwnerPath }, "P1003"],
+					["storage-metadata", { storagePath: metadataMismatchPath }, "P1000"],
+					["mime", { mimeType: "image/gif" }, "P1000"],
+					["zero", { byteSize: 0 }, "P1000"],
+					["oversize", { byteSize: 10 * 1024 * 1024 + 1 }, "P1000"],
+				] as const) {
+					const invalidBase: RegisterUploadParams = {
+						uploadKey: `invalid-${marker}-${suffix}`,
+						storagePath: `${S10_ACTORS.ownerA.userId}/${marker}-min`,
+						mimeType: "image/jpeg",
+						byteSize: 1,
+					};
+					const diagnostic = await database.captureError(
+						registerUploadSql({ ...invalidBase, ...override }),
+						{ actor: S10_ACTORS.service }
+					);
+					expect(diagnostic.sqlState).toBe(expectedState);
+					for (const sensitiveValue of [marker, crossOwnerPath, "mimetype", "owner_id"]) {
+						expect(diagnostic.detail ?? "").not.toContain(sensitiveValue);
+					}
+				}
+			} finally {
+				await cleanupUploadFixtures(marker);
+			}
+		});
 
 		// @category: edge-case
 		// @dependency: upload state machine
 		// @complexity: medium
-		it.todo("IT-UPLOAD-03: consumed/deleted upload keyの再利用とcross-owner参照を拒否する");
+		it("IT-UPLOAD-03: consumed/deleted upload keyの再利用とcross-owner参照を拒否する", async () => {
+			const marker = randomUUID();
+			try {
+				for (const status of ["consumed", "deleted"] as const) {
+					const storagePath = `${S10_ACTORS.ownerA.userId}/${marker}-${status}.png`;
+					const params = {
+						uploadKey: `upload-${marker}-${status}`,
+						storagePath,
+						mimeType: "image/png",
+						byteSize: 100,
+					};
+					await createStorageObject({ path: storagePath, mimeType: params.mimeType, byteSize: params.byteSize });
+					const registered = await registerUpload(params);
+					await database.execute(`
+						UPDATE public.ai_uploads SET status = '${status}',
+							consumed_at = ${status === "consumed" ? "now()" : "NULL"}
+						WHERE id = '${registered.uploadId}'
+					`);
+					expect((await database.captureError(registerUploadSql(params), {
+						actor: S10_ACTORS.service,
+					})).sqlState).toBe("P1008");
+				}
+
+				const crossOwnerPath = `${S10_ACTORS.ownerA.userId}/${marker}-cross-owner.png`;
+				await createStorageObject({
+					path: crossOwnerPath,
+					ownerUserId: S10_ACTORS.ownerB.userId ?? undefined,
+					mimeType: "image/png",
+					byteSize: 100,
+				});
+				expect((await database.captureError(registerUploadSql({
+					uploadKey: `cross-owner-${marker}`,
+					storagePath: crossOwnerPath,
+					mimeType: "image/png",
+					byteSize: 100,
+				}), { actor: S10_ACTORS.service })).sqlState).toBe("P1003");
+
+				const aclParams = {
+					uploadKey: `acl-${marker}`,
+					storagePath: `${S10_ACTORS.ownerA.userId}/${marker}-acl.png`,
+					mimeType: "image/png",
+					byteSize: 100,
+				};
+				await createStorageObject({ path: aclParams.storagePath, mimeType: aclParams.mimeType, byteSize: aclParams.byteSize });
+				expect((await database.captureError(registerUploadSql(aclParams), {
+					actor: S10_ACTORS.ownerA,
+				})).sqlState).toBe("42501");
+				expect((await database.captureError(registerUploadSql({ ...aclParams, internal: true }), {
+					actor: S10_ACTORS.service,
+				})).sqlState).toBe("42501");
+			} finally {
+				await cleanupUploadFixtures(marker);
+			}
+		});
 
 		// @category: integration
 		// @dependency: finalize_import_item

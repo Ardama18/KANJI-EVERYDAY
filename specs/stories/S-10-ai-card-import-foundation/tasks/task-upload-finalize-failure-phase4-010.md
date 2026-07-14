@@ -14,8 +14,8 @@ Queue/provider/Storage処理を起動せず、trusted adapter/workerが呼ぶ3�
 
 ## 対象ファイル
 
-- [ ] `supabase/migrations/20260714000000_s10_ai_card_import_foundation.sql`
-- [ ] `specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.int.test.ts`
+- [x] `supabase/migrations/20260714000000_s10_ai_card_import_foundation.sql`
+- [x] `specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.int.test.ts`
 - [ ] `specs/stories/S-10-ai-card-import-foundation/tests/helpers/s10-db-testkit.ts`
 
 ## 実装手順（TDD: Red-Green-Refactor）
@@ -31,8 +31,8 @@ S10_TEST_DATABASE_URL="$S10_TEST_DATABASE_URL" npm --prefix frontend run test:s1
 
 ### 2. Green Phase
 
-- [ ] uploadはowner/key advisory後、同metadata ready再送を同じrow、差分/consumed/deleted再利用を`CONFLICT`にする。
-- [ ] path prefix、object owner/存在をtrusted metadata fixtureで確認し、MIME PNG/JPEG/WebP、1..10MiBを強制する。Storage APIは呼ばない。
+- [x] uploadはowner/key advisory後、同metadata ready再送を同じrow、差分/consumed/deleted再利用を`CONFLICT`にする。
+- [x] path prefix、object owner/存在をtrusted metadata fixtureで確認し、MIME PNG/JPEG/WebP、1..10MiBを強制する。Storage APIは呼ばない。
 - [ ] finalizeはowner/card-key advisory→illustration→batch/item→deck/upload→reservation→relation順でlock後再検証する。
 - [ ] finalized再送は同じcard ID、terminal不整合は`CONFLICT`、owner重複はitemだけを`failed/DUPLICATE_EXISTING`へ確定する。
 - [ ] card/deck_card/card_tags/item result/upload consumeを1 transactionにし、named uniqueだけをduplicate分類する。
@@ -57,3 +57,8 @@ S10_TEST_DATABASE_URL="$S10_TEST_DATABASE_URL" npm --prefix frontend run test:s1
 - provider出力でfront/back/card_keyを書き換えずcommit済みitemを正本にする。
 - Queue ack/retry、provider/Storage object処理はIssue #12へ残す。
 
+## 先行分割証跡（2026-07-14）
+
+- 3 RPC・Integration 10件の一括差分が900行を超える見込みのため、明示された分割条件に従いupload境界を先行成果とした。
+- IT-UPLOAD-01〜03を実DB化し、並行同key、metadata差分、Storage owner/存在、MIME/size/path境界、terminal再利用、ACLを検証した。
+- finalize/failure境界とTask全体の完了条件は後続成果へ残す。

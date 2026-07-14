@@ -1526,6 +1526,142 @@ BEGIN
 END;
 $$;
 
+CREATE FUNCTION public.register_ai_upload_internal(
+  p_owner_user_id uuid,
+  p_upload_key text,
+  p_purpose text,
+  p_storage_path text,
+  p_mime_type text,
+  p_byte_size bigint
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE existing_upload public.ai_uploads%ROWTYPE;
+DECLARE path_upload public.ai_uploads%ROWTYPE;
+DECLARE storage_owner uuid;
+DECLARE storage_owner_id text;
+DECLARE storage_metadata jsonb;
+DECLARE created_upload_id uuid;
+DECLARE failed_constraint text;
+BEGIN
+  IF p_owner_user_id IS NULL OR p_upload_key IS NULL OR
+     char_length(p_upload_key) NOT BETWEEN 1 AND 128 OR
+     p_purpose IS DISTINCT FROM 'card_illustration' OR
+     p_storage_path IS NULL OR char_length(p_storage_path) NOT BETWEEN 1 AND 1024 OR
+     left(p_storage_path, 1) = '/' OR p_storage_path ~ '(^|/)\.\.(/|$)' OR
+     p_mime_type IS NULL OR p_mime_type NOT IN ('image/png', 'image/jpeg', 'image/webp') OR
+     p_byte_size IS NULL OR p_byte_size NOT BETWEEN 1 AND 10485760 THEN
+    PERFORM public.ai_raise_import_error(
+      'VALIDATION_ERROR', jsonb_build_object('field', 'upload', 'rule', 'metadata')
+    );
+  END IF;
+  IF p_storage_path NOT LIKE p_owner_user_id::text || '/%' OR
+     char_length(p_storage_path) <= char_length(p_owner_user_id::text) + 1 THEN
+    PERFORM public.ai_raise_import_error(
+      'VALIDATION_ERROR', jsonb_build_object('field', 'storagePath', 'rule', 'ownerPrefix')
+    );
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtextextended(
+    p_owner_user_id::text || chr(31) || 'upload-key' || chr(31) || p_upload_key, 1013
+  ));
+
+  SELECT uploads.* INTO existing_upload
+  FROM public.ai_uploads AS uploads
+  WHERE uploads.owner_user_id = p_owner_user_id
+    AND uploads.upload_key = p_upload_key
+  FOR UPDATE;
+  IF FOUND THEN
+    IF existing_upload.status IS DISTINCT FROM 'ready' OR
+       existing_upload.purpose IS DISTINCT FROM p_purpose OR
+       existing_upload.storage_path IS DISTINCT FROM p_storage_path OR
+       existing_upload.mime_type IS DISTINCT FROM p_mime_type OR
+       existing_upload.byte_size IS DISTINCT FROM p_byte_size THEN
+      PERFORM public.ai_raise_import_error('CONFLICT');
+    END IF;
+    RETURN jsonb_build_object('uploadId', existing_upload.id, 'status', existing_upload.status);
+  END IF;
+
+  SELECT objects.owner, objects.owner_id, objects.metadata
+  INTO storage_owner, storage_owner_id, storage_metadata
+  FROM storage.objects AS objects
+  WHERE objects.bucket_id = 'illustrations'
+    AND objects.name = p_storage_path
+  FOR UPDATE;
+  IF NOT FOUND OR
+     COALESCE(storage_owner_id, storage_owner::text) IS DISTINCT FROM p_owner_user_id::text THEN
+    PERFORM public.ai_raise_import_error('DECK_NOT_FOUND');
+  END IF;
+  IF storage_metadata IS NULL OR jsonb_typeof(storage_metadata) <> 'object' OR
+     storage_metadata ->> 'mimetype' IS DISTINCT FROM p_mime_type OR
+     storage_metadata ->> 'size' IS DISTINCT FROM p_byte_size::text THEN
+    PERFORM public.ai_raise_import_error(
+      'VALIDATION_ERROR', jsonb_build_object('field', 'upload', 'rule', 'storageMetadata')
+    );
+  END IF;
+
+  SELECT uploads.* INTO path_upload
+  FROM public.ai_uploads AS uploads
+  WHERE uploads.owner_user_id = p_owner_user_id
+    AND uploads.storage_path = p_storage_path
+  FOR UPDATE;
+  IF FOUND THEN
+    PERFORM public.ai_raise_import_error('CONFLICT');
+  END IF;
+
+  BEGIN
+    INSERT INTO public.ai_uploads (
+      owner_user_id, upload_key, purpose, storage_path, mime_type, byte_size, status
+    ) VALUES (
+      p_owner_user_id, p_upload_key, p_purpose, p_storage_path, p_mime_type, p_byte_size, 'ready'
+    ) RETURNING id INTO STRICT created_upload_id;
+  EXCEPTION
+    WHEN unique_violation THEN
+      GET STACKED DIAGNOSTICS failed_constraint = CONSTRAINT_NAME;
+      IF failed_constraint IN (
+        'ai_uploads_owner_upload_key_uq', 'ai_uploads_owner_storage_path_uq'
+      ) THEN
+        PERFORM public.ai_raise_import_error('CONFLICT');
+      END IF;
+      RAISE;
+    WHEN foreign_key_violation THEN
+      GET STACKED DIAGNOSTICS failed_constraint = CONSTRAINT_NAME;
+      IF failed_constraint = 'ai_uploads_owner_fkey' THEN
+        PERFORM public.ai_raise_import_error('UNAUTHORIZED');
+      END IF;
+      RAISE;
+  END;
+
+  RETURN jsonb_build_object('uploadId', created_upload_id, 'status', 'ready');
+END;
+$$;
+
+CREATE FUNCTION public.register_ai_upload(
+  p_owner_user_id uuid,
+  p_upload_key text,
+  p_purpose text,
+  p_storage_path text,
+  p_mime_type text,
+  p_byte_size bigint
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+BEGIN
+  IF current_setting('request.jwt.claim.role', true) IS DISTINCT FROM 'service_role' THEN
+    PERFORM public.ai_raise_import_error('UNAUTHORIZED');
+  END IF;
+  RETURN public.register_ai_upload_internal(
+    p_owner_user_id, p_upload_key, p_purpose, p_storage_path, p_mime_type, p_byte_size
+  );
+END;
+$$;
+
 CREATE FUNCTION public.reserve_provider_usage_internal(
   p_owner_user_id uuid,
   p_reservation_key text,
@@ -1879,6 +2015,10 @@ ALTER FUNCTION public.commit_import_internal(uuid, text, text, text, jsonb, text
   OWNER TO s10_migration_owner;
 ALTER FUNCTION public.commit_import(uuid, text, text, text, jsonb, text)
   OWNER TO s10_migration_owner;
+ALTER FUNCTION public.register_ai_upload_internal(uuid, text, text, text, text, bigint)
+  OWNER TO s10_migration_owner;
+ALTER FUNCTION public.register_ai_upload(uuid, text, text, text, text, bigint)
+  OWNER TO s10_migration_owner;
 ALTER FUNCTION public.reserve_provider_usage_internal(
   uuid, text, text, text, text, integer, uuid, uuid, text, timestamptz
 ) OWNER TO s10_migration_owner;
@@ -1900,6 +2040,7 @@ REVOKE ALL ON FUNCTION public.ai_enable_internal_context(),
   public.ai_internal_context_active(), public.ai_raise_import_error(text, jsonb),
   public.ai_prepare_import_request(jsonb),
   public.commit_import_internal(uuid, text, text, text, jsonb, text),
+  public.register_ai_upload_internal(uuid, text, text, text, text, bigint),
   public.reserve_provider_usage_internal(
     uuid, text, text, text, text, integer, uuid, uuid, text, timestamptz
   )
@@ -1909,6 +2050,8 @@ REVOKE ALL ON FUNCTION public.reserve_provider_usage(
 ) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.commit_import(uuid, text, text, text, jsonb, text)
   FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.register_ai_upload(uuid, text, text, text, text, bigint)
+  FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.ai_normalize_display_text(text),
   public.ai_normalize_key_text(text), public.ai_compute_card_key(text, text, text)
   TO authenticated, service_role;
@@ -1917,9 +2060,11 @@ GRANT EXECUTE ON FUNCTION public.reserve_provider_usage(
 ) TO service_role;
 GRANT EXECUTE ON FUNCTION public.commit_import(uuid, text, text, text, jsonb, text)
   TO service_role;
+GRANT EXECUTE ON FUNCTION public.register_ai_upload(uuid, text, text, text, text, bigint)
+  TO service_role;
 GRANT USAGE ON SCHEMA extensions TO authenticated, service_role;
 
-GRANT USAGE ON SCHEMA public, extensions TO s10_migration_owner;
+GRANT USAGE ON SCHEMA public, extensions, storage TO s10_migration_owner;
 GRANT SELECT, UPDATE ON public.cards TO s10_migration_owner;
 GRANT SELECT, INSERT, UPDATE ON public.decks TO s10_migration_owner;
 GRANT SELECT ON public.study_sessions TO s10_migration_owner;
@@ -1927,9 +2072,10 @@ GRANT SELECT, DELETE ON public.review_states TO s10_migration_owner;
 GRANT SELECT, INSERT, UPDATE ON public.ai_import_batches, public.ai_import_items,
   public.tags TO s10_migration_owner;
 GRANT SELECT, INSERT ON public.ai_import_item_tags TO s10_migration_owner;
-GRANT SELECT, UPDATE ON public.ai_uploads TO s10_migration_owner;
+GRANT SELECT, INSERT, UPDATE ON public.ai_uploads TO s10_migration_owner;
 GRANT SELECT, INSERT, UPDATE ON public.ai_usage_daily, public.ai_quota_reservations
   TO s10_migration_owner;
+GRANT SELECT, UPDATE ON storage.objects TO s10_migration_owner;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC, anon, authenticated, service_role;
 ALTER SCHEMA public OWNER TO s10_migration_owner;
 GRANT CREATE ON SCHEMA public TO s10_migration_owner;
