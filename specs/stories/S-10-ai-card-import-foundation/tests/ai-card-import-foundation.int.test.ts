@@ -10,8 +10,14 @@ import { randomUUID } from "node:crypto";
 
 import { beforeAll, describe, expect, it } from "vitest";
 
+import {
+	hashImportRequest,
+	type CanonicalImportRequestInput,
+} from "../../../../frontend/src/lib/ai-import/canonical-request";
+import canonicalRequestFixture from "../fixtures/canonical-requests.json";
 import unicodeFixture from "../fixtures/unicode-card-key.json";
 import {
+	captureS10Snapshot,
 	createS10DbClient,
 	ensureS10ActorFixtures,
 	S10_ACTORS,
@@ -42,6 +48,33 @@ interface ReservationResult {
 	usageDate: string;
 	units: number;
 	providerStartedAt: string;
+}
+
+interface CommitImportParams {
+	ownerUserId?: string;
+	source: ImportSource;
+	idempotencyKey: string;
+	importRequestHash: string;
+	request: CanonicalImportRequestInput | Readonly<Record<string, unknown>>;
+	cardReservationKey: string;
+	internal?: boolean;
+}
+
+interface CommitImportResult {
+	batchId: string;
+	status: "committed";
+	requestedCardCount: number;
+	requestedImageCount: number;
+}
+
+interface CommitFixture {
+	marker: string;
+	deckId: string;
+	request: CanonicalImportRequestInput;
+	idempotencyKey: string;
+	reservationKey: string;
+	importRequestHash: string;
+	generationRequestHash: string;
 }
 
 const fixedHash = (marker: string): string => marker.repeat(64).slice(0, 64);
@@ -81,6 +114,134 @@ async function reserveUsage(params: ReserveUsageParams): Promise<ReservationResu
 		throw new Error("quota reservation did not return a result");
 	}
 	return result;
+}
+
+function commitImportSql(params: CommitImportParams): string {
+	const functionName = params.internal ? "public.commit_import_internal" : "public.commit_import";
+	return `SELECT ${functionName}(
+		${sqlLiteral(params.ownerUserId ?? S10_ACTORS.ownerA.userId)}::uuid,
+		${sqlLiteral(params.source)},
+		${sqlLiteral(params.idempotencyKey)},
+		${sqlLiteral(params.importRequestHash)},
+		${sqlLiteral(JSON.stringify(params.request))}::jsonb,
+		${sqlLiteral(params.cardReservationKey)}
+	) AS result`;
+}
+
+async function commitImport(params: CommitImportParams): Promise<CommitImportResult> {
+	const rows = await database.query<{ result: CommitImportResult }>(commitImportSql(params),
+		params.internal ? undefined : { actor: S10_ACTORS.service });
+	const result = rows[0]?.result;
+	if (result === undefined) {
+		throw new Error("commit import did not return a result");
+	}
+	return result;
+}
+
+async function createCommitFixture(options: {
+	marker?: string;
+	deck?: CanonicalImportRequestInput["deck"];
+	items?: CanonicalImportRequestInput["items"];
+} = {}): Promise<CommitFixture> {
+	const marker = options.marker ?? randomUUID();
+	const deckId = randomUUID();
+	if (options.deck === undefined) {
+		await database.execute(`
+			INSERT INTO public.decks (id, owner_user_id, name)
+			VALUES ('${deckId}', '${S10_ACTORS.ownerA.userId}', 'commit-${marker}')
+		`);
+	}
+	const request: CanonicalImportRequestInput = {
+		deck: options.deck ?? { id: deckId },
+		items: options.items ?? [
+			{
+				clientItemId: `r-${marker}`,
+				conceptId: `concept-${marker}`,
+				pattern: "R1",
+				front: `漢字 ${marker}`,
+				back: `かんじ ${marker}`,
+				tags: [` 国語 ${marker.slice(0, 8)} `],
+				image: { mode: "none" },
+			},
+			{
+				clientItemId: `w-${marker}`,
+				conceptId: `concept-${marker}`,
+				pattern: "W1",
+				front: `かんじ ${marker}`,
+				back: `漢字 ${marker}`,
+				tags: [` 国語 ${marker.slice(0, 8)} `],
+				image: { mode: "none" },
+			},
+		],
+	};
+	return {
+		marker,
+		deckId,
+		request,
+		idempotencyKey: `commit-${marker}`,
+		reservationKey: `card-${marker}`,
+		importRequestHash: await hashImportRequest(request),
+		generationRequestHash: fixedHash("e"),
+	};
+}
+
+async function createCommitReservation(
+	fixture: CommitFixture,
+	source: ImportSource = "app_ai"
+): Promise<ReservationResult> {
+	return await reserveUsage({
+		reservationKey: fixture.reservationKey,
+		kind: "card_generation",
+		source,
+		generationRequestHash: fixture.generationRequestHash,
+		units: source === "app_ai" ? fixture.request.items.length : 0,
+		testNow: "2048-01-01T00:00:00Z",
+	});
+}
+
+const commitSnapshotQueries = [
+	{ name: "decks", sql: `SELECT count(*)::int AS count FROM public.decks WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}'` },
+	{ name: "cards", sql: `SELECT count(*)::int AS count FROM public.cards WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}'` },
+	{ name: "deckCards", sql: `SELECT count(*)::int AS count FROM public.deck_cards AS relations INNER JOIN public.decks ON decks.id = relations.deck_id WHERE decks.owner_user_id = '${S10_ACTORS.ownerA.userId}'` },
+	{ name: "batches", sql: `SELECT count(*)::int AS count FROM public.ai_import_batches WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}'` },
+	{ name: "items", sql: `SELECT count(*)::int AS count FROM public.ai_import_items WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}'` },
+	{ name: "tags", sql: `SELECT count(*)::int AS count FROM public.tags WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}'` },
+	{ name: "itemTags", sql: `SELECT count(*)::int AS count FROM public.ai_import_item_tags WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}'` },
+	{ name: "cardTags", sql: `SELECT count(*)::int AS count FROM public.card_tags WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}'` },
+	{ name: "usage", sql: `SELECT usage_date::text, generated_card_count, generated_image_count FROM public.ai_usage_daily WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}' ORDER BY usage_date` },
+	{ name: "reservations", sql: `SELECT reservation_key, import_request_hash, batch_id::text FROM public.ai_quota_reservations WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}' ORDER BY reservation_key, kind` },
+] as const;
+
+async function cleanupCommitFixtures(markers: readonly string[]): Promise<void> {
+	const patterns = markers.map((marker) => `${sqlLiteral(`%${marker}%`)}`).join(", ");
+	if (patterns.length === 0) {
+		return;
+	}
+	await database.execute(`
+		DELETE FROM public.ai_import_batches
+		WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}'
+			AND (${markers.map((marker) => `idempotency_key LIKE ${sqlLiteral(`%${marker}%`)}`).join(" OR ")});
+		DELETE FROM public.ai_quota_reservations
+		WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}'
+			AND (${markers.map((marker) => `reservation_key LIKE ${sqlLiteral(`%${marker}%`)}`).join(" OR ")});
+		DELETE FROM public.ai_uploads
+		WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}'
+			AND (${markers.map((marker) => `upload_key LIKE ${sqlLiteral(`%${marker}%`)}`).join(" OR ")});
+		DELETE FROM public.tags
+		WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}'
+			AND display_name LIKE ANY (ARRAY[${patterns}]);
+		DELETE FROM public.tags AS tags
+		WHERE tags.owner_user_id = '${S10_ACTORS.ownerA.userId}'
+			AND NOT EXISTS (SELECT 1 FROM public.ai_import_item_tags WHERE tag_id = tags.id)
+			AND NOT EXISTS (SELECT 1 FROM public.card_tags WHERE tag_id = tags.id);
+		DELETE FROM public.decks
+		WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}'
+			AND name LIKE ANY (ARRAY[${patterns}]);
+		DELETE FROM public.cards
+		WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}'
+			AND (front_text LIKE ANY (ARRAY[${patterns}]) OR back_text LIKE ANY (ARRAY[${patterns}]));
+		DELETE FROM public.ai_usage_daily WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}';
+	`);
 }
 
 async function createIllustrationQuotaFixture(params: {
@@ -593,47 +754,352 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 		// @category: integration
 		// @dependency: commit_import wrapper/internal, Stage 1 DB validation
 		// @complexity: high
-		it.todo("IT-COMMIT-01: 正常commitがbatch/items/tags/item_tagsとreservation linkを原子的に作りcard/deck_cards/card_tagsを0件に保つ");
+		it("IT-COMMIT-01: 正常commitがbatch/items/tags/item_tagsとreservation linkを原子的に作りcard/deck_cards/card_tagsを0件に保つ", async () => {
+			const fixture = await createCommitFixture();
+			try {
+				await createCommitReservation(fixture);
+				const before = await captureS10Snapshot(database, commitSnapshotQueries);
+				const result = await commitImport({
+					source: "app_ai",
+					idempotencyKey: fixture.idempotencyKey,
+					importRequestHash: fixture.importRequestHash,
+					request: fixture.request,
+					cardReservationKey: fixture.reservationKey,
+				});
+				expect(result).toMatchObject({
+					status: "committed",
+					requestedCardCount: 2,
+					requestedImageCount: 0,
+				});
+				const rows = await database.query<{
+					batches: number; items: number; tags: number; itemTags: number;
+					cards: number; deckCards: number; cardTags: number; usage: number;
+					reservationBatchId: string; reservationImportHash: string;
+				}>(`
+					SELECT
+						(SELECT count(*)::int FROM public.ai_import_batches WHERE id = '${result.batchId}') AS batches,
+						(SELECT count(*)::int FROM public.ai_import_items WHERE batch_id = '${result.batchId}') AS items,
+						(SELECT count(DISTINCT tags.id)::int FROM public.tags INNER JOIN public.ai_import_item_tags AS links ON links.tag_id = tags.id INNER JOIN public.ai_import_items AS items ON items.id = links.item_id WHERE items.batch_id = '${result.batchId}') AS tags,
+						(SELECT count(*)::int FROM public.ai_import_item_tags AS links INNER JOIN public.ai_import_items AS items ON items.id = links.item_id WHERE items.batch_id = '${result.batchId}') AS "itemTags",
+						(SELECT count(*)::int FROM public.cards WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}') AS cards,
+						(SELECT count(*)::int FROM public.deck_cards AS links INNER JOIN public.decks ON decks.id = links.deck_id WHERE decks.owner_user_id = '${S10_ACTORS.ownerA.userId}') AS "deckCards",
+						(SELECT count(*)::int FROM public.card_tags WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}') AS "cardTags",
+						(SELECT sum(generated_card_count)::int FROM public.ai_usage_daily WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}') AS usage,
+						(SELECT batch_id::text FROM public.ai_quota_reservations WHERE reservation_key = '${fixture.reservationKey}') AS "reservationBatchId",
+						(SELECT import_request_hash FROM public.ai_quota_reservations WHERE reservation_key = '${fixture.reservationKey}') AS "reservationImportHash"
+				`);
+				expect(rows).toEqual([{
+					batches: 1, items: 2, tags: 1, itemTags: 2,
+					cards: (before.entries.cards[0]?.count as number) ?? 0,
+					deckCards: (before.entries.deckCards[0]?.count as number) ?? 0,
+					cardTags: (before.entries.cardTags[0]?.count as number) ?? 0,
+					usage: 2,
+					reservationBatchId: result.batchId,
+					reservationImportHash: fixture.importRequestHash,
+				}]);
+			} finally {
+				await cleanupCommitFixtures([fixture.marker]);
+			}
+		});
 
 		// @category: edge-case
 		// @dependency: commit transaction, snapshot helper
 		// @complexity: high
-		it.todo("IT-COMMIT-02: Stage 1各validation違反と途中例外でdeck/card/batch/item/tag/card_tags/usage/reservation差分が0になる");
+		it("IT-COMMIT-02: Stage 1各validation違反と途中例外でdeck/card/batch/item/tag/card_tags/usage/reservation差分が0になる", async () => {
+			const fixture = await createCommitFixture();
+			const invalidRequests: ReadonlyArray<Readonly<Record<string, unknown>>> = [
+				{ ...fixture.request, source: "app_ai" },
+				{ deck: fixture.request.deck, items: "invalid" },
+				{ deck: fixture.request.deck, items: Array.from({ length: 51 }, (_, index) => ({ ...fixture.request.items[0], clientItemId: `i-${index}`, conceptId: `c-${index}`, front: `漢${index}` })) },
+				{ deck: fixture.request.deck, items: [{ ...fixture.request.items[0], clientItemId: "" }] },
+				{ deck: fixture.request.deck, items: [{ ...fixture.request.items[0], tags: Array.from({ length: 11 }, (_, index) => `tag-${index}`) }] },
+				{ deck: fixture.request.deck, items: [fixture.request.items[0], { ...fixture.request.items[1], front: "mismatch" }] },
+			];
+			try {
+				const before = await captureS10Snapshot(database, commitSnapshotQueries);
+				for (const [index, request] of invalidRequests.entries()) {
+					const diagnostic = await database.captureError(commitImportSql({
+						source: "app_ai",
+						idempotencyKey: `${fixture.idempotencyKey}-${index}`,
+						importRequestHash: fixedHash("a"),
+						request,
+						cardReservationKey: `${fixture.reservationKey}-${index}`,
+					}), { actor: S10_ACTORS.service });
+					expect(["P1000", "P1001"]).toContain(diagnostic.sqlState);
+					expect(await captureS10Snapshot(database, commitSnapshotQueries)).toEqual(before);
+				}
+
+				const rollbackFixture = await createCommitFixture({ marker: `rollback-${randomUUID()}`, deck: { create: { name: `rollback-${fixture.marker}` } } });
+				await createCommitReservation(rollbackFixture);
+				const rollbackBefore = await captureS10Snapshot(database, commitSnapshotQueries);
+				const failpoint = await database.captureError(commitImportSql({
+					source: "app_ai",
+					idempotencyKey: rollbackFixture.idempotencyKey,
+					importRequestHash: rollbackFixture.importRequestHash,
+					request: rollbackFixture.request,
+					cardReservationKey: rollbackFixture.reservationKey,
+					internal: true,
+				}), { failpoint: "commit_after_tags" });
+				expect(failpoint.sqlState).toBe("P1008");
+				expect(await captureS10Snapshot(database, commitSnapshotQueries)).toEqual(rollbackBefore);
+				await cleanupCommitFixtures([rollbackFixture.marker]);
+			} finally {
+				await cleanupCommitFixtures([fixture.marker]);
+			}
+		});
 
 		// @category: edge-case
 		// @dependency: idempotency advisory lock, parallel DB clients
 		// @complexity: high
-		it.todo("IT-COMMIT-03: 同owner/key/import hashの並行commitがbatch 1件と同一batch IDを返しitem/tag/usageを増やさない");
+		it("IT-COMMIT-03: 同owner/key/import hashの並行commitがbatch 1件と同一batch IDを返しitem/tag/usageを増やさない", async () => {
+			const fixture = await createCommitFixture();
+			try {
+				await createCommitReservation(fixture);
+				const params = {
+					source: "app_ai" as const,
+					idempotencyKey: fixture.idempotencyKey,
+					importRequestHash: fixture.importRequestHash,
+					request: fixture.request,
+					cardReservationKey: fixture.reservationKey,
+				};
+				const results = await Promise.all([createS10DbClient(), createS10DbClient()].map(async (client) => {
+					const rows = await client.query<{ result: CommitImportResult }>(commitImportSql(params), { actor: S10_ACTORS.service });
+					return rows[0]?.result;
+				}));
+				expect(results[0]).toEqual(results[1]);
+				const batchId = results[0]?.batchId;
+				expect(await database.query<{ batches: number; items: number; tags: number; usage: number }>(`
+					SELECT
+						(SELECT count(*)::int FROM public.ai_import_batches WHERE idempotency_key = '${fixture.idempotencyKey}') AS batches,
+						(SELECT count(*)::int FROM public.ai_import_items WHERE batch_id = '${batchId}') AS items,
+						(SELECT count(DISTINCT tags.id)::int FROM public.tags INNER JOIN public.ai_import_item_tags AS links ON links.tag_id = tags.id INNER JOIN public.ai_import_items AS items ON items.id = links.item_id WHERE items.batch_id = '${batchId}') AS tags,
+						(SELECT sum(generated_card_count)::int FROM public.ai_usage_daily WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}') AS usage
+				`)).toEqual([{ batches: 1, items: 2, tags: 1, usage: 2 }]);
+			} finally {
+				await cleanupCommitFixtures([fixture.marker]);
+			}
+		});
 
 		// @category: edge-case
 		// @dependency: commit idempotency contract
 		// @complexity: high
-		it.todo("IT-COMMIT-04: 同owner/keyでimport hash・source・reservationのいずれかが異なる再送をCONFLICTにして既存batchを不変にする");
+		it("IT-COMMIT-04: 同owner/keyでimport hash・source・reservationのいずれかが異なる再送をCONFLICTにして既存batchを不変にする", async () => {
+			const fixture = await createCommitFixture();
+			try {
+				await createCommitReservation(fixture);
+				await commitImport({ source: "app_ai", idempotencyKey: fixture.idempotencyKey, importRequestHash: fixture.importRequestHash, request: fixture.request, cardReservationKey: fixture.reservationKey });
+				const before = await captureS10Snapshot(database, commitSnapshotQueries);
+				for (const override of [
+					{ importRequestHash: fixedHash("b") },
+					{ source: "remote_mcp" as const },
+					{ cardReservationKey: `${fixture.reservationKey}-other` },
+				]) {
+					const diagnostic = await database.captureError(commitImportSql({
+						source: "app_ai", idempotencyKey: fixture.idempotencyKey,
+						importRequestHash: fixture.importRequestHash, request: fixture.request,
+						cardReservationKey: fixture.reservationKey, ...override,
+					}), { actor: S10_ACTORS.service });
+					expect(diagnostic.sqlState).toBe("P1008");
+					 expect(await captureS10Snapshot(database, commitSnapshotQueries)).toEqual(before);
+				}
+				const changedRequest: CanonicalImportRequestInput = {
+					deck: fixture.request.deck,
+					items: [
+						{ ...fixture.request.items[0], front: `${fixture.request.items[0].front} changed` },
+						{ ...fixture.request.items[1], back: `${fixture.request.items[1].back} changed` },
+					],
+				};
+				const changedBody = await database.captureError(commitImportSql({
+					source: "app_ai", idempotencyKey: fixture.idempotencyKey,
+					importRequestHash: fixture.importRequestHash, request: changedRequest,
+					cardReservationKey: fixture.reservationKey,
+				}), { actor: S10_ACTORS.service });
+				expect(changedBody.sqlState).toBe("P1000");
+				expect(await captureS10Snapshot(database, commitSnapshotQueries)).toEqual(before);
+			} finally {
+				await cleanupCommitFixtures([fixture.marker]);
+			}
+		});
 
 		// @category: integration
 		// @dependency: generation/import hash DB validation
 		// @complexity: high
-		it.todo("IT-COMMIT-05: generation hashとimport hashの非一致を許容しreservation keyで結び、初回だけimport hashを関連付ける");
+		it("IT-COMMIT-05: generation hashとimport hashの非一致を許容しreservation keyで結び、初回だけimport hashを関連付ける", async () => {
+			const vector = canonicalRequestFixture.importVectors[0];
+			const deckId = vector.input.deck.id.toLowerCase();
+			const marker = `fixture-${randomUUID()}`;
+			const fixtureRequest: CanonicalImportRequestInput = {
+				deck: vector.input.deck,
+				items: vector.input.items,
+			};
+			const fixture: CommitFixture = {
+				marker, deckId, request: fixtureRequest,
+				idempotencyKey: marker, reservationKey: `card-${marker}`,
+				importRequestHash: vector.expectedSha256Hex,
+				generationRequestHash: canonicalRequestFixture.generationVectors[0].expectedSha256Hex,
+			};
+			try {
+				await database.execute(`INSERT INTO public.decks(id, owner_user_id, name) VALUES ('${deckId}', '${S10_ACTORS.ownerA.userId}', '${marker}')`);
+				expect(fixture.generationRequestHash).not.toBe(fixture.importRequestHash);
+				await createCommitReservation(fixture);
+				const first = await commitImport({ source: "app_ai", idempotencyKey: marker, importRequestHash: fixture.importRequestHash, request: fixture.request, cardReservationKey: fixture.reservationKey });
+				const second = await commitImport({ source: "app_ai", idempotencyKey: marker, importRequestHash: fixture.importRequestHash, request: fixture.request, cardReservationKey: fixture.reservationKey });
+				expect(second).toEqual(first);
+				expect(await database.query<{ generationHash: string; importHash: string; batchId: string }>(`
+					SELECT generation_request_hash AS "generationHash", import_request_hash AS "importHash", batch_id::text AS "batchId"
+					FROM public.ai_quota_reservations WHERE reservation_key = '${fixture.reservationKey}'
+				`)).toEqual([{ generationHash: fixture.generationRequestHash, importHash: fixture.importRequestHash, batchId: first.batchId }]);
+			} finally {
+				await cleanupCommitFixtures([marker]);
+				await database.execute(`DELETE FROM public.decks WHERE id = '${deckId}'`);
+			}
+		});
 
 		// @category: edge-case
 		// @dependency: DB canonical import hash function
 		// @complexity: high
-		it.todo("IT-COMMIT-06: 引数import hashとDB再計算hashの不一致、reservation key改ざんを拒否し副作用を0件にする");
+		it("IT-COMMIT-06: 引数import hashとDB再計算hashの不一致、reservation key改ざんを拒否し副作用を0件にする", async () => {
+			const fixture = await createCommitFixture();
+			try {
+				await createCommitReservation(fixture);
+				const before = await captureS10Snapshot(database, commitSnapshotQueries);
+				const wrongHash = await database.captureError(commitImportSql({ source: "app_ai", idempotencyKey: fixture.idempotencyKey, importRequestHash: fixedHash("f"), request: fixture.request, cardReservationKey: fixture.reservationKey }), { actor: S10_ACTORS.service });
+				expect(wrongHash.sqlState).toBe("P1000");
+				expect(wrongHash.detail).toContain("importRequestHash");
+				for (const sensitiveValue of [fixture.marker, fixture.reservationKey, fixture.request.items[0]?.front ?? ""]) {
+					expect(wrongHash.detail).not.toContain(sensitiveValue);
+				}
+				expect(await captureS10Snapshot(database, commitSnapshotQueries)).toEqual(before);
+				const tamperedKey = await database.captureError(commitImportSql({ source: "app_ai", idempotencyKey: `${fixture.idempotencyKey}-tampered`, importRequestHash: fixture.importRequestHash, request: fixture.request, cardReservationKey: `${fixture.reservationKey}-tampered` }), { actor: S10_ACTORS.service });
+				expect(tamperedKey.sqlState).toBe("P1008");
+				expect(await captureS10Snapshot(database, commitSnapshotQueries)).toEqual(before);
+			} finally {
+				await cleanupCommitFixtures([fixture.marker]);
+			}
+		});
 
 		// @category: edge-case
 		// @dependency: duplicate set validation
 		// @complexity: high
-		it.todo("IT-COMMIT-07: request内card-key重複をDUPLICATE_IN_REQUEST、既存owner重複をDUPLICATE_EXISTINGに分類し全変更をrollbackする");
+		it("IT-COMMIT-07: request内card-key重複をDUPLICATE_IN_REQUEST、既存owner重複をDUPLICATE_EXISTINGに分類し全変更をrollbackする", async () => {
+			const fixture = await createCommitFixture();
+			const duplicateRequest: CanonicalImportRequestInput = {
+				deck: fixture.request.deck,
+				items: [fixture.request.items[0], { ...fixture.request.items[0], clientItemId: `duplicate-${fixture.marker}`, conceptId: `duplicate-${fixture.marker}` }],
+			};
+			try {
+				const before = await captureS10Snapshot(database, commitSnapshotQueries);
+				const inRequest = await database.captureError(commitImportSql({ source: "remote_mcp", idempotencyKey: `${fixture.idempotencyKey}-request`, importRequestHash: await hashImportRequest(duplicateRequest), request: duplicateRequest, cardReservationKey: `${fixture.reservationKey}-request` }), { actor: S10_ACTORS.service });
+				expect(inRequest.sqlState).toBe("P1001");
+				expect(await captureS10Snapshot(database, commitSnapshotQueries)).toEqual(before);
+
+				await database.execute(`INSERT INTO public.cards(owner_user_id, visibility, skill, pattern, front_text, back_text, card_key) VALUES ('${S10_ACTORS.ownerA.userId}', 'private', 'reading', 'R1', ${sqlLiteral(fixture.request.items[0].front)}, ${sqlLiteral(fixture.request.items[0].back)}, 'ignored')`);
+				await createCommitReservation(fixture, "remote_mcp");
+				const existingBefore = await captureS10Snapshot(database, commitSnapshotQueries);
+				const existing = await database.captureError(commitImportSql({ source: "remote_mcp", idempotencyKey: fixture.idempotencyKey, importRequestHash: fixture.importRequestHash, request: fixture.request, cardReservationKey: fixture.reservationKey }), { actor: S10_ACTORS.service });
+				expect(existing.sqlState).toBe("P1002");
+				expect(await captureS10Snapshot(database, commitSnapshotQueries)).toEqual(existingBefore);
+			} finally {
+				await cleanupCommitFixtures([fixture.marker]);
+			}
+		});
 
 		// @category: integration
 		// @dependency: deck/upload locking
 		// @complexity: high
-		it.todo("IT-COMMIT-08: deck ID/name/createのowner・一意解決とupload ready状態をlock後再検証し適切な安定codeを返す");
+		it("IT-COMMIT-08: deck ID/name/createのowner・一意解決とupload ready状態をlock後再検証し適切な安定codeを返す", async () => {
+			const marker = randomUUID();
+			const ownerBDeck = randomUUID();
+			const ambiguousA = randomUUID();
+			const ambiguousB = randomUUID();
+			const uploadId = randomUUID();
+			try {
+				const [lockOrder] = await database.query<{
+					batchLock: number;
+					reservationLock: number;
+					deckLock: number;
+					uploadLock: number;
+				}>(`
+					SELECT
+						strpos(definition, 'SELECT batches.* INTO existing_batch')::int AS "batchLock",
+						strpos(definition, 'SELECT reservations.* INTO reservation')::int AS "reservationLock",
+						strpos(definition, 'IF prepared #>> ''{deck,mode}'' = ''id'' THEN')::int AS "deckLock",
+						strpos(definition, 'FOR upload_candidate IN')::int AS "uploadLock"
+					FROM (
+						SELECT pg_get_functiondef(
+							'public.commit_import_internal(uuid,text,text,text,jsonb,text)'::regprocedure
+						) AS definition
+					) AS function_source
+				`);
+				expect(lockOrder).toBeDefined();
+				expect(lockOrder?.batchLock).toBeGreaterThan(0);
+				expect(lockOrder?.reservationLock).toBeGreaterThan(lockOrder?.batchLock ?? 0);
+				expect(lockOrder?.deckLock).toBeGreaterThan(lockOrder?.reservationLock ?? 0);
+				expect(lockOrder?.uploadLock).toBeGreaterThan(lockOrder?.deckLock ?? 0);
+
+				await database.execute(`
+					INSERT INTO public.decks(id, owner_user_id, name) VALUES
+					('${ownerBDeck}', '${S10_ACTORS.ownerB.userId}', 'other-${marker}'),
+					('${ambiguousA}', '${S10_ACTORS.ownerA.userId}', 'ambiguous-${marker}'),
+					('${ambiguousB}', '${S10_ACTORS.ownerA.userId}', ' ambiguous-${marker} ');
+					INSERT INTO public.ai_uploads(id, owner_user_id, upload_key, purpose, storage_path, mime_type, byte_size)
+					VALUES ('${uploadId}', '${S10_ACTORS.ownerA.userId}', 'upload-${marker}', 'card_illustration', '${S10_ACTORS.ownerA.userId}/${marker}.png', 'image/png', 100)
+				`);
+				const baseItem = { clientItemId: `item-${marker}`, conceptId: `concept-${marker}`, pattern: "R1", front: `漢 ${marker}`, back: `かん ${marker}`, tags: [] as string[], image: { mode: "upload", uploadId } };
+				for (const [deck, state] of [[{ id: ownerBDeck }, "P1003"], [{ name: `ambiguous-${marker}` }, "P1004"]] as const) {
+					const request = { deck, items: [baseItem] } satisfies CanonicalImportRequestInput;
+					const reservationKey = `invalid-${marker}-${state}`;
+					await reserveUsage({
+						reservationKey,
+						kind: "card_generation",
+						source: "remote_mcp",
+						generationRequestHash: fixedHash("8"),
+						units: 0,
+						testNow: "2048-01-01T00:00:00Z",
+					});
+					const diagnostic = await database.captureError(commitImportSql({ source: "remote_mcp", idempotencyKey: `invalid-${marker}-${state}`, importRequestHash: await hashImportRequest(request), request, cardReservationKey: reservationKey }), { actor: S10_ACTORS.service });
+					expect(diagnostic.sqlState).toBe(state);
+				}
+
+				const fixture = await createCommitFixture({ marker, deck: { create: { name: `created-${marker}` } }, items: [baseItem] });
+				await createCommitReservation(fixture, "remote_mcp");
+				const result = await commitImport({ source: "remote_mcp", idempotencyKey: fixture.idempotencyKey, importRequestHash: fixture.importRequestHash, request: fixture.request, cardReservationKey: fixture.reservationKey });
+				expect(await database.query<{ target: string; auto: string; upload: string }>(`
+					SELECT batches.target_deck_id::text AS target, batches.auto_created_deck_id::text AS auto, items.upload_id::text AS upload
+					FROM public.ai_import_batches AS batches INNER JOIN public.ai_import_items AS items ON items.batch_id = batches.id
+					WHERE batches.id = '${result.batchId}'
+				`)).toEqual([{ target: expect.any(String), auto: expect.any(String), upload: uploadId }]);
+			} finally {
+				await cleanupCommitFixtures([marker]);
+				await database.execute(`DELETE FROM public.decks WHERE id IN ('${ownerBDeck}', '${ambiguousA}', '${ambiguousB}')`);
+			}
+		});
 
 		// @category: integration
 		// @dependency: tag normalization trigger
 		// @complexity: medium
-		it.todo("IT-COMMIT-09: tag display nameからDBがnormalized_nameを強制導出し、偽装値を無視してowner内uniqueを守る");
+		it("IT-COMMIT-09: tag display nameからDBがnormalized_nameを強制導出し、偽装値を無視してowner内uniqueを守る", async () => {
+			const fixture = await createCommitFixture({ items: [{
+				clientItemId: `item-${randomUUID()}`, conceptId: `concept-${randomUUID()}`,
+				pattern: "R1", front: `漢字 ${randomUUID()}`, back: "かんじ",
+				tags: [" 国語 ", "Ｇｒａｄｅ　３"], image: { mode: "none" },
+			}] });
+			try {
+				await database.execute(`INSERT INTO public.tags(owner_user_id, display_name, normalized_name) VALUES ('${S10_ACTORS.ownerA.userId}', 'Grade 3', 'forged')`);
+				await createCommitReservation(fixture, "remote_mcp");
+				const result = await commitImport({ source: "remote_mcp", idempotencyKey: fixture.idempotencyKey, importRequestHash: fixture.importRequestHash, request: fixture.request, cardReservationKey: fixture.reservationKey });
+				expect(await database.query<{ display: string; normalized: string }>(`
+					SELECT tags.display_name AS display, tags.normalized_name AS normalized
+					FROM public.tags INNER JOIN public.ai_import_item_tags AS links ON links.tag_id = tags.id
+					INNER JOIN public.ai_import_items AS items ON items.id = links.item_id
+					WHERE items.batch_id = '${result.batchId}' ORDER BY tags.normalized_name
+				`)).toEqual([{ display: "Grade 3", normalized: "grade 3" }, { display: "国語", normalized: "国語" }]);
+				const forged = { deck: fixture.request.deck, items: [{ ...fixture.request.items[0], tags: [{ displayName: "国語", normalizedName: "spoof" }] }] };
+				expect((await database.captureError(commitImportSql({ source: "remote_mcp", idempotencyKey: `${fixture.idempotencyKey}-forged`, importRequestHash: fixedHash("a"), request: forged, cardReservationKey: `${fixture.reservationKey}-forged` }), { actor: S10_ACTORS.service })).sqlState).toBe("P1000");
+			} finally {
+				await cleanupCommitFixtures([fixture.marker, "Grade 3", "国語"]);
+			}
+		});
 	});
 
 	describe("JST quota reservation (AC-05)", () => {

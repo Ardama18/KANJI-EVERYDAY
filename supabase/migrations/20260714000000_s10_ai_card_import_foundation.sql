@@ -904,6 +904,628 @@ BEGIN
 END;
 $$;
 
+CREATE FUNCTION public.ai_prepare_import_request(p_request jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql
+IMMUTABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+  deck_value jsonb;
+  deck_mode text;
+  deck_id uuid;
+  deck_name text;
+  prepared_deck jsonb;
+  item_value jsonb;
+  image_value jsonb;
+  tag_value jsonb;
+  prepared_items jsonb := '[]'::jsonb;
+  prepared_tags jsonb;
+  prepared_item jsonb;
+  client_item_id text;
+  concept_id text;
+  item_pattern text;
+  item_skill text;
+  front_value text;
+  back_value text;
+  image_mode text;
+  upload_id uuid;
+  tag_display text;
+  tag_normalized text;
+  item_card_key text;
+  client_item_ids text[] := ARRAY[]::text[];
+  card_keys text[] := ARRAY[]::text[];
+  tag_names text[];
+  item_count integer;
+  image_count integer;
+  ordinal_index integer;
+  canonical_deck text;
+  canonical_items text := '';
+  canonical_tags text;
+  canonical_image text;
+  canonical_request text;
+  request_hash text;
+BEGIN
+  IF p_request IS NULL OR jsonb_typeof(p_request) <> 'object' OR
+     NOT (p_request ?& ARRAY['deck', 'items']) OR
+     EXISTS (
+       SELECT 1 FROM jsonb_object_keys(p_request) AS request_keys(key)
+       WHERE request_keys.key NOT IN ('deck', 'items')
+     ) THEN
+    PERFORM public.ai_raise_import_error(
+      'VALIDATION_ERROR', jsonb_build_object('field', 'request', 'rule', 'shape')
+    );
+  END IF;
+
+  deck_value := p_request -> 'deck';
+  IF jsonb_typeof(deck_value) <> 'object' OR
+     (SELECT count(*) FROM jsonb_object_keys(deck_value)) <> 1 OR
+     EXISTS (
+       SELECT 1 FROM jsonb_object_keys(deck_value) AS deck_keys(key)
+       WHERE deck_keys.key NOT IN ('id', 'name', 'create')
+     ) THEN
+    PERFORM public.ai_raise_import_error(
+      'VALIDATION_ERROR', jsonb_build_object('field', 'deck', 'rule', 'shape')
+    );
+  END IF;
+
+  IF deck_value ? 'id' THEN
+    IF jsonb_typeof(deck_value -> 'id') <> 'string' OR
+       (deck_value ->> 'id') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' THEN
+      PERFORM public.ai_raise_import_error(
+        'VALIDATION_ERROR', jsonb_build_object('field', 'deck.id', 'rule', 'uuid')
+      );
+    END IF;
+    deck_mode := 'id';
+    deck_id := (deck_value ->> 'id')::uuid;
+    prepared_deck := jsonb_build_object('mode', deck_mode, 'id', deck_id::text);
+    canonical_deck := '{"id":' || to_jsonb(deck_id::text)::text || '}';
+  ELSIF deck_value ? 'name' THEN
+    IF jsonb_typeof(deck_value -> 'name') <> 'string' THEN
+      PERFORM public.ai_raise_import_error(
+        'VALIDATION_ERROR', jsonb_build_object('field', 'deck.name', 'rule', 'string')
+      );
+    END IF;
+    deck_mode := 'name';
+    deck_name := public.ai_normalize_display_text(deck_value ->> 'name');
+    IF char_length(deck_name) NOT BETWEEN 1 AND 200 THEN
+      PERFORM public.ai_raise_import_error(
+        'VALIDATION_ERROR', jsonb_build_object('field', 'deck.name', 'rule', 'length')
+      );
+    END IF;
+    prepared_deck := jsonb_build_object('mode', deck_mode, 'name', deck_name);
+    canonical_deck := '{"name":' || to_jsonb(deck_name)::text || '}';
+  ELSE
+    IF jsonb_typeof(deck_value -> 'create') <> 'object' OR
+       NOT ((deck_value -> 'create') ? 'name') OR
+       (SELECT count(*) FROM jsonb_object_keys(deck_value -> 'create')) <> 1 OR
+       jsonb_typeof(deck_value #> '{create,name}') <> 'string' THEN
+      PERFORM public.ai_raise_import_error(
+        'VALIDATION_ERROR', jsonb_build_object('field', 'deck.create', 'rule', 'shape')
+      );
+    END IF;
+    deck_mode := 'create';
+    deck_name := public.ai_normalize_display_text(deck_value #>> '{create,name}');
+    IF char_length(deck_name) NOT BETWEEN 1 AND 200 THEN
+      PERFORM public.ai_raise_import_error(
+        'VALIDATION_ERROR', jsonb_build_object('field', 'deck.create.name', 'rule', 'length')
+      );
+    END IF;
+    prepared_deck := jsonb_build_object('mode', deck_mode, 'name', deck_name);
+    canonical_deck := '{"create":{"name":' || to_jsonb(deck_name)::text || '}}';
+  END IF;
+
+  IF jsonb_typeof(p_request -> 'items') <> 'array' THEN
+    PERFORM public.ai_raise_import_error(
+      'VALIDATION_ERROR', jsonb_build_object('field', 'items', 'rule', 'array')
+    );
+  END IF;
+  item_count := jsonb_array_length(p_request -> 'items');
+  IF item_count NOT BETWEEN 1 AND 50 THEN
+    PERFORM public.ai_raise_import_error(
+      'VALIDATION_ERROR', jsonb_build_object('field', 'items', 'rule', 'count')
+    );
+  END IF;
+
+  FOR item_value, ordinal_index IN
+    SELECT entries.value, (entries.ordinality - 1)::integer
+    FROM jsonb_array_elements(p_request -> 'items') WITH ORDINALITY AS entries(value, ordinality)
+    ORDER BY entries.ordinality
+  LOOP
+    IF jsonb_typeof(item_value) <> 'object' OR
+       NOT (item_value ?& ARRAY['clientItemId', 'conceptId', 'pattern', 'front', 'back', 'tags', 'image']) OR
+       EXISTS (
+         SELECT 1 FROM jsonb_object_keys(item_value) AS item_keys(key)
+         WHERE item_keys.key NOT IN ('clientItemId', 'conceptId', 'pattern', 'front', 'back', 'tags', 'image')
+       ) OR
+       jsonb_typeof(item_value -> 'clientItemId') <> 'string' OR
+       jsonb_typeof(item_value -> 'conceptId') <> 'string' OR
+       jsonb_typeof(item_value -> 'pattern') <> 'string' OR
+       jsonb_typeof(item_value -> 'front') <> 'string' OR
+       jsonb_typeof(item_value -> 'back') <> 'string' OR
+       jsonb_typeof(item_value -> 'tags') <> 'array' OR
+       jsonb_typeof(item_value -> 'image') <> 'object' THEN
+      PERFORM public.ai_raise_import_error(
+        'VALIDATION_ERROR', jsonb_build_object('field', 'items', 'rule', 'shape')
+      );
+    END IF;
+
+    client_item_id := item_value ->> 'clientItemId';
+    concept_id := item_value ->> 'conceptId';
+    item_pattern := item_value ->> 'pattern';
+    front_value := public.ai_normalize_display_text(item_value ->> 'front');
+    back_value := public.ai_normalize_display_text(item_value ->> 'back');
+    IF char_length(client_item_id) NOT BETWEEN 1 AND 64 OR
+       char_length(concept_id) NOT BETWEEN 1 AND 64 OR
+       item_pattern NOT IN ('R1', 'W1') OR
+       char_length(front_value) NOT BETWEEN 1 AND 200 OR
+       char_length(back_value) NOT BETWEEN 1 AND 200 OR
+       (item_pattern = 'R1' AND front_value !~ '[㐀-䶿一-鿿𠀀-𫠟々〇〆]') OR
+       (item_pattern = 'W1' AND back_value !~ '[㐀-䶿一-鿿𠀀-𫠟々〇〆]') THEN
+      PERFORM public.ai_raise_import_error(
+        'VALIDATION_ERROR', jsonb_build_object('field', 'items', 'rule', 'content')
+      );
+    END IF;
+    IF client_item_id = ANY(client_item_ids) THEN
+      PERFORM public.ai_raise_import_error(
+        'DUPLICATE_IN_REQUEST', jsonb_build_object('clientItemId', client_item_id)
+      );
+    END IF;
+    client_item_ids := array_append(client_item_ids, client_item_id);
+    item_skill := CASE item_pattern WHEN 'R1' THEN 'reading' ELSE 'writing' END;
+
+    image_value := item_value -> 'image';
+    IF NOT (image_value ? 'mode') OR jsonb_typeof(image_value -> 'mode') <> 'string' OR
+       (image_value ->> 'mode') NOT IN ('none', 'ai', 'upload') THEN
+      PERFORM public.ai_raise_import_error(
+        'VALIDATION_ERROR', jsonb_build_object('field', 'items.image', 'rule', 'mode')
+      );
+    END IF;
+    image_mode := image_value ->> 'mode';
+    upload_id := NULL;
+    IF image_mode IN ('none', 'ai') THEN
+      IF (SELECT count(*) FROM jsonb_object_keys(image_value)) <> 1 THEN
+        PERFORM public.ai_raise_import_error(
+          'VALIDATION_ERROR', jsonb_build_object('field', 'items.image', 'rule', 'shape')
+        );
+      END IF;
+    ELSE
+      IF NOT (image_value ? 'uploadId') OR
+         (SELECT count(*) FROM jsonb_object_keys(image_value)) <> 2 OR
+         jsonb_typeof(image_value -> 'uploadId') <> 'string' OR
+         (image_value ->> 'uploadId') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' THEN
+        PERFORM public.ai_raise_import_error(
+          'VALIDATION_ERROR', jsonb_build_object('field', 'items.image.uploadId', 'rule', 'uuid')
+        );
+      END IF;
+      upload_id := (image_value ->> 'uploadId')::uuid;
+    END IF;
+
+    IF jsonb_array_length(item_value -> 'tags') > 10 THEN
+      PERFORM public.ai_raise_import_error(
+        'VALIDATION_ERROR', jsonb_build_object('field', 'items.tags', 'rule', 'count')
+      );
+    END IF;
+    prepared_tags := '[]'::jsonb;
+    tag_names := ARRAY[]::text[];
+    FOR tag_value IN SELECT value FROM jsonb_array_elements(item_value -> 'tags') LOOP
+      IF jsonb_typeof(tag_value) <> 'string' THEN
+        PERFORM public.ai_raise_import_error(
+          'VALIDATION_ERROR', jsonb_build_object('field', 'items.tags', 'rule', 'string')
+        );
+      END IF;
+      tag_display := public.ai_normalize_display_text(tag_value #>> '{}');
+      tag_normalized := public.ai_normalize_key_text(tag_display);
+      IF char_length(tag_display) NOT BETWEEN 1 AND 30 OR
+         char_length(tag_normalized) NOT BETWEEN 1 AND 30 THEN
+        PERFORM public.ai_raise_import_error(
+          'VALIDATION_ERROR', jsonb_build_object('field', 'items.tags', 'rule', 'length')
+        );
+      END IF;
+      IF tag_normalized = ANY(tag_names) THEN
+        PERFORM public.ai_raise_import_error(
+          'VALIDATION_ERROR', jsonb_build_object('field', 'items.tags', 'rule', 'unique')
+        );
+      END IF;
+      tag_names := array_append(tag_names, tag_normalized);
+      prepared_tags := prepared_tags || jsonb_build_array(jsonb_build_object(
+        'displayName', tag_display, 'normalizedName', tag_normalized
+      ));
+    END LOOP;
+    SELECT coalesce(jsonb_agg(tags.value ORDER BY tags.value ->> 'normalizedName'), '[]'::jsonb)
+    INTO prepared_tags
+    FROM jsonb_array_elements(prepared_tags) AS tags(value);
+
+    item_card_key := public.ai_compute_card_key(item_pattern, front_value, back_value);
+    IF item_card_key = ANY(card_keys) THEN
+      PERFORM public.ai_raise_import_error(
+        'DUPLICATE_IN_REQUEST', jsonb_build_object('clientItemId', client_item_id)
+      );
+    END IF;
+    card_keys := array_append(card_keys, item_card_key);
+    prepared_items := prepared_items || jsonb_build_array(jsonb_build_object(
+      'clientItemId', client_item_id,
+      'conceptId', concept_id,
+      'ordinal', ordinal_index,
+      'pattern', item_pattern,
+      'skill', item_skill,
+      'frontText', front_value,
+      'backText', back_value,
+      'cardKey', item_card_key,
+      'tags', prepared_tags,
+      'imageMode', image_mode,
+      'uploadId', upload_id
+    ));
+  END LOOP;
+
+  IF EXISTS (
+    SELECT 1
+    FROM (
+      SELECT
+        items.value ->> 'conceptId' AS concept_id,
+        count(*) FILTER (WHERE items.value ->> 'pattern' = 'R1') AS r1_count,
+        count(*) FILTER (WHERE items.value ->> 'pattern' = 'W1') AS w1_count,
+        min(items.value ->> 'frontText') FILTER (WHERE items.value ->> 'pattern' = 'R1') AS r1_front,
+        min(items.value ->> 'backText') FILTER (WHERE items.value ->> 'pattern' = 'R1') AS r1_back,
+        min(items.value ->> 'frontText') FILTER (WHERE items.value ->> 'pattern' = 'W1') AS w1_front,
+        min(items.value ->> 'backText') FILTER (WHERE items.value ->> 'pattern' = 'W1') AS w1_back
+      FROM jsonb_array_elements(prepared_items) AS items(value)
+      GROUP BY items.value ->> 'conceptId'
+    ) AS concepts
+    WHERE concepts.r1_count > 1 OR concepts.w1_count > 1 OR
+      (concepts.r1_count = 1 AND concepts.w1_count = 1 AND
+       (concepts.r1_front IS DISTINCT FROM concepts.w1_back OR
+        concepts.r1_back IS DISTINCT FROM concepts.w1_front))
+  ) THEN
+    PERFORM public.ai_raise_import_error(
+      'VALIDATION_ERROR', jsonb_build_object('field', 'items', 'rule', 'pair')
+    );
+  END IF;
+
+  SELECT count(DISTINCT items.value ->> 'conceptId')::integer
+  INTO image_count
+  FROM jsonb_array_elements(prepared_items) AS items(value)
+  WHERE items.value ->> 'imageMode' = 'ai';
+
+  FOR prepared_item IN
+    SELECT value FROM jsonb_array_elements(prepared_items)
+    ORDER BY (value ->> 'ordinal')::integer
+  LOOP
+    SELECT coalesce(
+      string_agg(to_jsonb(tags.value ->> 'normalizedName')::text, ',' ORDER BY tags.value ->> 'normalizedName'),
+      ''
+    ) INTO canonical_tags
+    FROM jsonb_array_elements(prepared_item -> 'tags') AS tags(value);
+    canonical_image := CASE prepared_item ->> 'imageMode'
+      WHEN 'upload' THEN '{"mode":"upload","uploadId":' ||
+        to_jsonb(prepared_item ->> 'uploadId')::text || '}'
+      ELSE '{"mode":' || to_jsonb(prepared_item ->> 'imageMode')::text || '}'
+    END;
+    IF canonical_items <> '' THEN
+      canonical_items := canonical_items || ',';
+    END IF;
+    canonical_items := canonical_items ||
+      '{"clientItemId":' || to_jsonb(prepared_item ->> 'clientItemId')::text ||
+      ',"conceptId":' || to_jsonb(prepared_item ->> 'conceptId')::text ||
+      ',"pattern":' || to_jsonb(prepared_item ->> 'pattern')::text ||
+      ',"front":' || to_jsonb(prepared_item ->> 'frontText')::text ||
+      ',"back":' || to_jsonb(prepared_item ->> 'backText')::text ||
+      ',"tags":[' || canonical_tags || ']' ||
+      ',"image":' || canonical_image || '}';
+  END LOOP;
+  canonical_request := '{"deck":' || canonical_deck || ',"items":[' || canonical_items || ']}';
+  request_hash := encode(
+    extensions.digest(convert_to(canonical_request, 'UTF8'), 'sha256'), 'hex'
+  );
+
+  RETURN jsonb_build_object(
+    'deck', prepared_deck,
+    'items', prepared_items,
+    'requestedCardCount', item_count,
+    'requestedImageCount', coalesce(image_count, 0),
+    'importRequestHash', request_hash
+  );
+END;
+$$;
+
+CREATE FUNCTION public.commit_import_internal(
+  p_actor_user_id uuid,
+  p_source text,
+  p_idempotency_key text,
+  p_import_request_hash text,
+  p_request jsonb,
+  p_card_reservation_key text
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+  prepared jsonb;
+  prepared_item jsonb;
+  prepared_tag jsonb;
+  candidate_id uuid;
+  candidate_key text;
+  upload_candidate uuid;
+  locked_upload_owner uuid;
+  locked_upload_status text;
+  existing_batch public.ai_import_batches%ROWTYPE;
+  reservation public.ai_quota_reservations%ROWTYPE;
+  resolved_deck_id uuid;
+  auto_deck_id uuid;
+  matching_deck_ids uuid[];
+  created_batch_id uuid;
+  created_item_id uuid;
+  resolved_tag_id uuid;
+  requested_card_count integer;
+  requested_image_count integer;
+  expected_reservation_units integer;
+  expected_reservation_status text;
+  duplicate_client_item_id text;
+BEGIN
+  prepared := public.ai_prepare_import_request(p_request);
+  requested_card_count := (prepared ->> 'requestedCardCount')::integer;
+  requested_image_count := (prepared ->> 'requestedImageCount')::integer;
+
+  FOR candidate_id IN
+    SELECT cards.id
+    FROM public.cards AS cards
+    WHERE cards.owner_user_id = p_actor_user_id
+      AND cards.visibility = 'private'
+      AND cards.card_key IN (
+        SELECT items.value ->> 'cardKey'
+        FROM jsonb_array_elements(prepared -> 'items') AS items(value)
+      )
+    ORDER BY cards.id
+    FOR UPDATE
+  LOOP
+    NULL;
+  END LOOP;
+
+  FOR candidate_key IN
+    SELECT DISTINCT items.value ->> 'cardKey'
+    FROM jsonb_array_elements(prepared -> 'items') AS items(value)
+    ORDER BY items.value ->> 'cardKey'
+  LOOP
+    PERFORM pg_advisory_xact_lock(hashtextextended(
+      p_actor_user_id::text || chr(31) || 'card-key' || chr(31) || candidate_key, 1011
+    ));
+  END LOOP;
+  PERFORM pg_advisory_xact_lock(hashtextextended(
+    p_actor_user_id::text || chr(31) || 'commit' || chr(31) || p_idempotency_key, 1012
+  ));
+
+  SELECT batches.* INTO existing_batch
+  FROM public.ai_import_batches AS batches
+  WHERE batches.owner_user_id = p_actor_user_id
+    AND batches.idempotency_key = p_idempotency_key
+  FOR UPDATE;
+  IF FOUND THEN
+    IF existing_batch.source IS DISTINCT FROM p_source OR
+       existing_batch.import_request_hash IS DISTINCT FROM p_import_request_hash OR
+       existing_batch.card_reservation_key IS DISTINCT FROM p_card_reservation_key THEN
+      PERFORM public.ai_raise_import_error('CONFLICT');
+    END IF;
+    IF prepared ->> 'importRequestHash' IS DISTINCT FROM p_import_request_hash THEN
+      PERFORM public.ai_raise_import_error(
+        'VALIDATION_ERROR', jsonb_build_object('field', 'importRequestHash', 'rule', 'mismatch')
+      );
+    END IF;
+    RETURN jsonb_build_object(
+      'batchId', existing_batch.id,
+      'status', existing_batch.status,
+      'requestedCardCount', existing_batch.requested_card_count,
+      'requestedImageCount', existing_batch.requested_image_count
+    );
+  END IF;
+
+  IF prepared ->> 'importRequestHash' IS DISTINCT FROM p_import_request_hash THEN
+    PERFORM public.ai_raise_import_error(
+      'VALIDATION_ERROR', jsonb_build_object('field', 'importRequestHash', 'rule', 'mismatch')
+    );
+  END IF;
+
+  SELECT items.value ->> 'clientItemId'
+  INTO duplicate_client_item_id
+  FROM jsonb_array_elements(prepared -> 'items') AS items(value)
+  WHERE EXISTS (
+    SELECT 1 FROM public.cards AS cards
+    WHERE cards.owner_user_id = p_actor_user_id
+      AND cards.visibility = 'private'
+      AND cards.card_key = items.value ->> 'cardKey'
+  )
+  ORDER BY (items.value ->> 'ordinal')::integer
+  LIMIT 1;
+  IF duplicate_client_item_id IS NOT NULL THEN
+    PERFORM public.ai_raise_import_error(
+      'DUPLICATE_EXISTING', jsonb_build_object('itemId', duplicate_client_item_id)
+    );
+  END IF;
+
+  SELECT reservations.* INTO reservation
+  FROM public.ai_quota_reservations AS reservations
+  WHERE reservations.owner_user_id = p_actor_user_id
+    AND reservations.reservation_key = p_card_reservation_key
+    AND reservations.kind = 'card_generation'
+  FOR UPDATE;
+  expected_reservation_units := CASE p_source WHEN 'app_ai' THEN requested_card_count ELSE 0 END;
+  expected_reservation_status := CASE p_source WHEN 'app_ai' THEN 'reserved' ELSE 'exempt' END;
+  IF NOT FOUND OR reservation.source IS DISTINCT FROM p_source OR
+     reservation.units IS DISTINCT FROM expected_reservation_units OR
+     reservation.status IS DISTINCT FROM expected_reservation_status OR
+     reservation.provider_started_at IS NULL OR
+     reservation.item_id IS NOT NULL OR reservation.concept_id IS NOT NULL OR
+     reservation.import_request_hash IS NOT NULL AND
+       reservation.import_request_hash IS DISTINCT FROM p_import_request_hash OR
+     reservation.batch_id IS NOT NULL THEN
+    PERFORM public.ai_raise_import_error('CONFLICT');
+  END IF;
+
+  IF prepared #>> '{deck,mode}' = 'id' THEN
+    SELECT decks.id INTO resolved_deck_id
+    FROM public.decks AS decks
+    WHERE decks.id = (prepared #>> '{deck,id}')::uuid
+      AND decks.owner_user_id = p_actor_user_id
+    FOR UPDATE;
+    IF NOT FOUND THEN
+      PERFORM public.ai_raise_import_error('DECK_NOT_FOUND');
+    END IF;
+  ELSIF prepared #>> '{deck,mode}' = 'name' THEN
+    SELECT array_agg(decks.id ORDER BY decks.id)
+    INTO matching_deck_ids
+    FROM public.decks AS decks
+    WHERE decks.owner_user_id = p_actor_user_id
+      AND public.ai_normalize_key_text(decks.name) =
+        public.ai_normalize_key_text(prepared #>> '{deck,name}');
+    IF matching_deck_ids IS NULL THEN
+      PERFORM public.ai_raise_import_error('DECK_NOT_FOUND');
+    END IF;
+    IF array_length(matching_deck_ids, 1) > 1 THEN
+      PERFORM public.ai_raise_import_error(
+        'DECK_AMBIGUOUS', jsonb_build_object(
+          'normalizedName', public.ai_normalize_key_text(prepared #>> '{deck,name}')
+        )
+      );
+    END IF;
+    SELECT decks.id INTO STRICT resolved_deck_id
+    FROM public.decks AS decks
+    WHERE decks.id = matching_deck_ids[1]
+    FOR UPDATE;
+  ELSE
+    INSERT INTO public.decks (owner_user_id, name)
+    VALUES (p_actor_user_id, prepared #>> '{deck,name}')
+    RETURNING id INTO STRICT resolved_deck_id;
+    auto_deck_id := resolved_deck_id;
+  END IF;
+
+  FOR upload_candidate IN
+    SELECT DISTINCT (items.value ->> 'uploadId')::uuid
+    FROM jsonb_array_elements(prepared -> 'items') AS items(value)
+    WHERE items.value ->> 'imageMode' = 'upload'
+    ORDER BY (items.value ->> 'uploadId')::uuid
+  LOOP
+    SELECT uploads.owner_user_id, uploads.status
+    INTO locked_upload_owner, locked_upload_status
+    FROM public.ai_uploads AS uploads
+    WHERE uploads.id = upload_candidate
+    FOR UPDATE;
+    IF NOT FOUND OR locked_upload_owner IS DISTINCT FROM p_actor_user_id THEN
+      PERFORM public.ai_raise_import_error('DECK_NOT_FOUND');
+    END IF;
+    IF locked_upload_status IS DISTINCT FROM 'ready' THEN
+      PERFORM public.ai_raise_import_error('CONFLICT');
+    END IF;
+  END LOOP;
+
+  INSERT INTO public.ai_import_batches (
+    owner_user_id, source, target_deck_id, auto_created_deck_id, status,
+    idempotency_key, import_request_hash, card_reservation_key,
+    requested_card_count, requested_image_count
+  ) VALUES (
+    p_actor_user_id, p_source, resolved_deck_id, auto_deck_id, 'committed',
+    p_idempotency_key, p_import_request_hash, p_card_reservation_key,
+    requested_card_count, requested_image_count
+  ) RETURNING id INTO STRICT created_batch_id;
+
+  UPDATE public.ai_quota_reservations
+  SET import_request_hash = p_import_request_hash, batch_id = created_batch_id
+  WHERE id = reservation.id;
+
+  FOR prepared_tag IN
+    SELECT DISTINCT ON (tags.value ->> 'normalizedName') tags.value
+    FROM jsonb_array_elements(prepared -> 'items') AS items(value)
+    CROSS JOIN LATERAL jsonb_array_elements(items.value -> 'tags') AS tags(value)
+    ORDER BY tags.value ->> 'normalizedName', tags.value ->> 'displayName'
+  LOOP
+    INSERT INTO public.tags (owner_user_id, display_name, normalized_name)
+    VALUES (
+      p_actor_user_id,
+      prepared_tag ->> 'displayName',
+      prepared_tag ->> 'displayName'
+    )
+    ON CONFLICT (owner_user_id, normalized_name) DO NOTHING;
+  END LOOP;
+
+  IF current_setting('app.s10_failpoint', true) = 'commit_after_tags' THEN
+    PERFORM public.ai_raise_import_error('CONFLICT');
+  END IF;
+
+  FOR prepared_item IN
+    SELECT value FROM jsonb_array_elements(prepared -> 'items')
+    ORDER BY (value ->> 'ordinal')::integer
+  LOOP
+    INSERT INTO public.ai_import_items (
+      owner_user_id, batch_id, client_item_id, concept_id, ordinal,
+      pattern, skill, front_text, back_text, card_key, image_mode, upload_id
+    ) VALUES (
+      p_actor_user_id, created_batch_id,
+      prepared_item ->> 'clientItemId', prepared_item ->> 'conceptId',
+      (prepared_item ->> 'ordinal')::integer,
+      prepared_item ->> 'pattern', prepared_item ->> 'skill',
+      prepared_item ->> 'frontText', prepared_item ->> 'backText',
+      prepared_item ->> 'cardKey', prepared_item ->> 'imageMode',
+      (prepared_item ->> 'uploadId')::uuid
+    ) RETURNING id INTO STRICT created_item_id;
+
+    FOR prepared_tag IN
+      SELECT value FROM jsonb_array_elements(prepared_item -> 'tags')
+      ORDER BY value ->> 'normalizedName'
+    LOOP
+      SELECT tags.id INTO STRICT resolved_tag_id
+      FROM public.tags AS tags
+      WHERE tags.owner_user_id = p_actor_user_id
+        AND tags.normalized_name = prepared_tag ->> 'normalizedName'
+      FOR KEY SHARE;
+      INSERT INTO public.ai_import_item_tags (owner_user_id, item_id, tag_id)
+      VALUES (p_actor_user_id, created_item_id, resolved_tag_id);
+    END LOOP;
+  END LOOP;
+
+  RETURN jsonb_build_object(
+    'batchId', created_batch_id,
+    'status', 'committed',
+    'requestedCardCount', requested_card_count,
+    'requestedImageCount', requested_image_count
+  );
+END;
+$$;
+
+CREATE FUNCTION public.commit_import(
+  p_actor_user_id uuid,
+  p_source text,
+  p_idempotency_key text,
+  p_import_request_hash text,
+  p_request jsonb,
+  p_card_reservation_key text
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+BEGIN
+  IF current_setting('request.jwt.claim.role', true) IS DISTINCT FROM 'service_role' THEN
+    PERFORM public.ai_raise_import_error('UNAUTHORIZED');
+  END IF;
+  IF p_actor_user_id IS NULL OR p_source NOT IN ('app_ai', 'remote_mcp') OR
+     p_idempotency_key IS NULL OR char_length(p_idempotency_key) NOT BETWEEN 1 AND 128 OR
+     p_import_request_hash !~ '^[0-9a-f]{64}$' OR
+     p_request IS NULL OR jsonb_typeof(p_request) <> 'object' OR
+     p_card_reservation_key IS NULL OR
+       char_length(p_card_reservation_key) NOT BETWEEN 1 AND 128 THEN
+    PERFORM public.ai_raise_import_error(
+      'VALIDATION_ERROR', jsonb_build_object('field', 'commit', 'rule', 'arguments')
+    );
+  END IF;
+  RETURN public.commit_import_internal(
+    p_actor_user_id, p_source, p_idempotency_key, p_import_request_hash,
+    p_request, p_card_reservation_key
+  );
+END;
+$$;
+
 CREATE FUNCTION public.reserve_provider_usage_internal(
   p_owner_user_id uuid,
   p_reservation_key text,
@@ -1252,6 +1874,11 @@ ALTER FUNCTION public.reset_review_state_on_content_change() OWNER TO s10_migrat
 ALTER FUNCTION public.ai_enable_internal_context() OWNER TO s10_migration_owner;
 ALTER FUNCTION public.ai_internal_context_active() OWNER TO s10_migration_owner;
 ALTER FUNCTION public.ai_raise_import_error(text, jsonb) OWNER TO s10_migration_owner;
+ALTER FUNCTION public.ai_prepare_import_request(jsonb) OWNER TO s10_migration_owner;
+ALTER FUNCTION public.commit_import_internal(uuid, text, text, text, jsonb, text)
+  OWNER TO s10_migration_owner;
+ALTER FUNCTION public.commit_import(uuid, text, text, text, jsonb, text)
+  OWNER TO s10_migration_owner;
 ALTER FUNCTION public.reserve_provider_usage_internal(
   uuid, text, text, text, text, integer, uuid, uuid, text, timestamptz
 ) OWNER TO s10_migration_owner;
@@ -1271,6 +1898,8 @@ REVOKE ALL ON FUNCTION public.ai_normalize_display_text(text),
   FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public.ai_enable_internal_context(),
   public.ai_internal_context_active(), public.ai_raise_import_error(text, jsonb),
+  public.ai_prepare_import_request(jsonb),
+  public.commit_import_internal(uuid, text, text, text, jsonb, text),
   public.reserve_provider_usage_internal(
     uuid, text, text, text, text, integer, uuid, uuid, text, timestamptz
   )
@@ -1278,22 +1907,27 @@ REVOKE ALL ON FUNCTION public.ai_enable_internal_context(),
 REVOKE ALL ON FUNCTION public.reserve_provider_usage(
   uuid, text, text, text, text, integer, uuid, uuid, text
 ) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.commit_import(uuid, text, text, text, jsonb, text)
+  FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.ai_normalize_display_text(text),
   public.ai_normalize_key_text(text), public.ai_compute_card_key(text, text, text)
   TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.reserve_provider_usage(
   uuid, text, text, text, text, integer, uuid, uuid, text
 ) TO service_role;
+GRANT EXECUTE ON FUNCTION public.commit_import(uuid, text, text, text, jsonb, text)
+  TO service_role;
 GRANT USAGE ON SCHEMA extensions TO authenticated, service_role;
 
 GRANT USAGE ON SCHEMA public, extensions TO s10_migration_owner;
-GRANT SELECT, UPDATE ON public.cards, public.decks TO s10_migration_owner;
+GRANT SELECT, UPDATE ON public.cards TO s10_migration_owner;
+GRANT SELECT, INSERT, UPDATE ON public.decks TO s10_migration_owner;
 GRANT SELECT ON public.study_sessions TO s10_migration_owner;
 GRANT SELECT, DELETE ON public.review_states TO s10_migration_owner;
-GRANT SELECT ON public.ai_import_items,
-  public.ai_import_item_tags TO s10_migration_owner;
-GRANT SELECT, UPDATE ON public.ai_import_batches, public.ai_import_items
-  TO s10_migration_owner;
+GRANT SELECT, INSERT, UPDATE ON public.ai_import_batches, public.ai_import_items,
+  public.tags TO s10_migration_owner;
+GRANT SELECT, INSERT ON public.ai_import_item_tags TO s10_migration_owner;
+GRANT SELECT, UPDATE ON public.ai_uploads TO s10_migration_owner;
 GRANT SELECT, INSERT, UPDATE ON public.ai_usage_daily, public.ai_quota_reservations
   TO s10_migration_owner;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC, anon, authenticated, service_role;
