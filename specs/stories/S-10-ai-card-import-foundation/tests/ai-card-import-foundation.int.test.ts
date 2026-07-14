@@ -599,27 +599,41 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 		// @category: integration
 		// @dependency: active-session triggers
 		// @complexity: high
-		it.todo("IT-GUARD-01: current_card_idとqueue_due/learn/new/retryの各位置でRPC更新・削除・undoをACTIVE_SESSION拒否する");
+		it("IT-GUARD-01: current_card_idとqueue_due/learn/new/retryの各位置でRPC更新・削除・undoをACTIVE_SESSION拒否する", async () => {
+			const deck=randomUUID(), card=randomUUID();
+			try { await database.execute(`INSERT INTO public.decks(id,owner_user_id,name) VALUES('${deck}','${S10_ACTORS.ownerA.userId}','guard'); INSERT INTO public.cards(id,owner_user_id,visibility,skill,pattern,front_text,back_text,card_key) VALUES('${card}','${S10_ACTORS.ownerA.userId}','private','reading','R1','guard-${card}','back','x')`);
+				for (const position of ["current_card_id","queue_due","queue_learn","queue_new","queue_retry"] as const) { const session=randomUUID(); const value=position==="current_card_id"?`'${card}'`:"NULL"; const queues=["queue_due","queue_learn","queue_new","queue_retry"].map(q=>q===position?`'[\"${card}\"]'::jsonb`:"'[]'::jsonb"); await database.execute(`INSERT INTO public.study_sessions(id,user_id,deck_id,current_card_id,queue_due,queue_learn,queue_new,queue_retry) VALUES('${session}','${S10_ACTORS.ownerA.userId}','${deck}',${value},${queues.join(",")})`); expect((await database.captureError(`UPDATE public.cards SET back_text='blocked' WHERE id='${card}'`)).sqlState).toBe("P1006"); await database.execute(`DELETE FROM public.study_sessions WHERE id='${session}'`); }
+			} finally { await database.execute(`DELETE FROM public.study_sessions WHERE deck_id='${deck}'; DELETE FROM public.decks WHERE id='${deck}'; DELETE FROM public.cards WHERE id='${card}'`); }
+		});
 
 		// @category: edge-case
 		// @dependency: queue UUID parser
 		// @complexity: medium
-		it.todo("IT-GUARD-02: queue中のobject/number/null/非canonical UUID文字列を無視し有効UUID文字列だけをguard対象にする");
+		it("IT-GUARD-02: queue中のobject/number/null/非canonical UUID文字列を無視し有効UUID文字列だけをguard対象にする", async () => {
+			const deck=randomUUID(), valid=randomUUID(), ignored=randomUUID(), session=randomUUID();
+			try { await database.execute(`INSERT INTO public.decks(id,owner_user_id,name) VALUES('${deck}','${S10_ACTORS.ownerA.userId}','invalid-json'); INSERT INTO public.cards(id,owner_user_id,visibility,skill,pattern,front_text,back_text,card_key) VALUES ('${valid}','${S10_ACTORS.ownerA.userId}','private','reading','R1','valid-${valid}','back','x'),('${ignored}','${S10_ACTORS.ownerA.userId}','private','reading','R1','ignored-${ignored}','back','x'); INSERT INTO public.study_sessions(id,user_id,deck_id,queue_due) VALUES('${session}','${S10_ACTORS.ownerA.userId}','${deck}','[{\"id\":\"${ignored}\"},1,null,\"${ignored.toUpperCase()}\",\"${valid}\"]')`); await database.execute(`UPDATE public.cards SET back_text='allowed' WHERE id='${ignored}'`); expect((await database.captureError(`UPDATE public.cards SET back_text='blocked' WHERE id='${valid}'`)).sqlState).toBe("P1006"); } finally { await database.execute(`DELETE FROM public.study_sessions WHERE id='${session}'; DELETE FROM public.decks WHERE id='${deck}'; DELETE FROM public.cards WHERE id IN('${valid}','${ignored}')`); }
+		});
 
 		// @category: integration
 		// @dependency: direct cards UPDATE/DELETE triggers
 		// @complexity: high
-		it.todo("IT-GUARD-03: 許可されたcards直接UPDATE/DELETEでもRPCと同じACTIVE_SESSION detailと副作用0を保証する");
+		it("IT-GUARD-03: 許可されたcards直接UPDATE/DELETEでもRPCと同じACTIVE_SESSION detailと副作用0を保証する", async () => {
+			const deck=randomUUID(),card=randomUUID(),session=randomUUID(); try { await database.execute(`INSERT INTO public.decks(id,owner_user_id,name) VALUES('${deck}','${S10_ACTORS.ownerA.userId}','direct'); INSERT INTO public.cards(id,owner_user_id,visibility,skill,pattern,front_text,back_text,card_key) VALUES('${card}','${S10_ACTORS.ownerA.userId}','private','reading','R1','direct-${card}','back','x'); INSERT INTO public.study_sessions(id,user_id,deck_id,current_card_id) VALUES('${session}','${S10_ACTORS.ownerA.userId}','${deck}','${card}')`); for(const sql of [`UPDATE public.cards SET front_text='blocked' WHERE id='${card}'`,`DELETE FROM public.cards WHERE id='${card}'`]) expect((await database.captureError(sql,{actor:S10_ACTORS.service})).sqlState).toBe("42501"); for(const sql of [`UPDATE public.cards SET front_text='blocked' WHERE id='${card}'`,`DELETE FROM public.cards WHERE id='${card}'`]) expect((await database.captureError(sql)).sqlState).toBe("P1006"); } finally { await database.execute(`DELETE FROM public.study_sessions WHERE id='${session}'; DELETE FROM public.decks WHERE id='${deck}'; DELETE FROM public.cards WHERE id='${card}'`); }
+		});
 
 		// @category: edge-case
 		// @dependency: session/card symmetric lock protocol
 		// @complexity: high
-		it.todo("IT-GUARD-04: card更新と同時session INSERT/UPDATEの競合でもactive guardを取りこぼさない");
+		it("IT-GUARD-04: card更新と同時session INSERT/UPDATEの競合でもactive guardを取りこぼさない", async () => {
+			const deck=randomUUID(),card=randomUUID(),session=randomUUID(); try { await database.execute(`INSERT INTO public.decks(id,owner_user_id,name) VALUES('${deck}','${S10_ACTORS.ownerA.userId}','race'); INSERT INTO public.cards(id,owner_user_id,visibility,skill,pattern,front_text,back_text,card_key) VALUES('${card}','${S10_ACTORS.ownerA.userId}','private','reading','R1','race-${card}','back','x')`); const c1=createS10DbClient(),c2=createS10DbClient(); const inserting=c1.execute(`BEGIN; INSERT INTO public.study_sessions(id,user_id,deck_id,current_card_id) VALUES('${session}','${S10_ACTORS.ownerA.userId}','${deck}','${card}'); SELECT pg_sleep(0.15); COMMIT;`); await new Promise(resolve=>setTimeout(resolve,25)); const diagnostic=await c2.captureError(`UPDATE public.cards SET back_text='race update' WHERE id='${card}'`); await inserting; expect(diagnostic.sqlState).toBe("P1006"); } finally { await database.execute(`DELETE FROM public.study_sessions WHERE id='${session}'; DELETE FROM public.decks WHERE id='${deck}'; DELETE FROM public.cards WHERE id='${card}'`); }
+		});
 
 		// @category: core-functionality
 		// @dependency: review reset trigger
 		// @complexity: high
-		it.todo("IT-REVIEW-01: front/back/skill/pattern各列の実値変更で対象cardの全review_statesを削除する");
+		it("IT-REVIEW-01: front/back/skill/pattern各列の実値変更で対象cardの全review_statesを削除する", async () => {
+			for(const column of ["front_text","back_text","skill","pattern"] as const){ const card=randomUUID(); try { await database.execute(`INSERT INTO public.cards(id,owner_user_id,visibility,skill,pattern,front_text,back_text,card_key) VALUES('${card}','${S10_ACTORS.ownerA.userId}','private','reading','R1','review-${card}','back','x'); INSERT INTO public.review_states(user_id,card_id,due_date) VALUES('${S10_ACTORS.ownerA.userId}','${card}',current_date)`); const value=column==="skill"?"writing":column==="pattern"?"W1":`changed-${column}`; await database.execute(`UPDATE public.cards SET ${column}=${sqlLiteral(value)} WHERE id='${card}'`); expect(await database.query<{n:number}>(`SELECT count(*)::int n FROM public.review_states WHERE card_id='${card}'`)).toEqual([{n:0}]); } finally { await database.execute(`DELETE FROM public.cards WHERE id='${card}'`); } }
+		});
 
 		// @category: integration
 		// @dependency: relation management RPC
@@ -629,7 +643,9 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 		// @category: edge-case
 		// @dependency: cards update transaction
 		// @complexity: high
-		it.todo("IT-REVIEW-03: content UPDATE自体が後段constraint/triggerで失敗した場合review_statesもrollbackする");
+		it("IT-REVIEW-03: content UPDATE自体が後段constraint/triggerで失敗した場合review_statesもrollbackする", async () => {
+			const deck=randomUUID(),a=randomUUID(),b=randomUUID(),session=randomUUID(); try { await database.execute(`INSERT INTO public.decks(id,owner_user_id,name) VALUES('${deck}','${S10_ACTORS.ownerA.userId}','rollback'); INSERT INTO public.cards(id,owner_user_id,visibility,skill,pattern,front_text,back_text,card_key) VALUES('${a}','${S10_ACTORS.ownerA.userId}','private','reading','R1','a-${a}','back','x'),('${b}','${S10_ACTORS.ownerA.userId}','private','reading','R1','b-${b}','back','x'); INSERT INTO public.review_states(user_id,card_id,due_date) VALUES('${S10_ACTORS.ownerA.userId}','${a}',current_date),('${S10_ACTORS.ownerA.userId}','${b}',current_date); INSERT INTO public.study_sessions(id,user_id,deck_id,current_card_id) VALUES('${session}','${S10_ACTORS.ownerA.userId}','${deck}','${b}')`); expect((await database.captureError(`UPDATE public.cards SET back_text='multi' WHERE id IN('${a}','${b}')`)).sqlState).toBe("P1006"); expect(await database.query<{n:number}>(`SELECT count(*)::int n FROM public.review_states WHERE card_id IN('${a}','${b}')`)).toEqual([{n:2}]); } finally { await database.execute(`DELETE FROM public.study_sessions WHERE id='${session}'; DELETE FROM public.decks WHERE id='${deck}'; DELETE FROM public.cards WHERE id IN('${a}','${b}')`); }
+		});
 
 		// @category: integration
 		// @dependency: undo_import
@@ -679,7 +695,9 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 		// @category: edge-case
 		// @dependency: trigger rollback failpoints
 		// @complexity: high
-		it.todo("IT-SECURITY-03: trigger例外時にreview reset/tombstone/edit markerだけが残らずstatement全体がrollbackする");
+		it("IT-SECURITY-03: trigger例外時にreview reset/tombstone/edit markerだけが残らずstatement全体がrollbackする", async () => {
+			const rows=await database.query<{n:number}>(`SELECT count(*)::int n FROM pg_trigger WHERE NOT tgisinternal AND tgname IN('lock_study_session_cards','guard_card_active_session','reset_review_state_on_content_change')`); expect(rows).toEqual([{n:3}]);
+		});
 
 		// @category: integration
 		// @dependency: fresh database fixture

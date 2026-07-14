@@ -42,6 +42,10 @@ interface SeedCardContractViolationRow {
 	violation_count: number;
 }
 
+interface SeedCardKeyRow {
+	card_key: string;
+}
+
 interface SeedOwnerRow {
 	id: string;
 	instance_id: string;
@@ -86,8 +90,11 @@ function loadSeedSql(): string {
 
 function collectSeedTableCounts(seedDeckId: string, seedOwnerUserId: string): SeedTableCounts {
 	const cards = queryRows<CountRow>(`
-    SELECT COUNT(*)::int AS count
+    SELECT COUNT(DISTINCT cards.id)::int AS count
     FROM public.cards
+    INNER JOIN public.deck_cards
+      ON deck_cards.card_id = cards.id
+     AND deck_cards.deck_id = ${sqlLiteral(seedDeckId)}::uuid
   `)[0]?.count;
 	const decks = queryRows<CountRow>(`
     SELECT COUNT(*)::int AS count
@@ -111,6 +118,17 @@ function collectSeedTableCounts(seedDeckId: string, seedOwnerUserId: string): Se
 		deck_cards: deckCards ?? 0,
 		users_profile: usersProfile ?? 0,
 	};
+}
+
+function collectSeedCardKeys(seedDeckId: string): string[] {
+	return queryRows<SeedCardKeyRow>(`
+    SELECT cards.card_key
+    FROM public.cards
+    INNER JOIN public.deck_cards
+      ON deck_cards.card_id = cards.id
+     AND deck_cards.deck_id = ${sqlLiteral(seedDeckId)}::uuid
+    ORDER BY cards.card_key
+  `).map(({ card_key }) => card_key);
 }
 
 function buildFailingSeedSql(seedSql: string, rollbackProbeCardKey: string): string {
@@ -255,14 +273,20 @@ describe("seed-data-and-utilities 統合テスト", () => {
 	// @complexity: medium
 	it("IT-AC07: Seed 実行で 50 字 x R1/W1 の 100 cards が投入される", () => {
 		const totalCards = queryRows<CountRow>(`
-      SELECT COUNT(*)::int AS count
+      SELECT COUNT(DISTINCT cards.id)::int AS count
       FROM public.cards
+      INNER JOIN public.deck_cards
+        ON deck_cards.card_id = cards.id
+       AND deck_cards.deck_id = ${sqlLiteral(SEED_DECK_ID)}::uuid
     `)[0];
 		expect(totalCards?.count).toBe(100);
 
 		const patternCounts = queryRows<SeedPatternCountRow>(`
       SELECT pattern, COUNT(*)::int AS count
       FROM public.cards
+      INNER JOIN public.deck_cards
+        ON deck_cards.card_id = cards.id
+       AND deck_cards.deck_id = ${sqlLiteral(SEED_DECK_ID)}::uuid
       WHERE pattern IN ('R1', 'W1')
       GROUP BY pattern
       ORDER BY pattern
@@ -279,6 +303,9 @@ describe("seed-data-and-utilities 統合テスト", () => {
           CASE WHEN pattern = 'R1' THEN back_text ELSE front_text END AS reading,
           pattern
         FROM public.cards
+        INNER JOIN public.deck_cards
+          ON deck_cards.card_id = cards.id
+         AND deck_cards.deck_id = ${sqlLiteral(SEED_DECK_ID)}::uuid
         WHERE pattern IN ('R1', 'W1')
       ),
       paired AS (
@@ -295,10 +322,10 @@ describe("seed-data-and-utilities 統合テスト", () => {
 		expect(pairCount?.pair_count).toBe(50);
 	});
 
-	// AC原文 (AC-08): システムは Seed カードの `visibility='public'`、`owner_user_id IS NULL`、`card_key='{pattern}:{front_text}:{back_text}'` を満たすこと。
-	// AC解釈: public カード契約と card_key 生成規則が全 Seed レコードで一貫する必要がある。
-	// 検証: Seed 由来カードの属性・キー形式を全件照合する。
-	// 期待結果: visibility/owner/card_key が契約通り。
+	// AC原文 (AC-08/S-10 forward互換): Seed カードは public/owner null を維持し、正規化後の内容から SHA-256 card_key を生成すること。
+	// AC解釈: public カード契約と S-10 の正規化・card_key 生成規則が全 Seed レコードで一貫する必要がある。
+	// 検証: Seed 由来カードの属性、64hex、DB生成関数との一致、境界空白正規化、100件一意性を全件照合する。
+	// 期待結果: visibility/owner/card_key/正規化/一意性が契約通り。
 	// 合格基準: 契約違反レコード 0 件。
 	// @category: integration
 	// @dependency: supabase/seed.sql, public.cards
@@ -307,15 +334,36 @@ describe("seed-data-and-utilities 統合テスト", () => {
 		const violationCount = queryRows<SeedCardContractViolationRow>(`
       SELECT COUNT(*)::int AS violation_count
       FROM public.cards
+      INNER JOIN public.deck_cards
+        ON deck_cards.card_id = cards.id
+       AND deck_cards.deck_id = ${sqlLiteral(SEED_DECK_ID)}::uuid
       WHERE visibility <> 'public'
         OR owner_user_id IS NOT NULL
-        OR card_key <> (pattern || ':' || front_text || ':' || back_text)
+        OR card_key !~ '^[0-9a-f]{64}$'
+        OR card_key <> public.ai_compute_card_key(pattern, front_text, back_text)
+        OR card_key <> public.ai_compute_card_key(
+          pattern,
+          U&'\\3000' || front_text || U&'\\3000',
+          E'\\t' || back_text || E'\\n'
+        )
     `)[0];
 		expect(violationCount?.violation_count).toBe(0);
+
+		const uniqueKeyCount = queryRows<CountRow>(`
+      SELECT COUNT(DISTINCT card_key)::int AS count
+      FROM public.cards
+      INNER JOIN public.deck_cards
+        ON deck_cards.card_id = cards.id
+       AND deck_cards.deck_id = ${sqlLiteral(SEED_DECK_ID)}::uuid
+    `)[0];
+		expect(uniqueKeyCount?.count).toBe(100);
 
 		const unexpectedPatternCount = queryRows<CountRow>(`
       SELECT COUNT(*)::int AS count
       FROM public.cards
+      INNER JOIN public.deck_cards
+        ON deck_cards.card_id = cards.id
+       AND deck_cards.deck_id = ${sqlLiteral(SEED_DECK_ID)}::uuid
       WHERE pattern NOT IN ('R1', 'W1')
     `)[0];
 		expect(unexpectedPatternCount?.count).toBe(0);
@@ -442,20 +490,23 @@ describe("seed-data-and-utilities 統合テスト", () => {
 	});
 
 	// AC原文 (AC-11): もし Seed を再実行した場合、システムは `cards` を `ON CONFLICT (card_key) DO NOTHING`、`decks` を `ON CONFLICT (id)`、`deck_cards` を `ON CONFLICT (deck_id, card_id) DO NOTHING` で処理し、`cards/decks/deck_cards` の件数を増やさないこと。
-	// AC解釈: 再実行時に重複を防ぐ冪等制御が 3 テーブルで同時に成立する必要がある。
-	// 検証: seed 2 回実行前後で件数差分を比較する。
-	// 期待結果: cards/decks/deck_cards の件数差分が 0。
-	// 合格基準: 3 テーブルすべてで件数不増。
+	// AC解釈: 再実行時に重複を防ぐ冪等制御が 3 テーブルで成立し、S-10 card_key も不変である必要がある。
+	// 検証: seed 2 回実行前後で件数と全 Seed card_key を比較する。
+	// 期待結果: cards/decks/deck_cards の件数差分が 0 で、100件の card_key が同一。
+	// 合格基準: 3 テーブルすべてで件数不増、card_key 差分 0。
 	// @category: integration
 	// @dependency: supabase/seed.sql, public.cards, public.decks, public.deck_cards
 	// @complexity: high
 	it("IT-AC11: Seed 再実行でも cards/decks/deck_cards の件数が増えない", () => {
 		const before = collectSeedTableCounts(SEED_DECK_ID, SEED_OWNER_USER_ID);
+		const beforeCardKeys = collectSeedCardKeys(SEED_DECK_ID);
 
 		runSql(loadSeedSql());
 
 		const after = collectSeedTableCounts(SEED_DECK_ID, SEED_OWNER_USER_ID);
 		expect(after).toEqual(before);
+		expect(collectSeedCardKeys(SEED_DECK_ID)).toEqual(beforeCardKeys);
+		expect(beforeCardKeys).toHaveLength(100);
 	});
 
 	// AC原文 (AC-12): もし S-02 マイグレーション未適用または Seed 途中ステートメント失敗が発生した場合、システムは不足テーブル/制約エラーを返し、単一トランザクションをロールバックして部分成功状態を残さないこと。

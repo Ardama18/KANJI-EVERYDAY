@@ -35,6 +35,10 @@ interface SeedCardContractViolationRow {
 	violation_count: number
 }
 
+interface SeedCardKeyRow {
+	card_key: string
+}
+
 interface SeedProfileRow {
 	user_id: string
 	display_name: string
@@ -67,8 +71,11 @@ function loadSeedSql(): string {
 
 function collectSeedTableCounts(seedDeckId: string, seedOwnerUserId: string): SeedTableCounts {
 	const cards = queryRows<CountRow>(`
-    SELECT COUNT(*)::int AS count
+    SELECT COUNT(DISTINCT cards.id)::int AS count
     FROM public.cards
+    INNER JOIN public.deck_cards
+      ON deck_cards.card_id = cards.id
+     AND deck_cards.deck_id = ${sqlLiteral(seedDeckId)}::uuid
   `)[0]?.count
 	const decks = queryRows<CountRow>(`
     SELECT COUNT(*)::int AS count
@@ -94,6 +101,17 @@ function collectSeedTableCounts(seedDeckId: string, seedOwnerUserId: string): Se
 	}
 }
 
+function collectSeedCardKeys(seedDeckId: string): string[] {
+	return queryRows<SeedCardKeyRow>(`
+    SELECT cards.card_key
+    FROM public.cards
+    INNER JOIN public.deck_cards
+      ON deck_cards.card_id = cards.id
+     AND deck_cards.deck_id = ${sqlLiteral(seedDeckId)}::uuid
+    ORDER BY cards.card_key
+  `).map(({ card_key }) => card_key)
+}
+
 function assertSeedContracts(seedDeckId: string, seedOwnerUserId: string): void {
 	const tableCounts = collectSeedTableCounts(seedDeckId, seedOwnerUserId)
 	expect(tableCounts).toEqual({
@@ -103,9 +121,12 @@ function assertSeedContracts(seedDeckId: string, seedOwnerUserId: string): void 
 		users_profile: 1,
 	})
 
-	const patternCounts = queryRows<SeedPatternCountRow>(`
+  const patternCounts = queryRows<SeedPatternCountRow>(`
     SELECT pattern, COUNT(*)::int AS count
     FROM public.cards
+    INNER JOIN public.deck_cards
+      ON deck_cards.card_id = cards.id
+     AND deck_cards.deck_id = ${sqlLiteral(seedDeckId)}::uuid
     WHERE pattern IN ('R1', 'W1')
     GROUP BY pattern
     ORDER BY pattern
@@ -122,6 +143,9 @@ function assertSeedContracts(seedDeckId: string, seedOwnerUserId: string): void 
         CASE WHEN pattern = 'R1' THEN back_text ELSE front_text END AS reading,
         pattern
       FROM public.cards
+      INNER JOIN public.deck_cards
+        ON deck_cards.card_id = cards.id
+       AND deck_cards.deck_id = ${sqlLiteral(seedDeckId)}::uuid
       WHERE pattern IN ('R1', 'W1')
     ),
     paired AS (
@@ -140,11 +164,29 @@ function assertSeedContracts(seedDeckId: string, seedOwnerUserId: string): void 
 	const contractViolationCount = queryRows<SeedCardContractViolationRow>(`
     SELECT COUNT(*)::int AS violation_count
     FROM public.cards
+    INNER JOIN public.deck_cards
+      ON deck_cards.card_id = cards.id
+     AND deck_cards.deck_id = ${sqlLiteral(seedDeckId)}::uuid
     WHERE visibility <> 'public'
       OR owner_user_id IS NOT NULL
-      OR card_key <> (pattern || ':' || front_text || ':' || back_text)
+      OR card_key !~ '^[0-9a-f]{64}$'
+      OR card_key <> public.ai_compute_card_key(pattern, front_text, back_text)
+      OR card_key <> public.ai_compute_card_key(
+        pattern,
+        U&'\\3000' || front_text || U&'\\3000',
+        E'\\t' || back_text || E'\\n'
+      )
   `)[0]
 	expect(contractViolationCount?.violation_count).toBe(0)
+
+	const uniqueKeyCount = queryRows<CountRow>(`
+    SELECT COUNT(DISTINCT card_key)::int AS count
+    FROM public.cards
+    INNER JOIN public.deck_cards
+      ON deck_cards.card_id = cards.id
+     AND deck_cards.deck_id = ${sqlLiteral(seedDeckId)}::uuid
+  `)[0]
+	expect(uniqueKeyCount?.count).toBe(100)
 
 	const profileRows = queryRows<SeedProfileRow>(`
     SELECT
@@ -300,20 +342,23 @@ describe("seed-data-and-utilities E2Eテスト", () => {
 	// 実行順序: Scenario 4 - seed 冪等再実行
 
 	// AC原文トレース: AC-11
-	// AC解釈: seed 再実行時に ON CONFLICT 戦略が効き、3 テーブル件数が増加しない必要がある。
-	// 検証: seed 2 回実行前後で cards/decks/deck_cards の件数差分を確認する。
-	// 期待結果: 差分がすべて 0。
-	// 合格基準: 冪等性違反 0 件。
+	// AC解釈: seed 再実行時に ON CONFLICT 戦略が効き、3 テーブル件数と S-10 card_key が不変である必要がある。
+	// 検証: seed 2 回実行前後で cards/decks/deck_cards の件数と全 Seed card_key を確認する。
+	// 期待結果: 件数差分がすべて 0 で、100件の card_key が同一。
+	// 合格基準: 件数・card_key の冪等性違反 0 件。
 	// @category: e2e
 	// @dependency: full-system
 	// @complexity: high
 	it("E2E-04: seed を再実行しても cards/decks/deck_cards の件数が増えない", () => {
 		const before = collectSeedTableCounts(SEED_DECK_ID, SEED_OWNER_USER_ID)
+		const beforeCardKeys = collectSeedCardKeys(SEED_DECK_ID)
 
 		runSql(loadSeedSql())
 
 		const after = collectSeedTableCounts(SEED_DECK_ID, SEED_OWNER_USER_ID)
 		expect(after).toEqual(before)
+		expect(collectSeedCardKeys(SEED_DECK_ID)).toEqual(beforeCardKeys)
+		expect(beforeCardKeys).toHaveLength(100)
 	})
 
 	// 実行順序: Scenario 5 - seed 失敗時ロールバック

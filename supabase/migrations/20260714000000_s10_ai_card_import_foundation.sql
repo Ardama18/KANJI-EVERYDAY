@@ -678,6 +678,112 @@ BEGIN
 END;
 $$;
 
+CREATE FUNCTION public.ai_session_card_ids(
+  current_card_id uuid,
+  queue_due jsonb,
+  queue_learn jsonb,
+  queue_new jsonb,
+  queue_retry jsonb
+)
+RETURNS TABLE (card_id uuid)
+LANGUAGE sql
+IMMUTABLE
+SET search_path = pg_catalog, pg_temp
+AS $$
+  SELECT current_card_id WHERE current_card_id IS NOT NULL
+  UNION
+  SELECT (entry.value #>> '{}')::uuid
+  FROM unnest(ARRAY[queue_due, queue_learn, queue_new, queue_retry]) AS queues(value)
+  CROSS JOIN LATERAL jsonb_array_elements(
+    CASE WHEN jsonb_typeof(queues.value) = 'array' THEN queues.value ELSE '[]'::jsonb END
+  ) AS entry(value)
+  WHERE jsonb_typeof(entry.value) = 'string'
+    AND (entry.value #>> '{}') ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+$$;
+
+CREATE FUNCTION public.lock_study_session_cards()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE locked_card_id uuid;
+BEGIN
+  FOR locked_card_id IN
+    SELECT DISTINCT ids.card_id
+    FROM (
+      SELECT * FROM public.ai_session_card_ids(NEW.current_card_id, NEW.queue_due, NEW.queue_learn, NEW.queue_new, NEW.queue_retry)
+      UNION
+      SELECT * FROM public.ai_session_card_ids(OLD.current_card_id, OLD.queue_due, OLD.queue_learn, OLD.queue_new, OLD.queue_retry)
+    ) AS ids
+    ORDER BY ids.card_id
+  LOOP
+    PERFORM 1 FROM public.cards WHERE id = locked_card_id FOR UPDATE;
+    PERFORM pg_advisory_xact_lock(hashtextextended(locked_card_id::text, 1010));
+  END LOOP;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER lock_study_session_cards
+BEFORE INSERT OR UPDATE ON public.study_sessions
+FOR EACH ROW EXECUTE FUNCTION public.lock_study_session_cards();
+
+CREATE FUNCTION public.guard_card_active_session()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE active_session_id uuid;
+DECLARE active_deck_id uuid;
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtextextended(OLD.id::text, 1010));
+  SELECT sessions.id, sessions.deck_id INTO active_session_id, active_deck_id
+  FROM public.study_sessions AS sessions
+  WHERE sessions.finished_at IS NULL
+    AND sessions.user_id = OLD.owner_user_id
+    AND OLD.id IN (
+      SELECT ids.card_id FROM public.ai_session_card_ids(
+        sessions.current_card_id, sessions.queue_due, sessions.queue_learn,
+        sessions.queue_new, sessions.queue_retry
+      ) AS ids
+    )
+  ORDER BY sessions.id
+  LIMIT 1;
+  IF active_session_id IS NOT NULL THEN
+    RAISE EXCEPTION USING ERRCODE = 'P1006', MESSAGE = 'S-10 card is in an active session',
+      DETAIL = json_build_object('sessionId', active_session_id, 'deckId', active_deck_id)::text;
+  END IF;
+  RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+END;
+$$;
+
+CREATE TRIGGER guard_card_active_session
+BEFORE UPDATE OR DELETE ON public.cards
+FOR EACH ROW EXECUTE FUNCTION public.guard_card_active_session();
+
+CREATE FUNCTION public.reset_review_state_on_content_change()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+BEGIN
+  IF OLD.front_text IS DISTINCT FROM NEW.front_text OR
+     OLD.back_text IS DISTINCT FROM NEW.back_text OR
+     OLD.skill IS DISTINCT FROM NEW.skill OR
+     OLD.pattern IS DISTINCT FROM NEW.pattern THEN
+    DELETE FROM public.review_states WHERE card_id = NEW.id;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER reset_review_state_on_content_change
+AFTER UPDATE ON public.cards
+FOR EACH ROW EXECUTE FUNCTION public.reset_review_state_on_content_change();
+
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 's10_migration_owner') THEN
@@ -788,12 +894,19 @@ ALTER FUNCTION public.enforce_import_batch_deck_owner() OWNER TO s10_migration_o
 ALTER FUNCTION public.enforce_deck_card_owner() OWNER TO s10_migration_owner;
 ALTER FUNCTION public.enforce_ai_import_item_tag_limit() OWNER TO s10_migration_owner;
 ALTER FUNCTION public.protect_public_cards() OWNER TO s10_migration_owner;
+ALTER FUNCTION public.ai_session_card_ids(uuid, jsonb, jsonb, jsonb, jsonb) OWNER TO s10_migration_owner;
+ALTER FUNCTION public.lock_study_session_cards() OWNER TO s10_migration_owner;
+ALTER FUNCTION public.guard_card_active_session() OWNER TO s10_migration_owner;
+ALTER FUNCTION public.reset_review_state_on_content_change() OWNER TO s10_migration_owner;
 
 REVOKE ALL ON FUNCTION public.ai_normalize_display_text(text),
   public.ai_normalize_key_text(text), public.ai_compute_card_key(text, text, text),
   public.ai_set_card_key(), public.normalize_tag_names(),
   public.enforce_import_batch_deck_owner(), public.enforce_deck_card_owner(),
   public.enforce_ai_import_item_tag_limit(), public.protect_public_cards(),
+  public.ai_session_card_ids(uuid, jsonb, jsonb, jsonb, jsonb),
+  public.lock_study_session_cards(), public.guard_card_active_session(),
+  public.reset_review_state_on_content_change(),
   public.update_updated_at_column()
   FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.ai_normalize_display_text(text),
@@ -803,6 +916,8 @@ GRANT USAGE ON SCHEMA extensions TO authenticated, service_role;
 
 GRANT USAGE ON SCHEMA public, auth, extensions TO s10_migration_owner;
 GRANT SELECT, UPDATE ON public.cards, public.decks TO s10_migration_owner;
+GRANT SELECT ON public.study_sessions TO s10_migration_owner;
+GRANT SELECT, DELETE ON public.review_states TO s10_migration_owner;
 GRANT SELECT ON public.ai_import_items,
   public.ai_import_item_tags TO s10_migration_owner;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC, anon, authenticated, service_role;
