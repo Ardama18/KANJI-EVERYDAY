@@ -1,6 +1,19 @@
 import { sha256Hex } from "./card-key";
 import { normalizeDisplayText, normalizeForKey } from "./normalize";
 
+export const IMPORT_REQUEST_LIMITS = Object.freeze({
+	itemsMin: 1,
+	itemsMax: 50,
+	textMin: 1,
+	textMax: 200,
+	identifierMin: 1,
+	identifierMax: 64,
+	tagsMin: 0,
+	tagsMax: 10,
+	tagTextMin: 1,
+	tagTextMax: 30,
+});
+
 export type CanonicalJsonValue =
 	| null
 	| boolean
