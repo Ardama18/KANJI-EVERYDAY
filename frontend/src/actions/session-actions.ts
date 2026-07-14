@@ -4,6 +4,11 @@ import {
 	type TriggerIllustrationGenerationResult,
 	triggerIllustrationGeneration,
 } from "@/actions/illustration-actions";
+import {
+	type IllustrationDisplayStatus,
+	STUDY_SESSION_COMPLETE_MESSAGE,
+	STUDY_SESSION_EMPTY_MESSAGE,
+} from "@/actions/session-contracts";
 import { getSignedUrl } from "@/lib/illustration/storage";
 import {
 	addToRetryQueue,
@@ -23,17 +28,7 @@ import { getTodayJST } from "../lib/date";
 const LOGIN_PATH = "/login";
 const ILLUSTRATION_SIGNED_URL_EXPIRES_IN_SECONDS = 3600;
 
-export const STUDY_SESSION_COMPLETE_MESSAGE = "今日の学習おわり！";
-export const STUDY_SESSION_EMPTY_MESSAGE = "今日の学習は完了しています";
-export const ILLUSTRATION_DISPLAY_STATUSES = [
-	"ready",
-	"pending",
-	"generating",
-	"failed",
-	"none",
-] as const;
-
-export type IllustrationDisplayStatus = (typeof ILLUSTRATION_DISPLAY_STATUSES)[number];
+export type { IllustrationDisplayStatus } from "@/actions/session-contracts";
 
 type SupabaseClient = ReturnType<typeof createServerClient>;
 type MutationError = { message: string } | null;

@@ -43,11 +43,11 @@ vi.mock("next/navigation", () => ({
 }));
 
 import {
-	ILLUSTRATION_DISPLAY_STATUSES,
 	type CardFrontData,
 	getStudySessionState,
 	revealCard,
 } from "../../../../frontend/src/actions/session-actions";
+import { ILLUSTRATION_DISPLAY_STATUSES } from "../../../../frontend/src/actions/session-contracts";
 import { CardBack } from "../../../../frontend/src/components/study/CardBack";
 
 class RedirectSignal extends Error {

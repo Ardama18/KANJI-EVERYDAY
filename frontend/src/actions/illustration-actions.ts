@@ -1,5 +1,9 @@
 "use server";
 
+import {
+	type ProcessIllustrationGenerationArgs,
+	runProcessIllustrationGeneration,
+} from "@/actions/illustration-generation-runtime";
 import { getSignedUrl } from "@/lib/illustration/storage";
 import { createServerClient } from "@/lib/supabase/server";
 
@@ -165,25 +169,7 @@ export type TriggerIllustrationGenerationResult =
 			code: TriggerErrorCode;
 	  };
 
-export type ProcessIllustrationGenerationArgs = {
-	illustrationId: string;
-	illustrationKey: string;
-	backText: string;
-	skill: string;
-	ownerUserId: string;
-};
-
-type ProcessIllustrationGenerationImplementation = (
-	args: ProcessIllustrationGenerationArgs
-) => Promise<void>;
-
-const defaultProcessIllustrationGenerationImplementation: ProcessIllustrationGenerationImplementation =
-	async () => {
-		return;
-	};
-
-let processIllustrationGenerationImplementation =
-	defaultProcessIllustrationGenerationImplementation;
+export type { ProcessIllustrationGenerationArgs } from "@/actions/illustration-generation-runtime";
 
 const READY_ILLUSTRATION_STATUS_FOR_URL_LOOKUP = "ready";
 const SIGNED_URL_EXPIRES_IN_SECONDS = 3600;
@@ -347,17 +333,7 @@ const findLatestReadyIllustrationForOwner = async (params: {
 export async function processIllustrationGeneration(
 	args: ProcessIllustrationGenerationArgs
 ): Promise<void> {
-	await processIllustrationGenerationImplementation(args);
-}
-
-export function __setProcessIllustrationGenerationImplementationForTest(
-	implementation: ProcessIllustrationGenerationImplementation
-): void {
-	processIllustrationGenerationImplementation = implementation;
-}
-
-export function __resetProcessIllustrationGenerationImplementationForTest(): void {
-	processIllustrationGenerationImplementation = defaultProcessIllustrationGenerationImplementation;
+	await runProcessIllustrationGeneration(args);
 }
 
 export async function triggerIllustrationGeneration(

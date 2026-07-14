@@ -22,14 +22,13 @@ vi.mock("next/navigation", () => ({
 }));
 
 import {
-	ILLUSTRATION_DISPLAY_STATUSES,
-	STUDY_SESSION_EMPTY_MESSAGE,
 	getNextCard,
 	getStudySessionState,
 	normalizeIllustrationState,
 	revealCard,
 	startStudySession,
 } from "./session-actions";
+import { ILLUSTRATION_DISPLAY_STATUSES, STUDY_SESSION_EMPTY_MESSAGE } from "./session-contracts";
 
 class RedirectSignal extends Error {
 	constructor(public readonly location: string) {

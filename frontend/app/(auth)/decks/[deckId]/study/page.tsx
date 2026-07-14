@@ -1,8 +1,5 @@
-import {
-	STUDY_SESSION_EMPTY_MESSAGE,
-	getStudySessionState,
-	startStudySession,
-} from "@/actions/session-actions";
+import { getStudySessionState, startStudySession } from "@/actions/session-actions";
+import { STUDY_SESSION_EMPTY_MESSAGE } from "@/actions/session-contracts";
 import { StudyClient } from "@/components/study/StudyClient";
 import { notFound } from "next/navigation";
 
