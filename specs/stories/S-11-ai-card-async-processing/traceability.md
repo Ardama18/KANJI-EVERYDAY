@@ -2,14 +2,14 @@
 id: S-11
 feature: ai-card-async-processing
 type: traceability
-version: 2.0.11
+version: 2.0.12
 created: 2026-07-15
 updated: 2026-07-16
 status: implementation_review
 requirements: specs/stories/S-11-ai-card-async-processing/requirements.md@2.0.5
 adr: specs/adr/ADR-008-ai-card-async-queue-image-processing.md@2.0.5
 design: specs/stories/S-11-ai-card-async-processing/design.md@2.0.5
-plan: specs/stories/S-11-ai-card-async-processing/plan.md@2.0.11
+plan: specs/stories/S-11-ai-card-async-processing/plan.md@2.0.12
 ---
 
 # S-11 implementation traceability
@@ -36,7 +36,7 @@ Repository-owned quality cycle 8 adds no production or AC contract. `.codex/qual
 
 Historical cycle 8 independent review attempt 3/3 returned zero findings and `approved` for that cycle's diff. The installed root quality-fixer then returned exit 0 through the then-current isolated S-10 lifecycle. This historical record does not approve any post-cycle-8 remediation and does not establish hosted AC acceptance.
 
-Historical R12 remediation introduced five boundaries: ready rows cannot be downgraded by stale cleanup, malformed JSON and status identifiers fail before side effects, expand/backfill/validate are bounded stages, resource-only authorization rejects blank secrets, and the repository runner owns three isolated disposable databases. This is historical implementation evidence, not current hosted acceptance. The current cycle-13 verification state remains hosted schedule controls, full real integration/E2E, resource artifact, and Deno `not_run`/exit 2 with merge blocked.
+Historical R12 remediation introduced five boundaries: ready rows cannot be downgraded by stale cleanup, malformed JSON and status identifiers fail before side effects, expand/backfill/validate are bounded stages, resource-only authorization rejects blank secrets, and the repository runner owns three isolated disposable databases. This is historical implementation evidence, not current hosted acceptance. The current cycle-14 verification state remains hosted schedule controls, full real integration/E2E, resource artifact, and Deno `not_run`/exit 2 with merge blocked.
 
 Cycle 7 independent review attempt 1 returned `changes_requested`. Its four authorized corrections now distinguish an empty Queue result from malformed RPC output at the real handler boundary, validate outbox error codes against `SAFE_IMPORT_ERROR_CODES`, directly check the corrected confirmed-poison `worker_poison` task evidence, and map provider selection/concept isolation to IT-16, local E2E-04, and the fail-closed F-08 PostgreSQL pair-failure/sibling-success gate. Independent review attempt 2/3 remains the next gate.
 
@@ -138,6 +138,9 @@ Fresh remediation cycle 3 adds P3-01/P3-02 focused evidence: `worker_failure` is
 | R16-F3 | cycle-12 readiness SSOT | v2.0.10/cycle 12 retains hosted 7 not_run/exit 2 and merge blocked; prior R12 and cycle-8 approvals are explicitly historical |
 | R17-F1 | strict diff-base identity | SHA-1 repository accepts only a full 40-hex commit ID as raw OID; symbolic/local/remote-tracking inputs must resolve to an existing full `refs/...` name, while abbreviated OIDs and revision expressions fail before resolution |
 | R17-F2 | cycle-13 readiness SSOT | v2.0.11/cycle 13 retains hosted 7 not_run/exit 2 and merge blocked; all earlier review approvals remain historical |
+| R18-F1 | unambiguous ref identity | shorthand candidates across `refs/`, heads, tags, remotes, and remote HEAD are matched against the complete existing ref set and only one exact match may peel to a commit; full refs remain exact and detached HEAD is rejected |
+| R18-F2 | complete diff surfaces | quality phases run committed `base...HEAD`, staged `--cached`, and unstaged whitespace checks in order, propagating the first nonzero exit and skipping later surfaces |
+| R18-F3 | cycle-14 readiness SSOT | v2.0.12/cycle 14 retains hosted 7 not_run/exit 2 and merge blocked; all earlier review approvals remain historical |
 
 ## Change history
 
@@ -167,3 +170,4 @@ Fresh remediation cycle 3 adds P3-01/P3-02 focused evidence: `worker_failure` is
 | 2026-07-16 | 2.0.9 | remediation | Mapped R15-F1/F2 and current 23/200/10 inventory; atomic constraint swap and hosted merge-blocked readiness SSOT added |
 | 2026-07-16 | 2.0.10 | implementation_review | Cycle 12 adds committed base...HEAD whitespace validation and uppercase prepared success-path boundary proof; hosted 7 remain not_run/exit 2 and merge blocked |
 | 2026-07-16 | 2.0.11 | implementation_review | Cycle 13 restricts raw diff bases to full SHA-1 commits and ref inputs to existing refs; hosted 7 remain not_run/exit 2 and merge blocked |
+| 2026-07-16 | 2.0.12 | implementation_review | Cycle 14 rejects ambiguous shorthand refs and validates committed, staged, and unstaged diff surfaces; hosted 7 remain not_run/exit 2 and merge blocked |

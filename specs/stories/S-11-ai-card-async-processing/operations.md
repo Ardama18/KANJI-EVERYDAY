@@ -1,6 +1,6 @@
 # S-11 operations and rollback runbook
 
-Current cycle-13 verification state: `hosted 7 not_run; merge blocked`. Local boundary
+Current cycle-14 verification state: `hosted 7 not_run; merge blocked`. Local boundary
 E2E, isolated PostgreSQL, and code-readiness results do not complete hosted
 full-system E2E or authorize merge.
 
@@ -298,4 +298,12 @@ Age cleanup is exact: source/orphan rows are protected through 23:59:59 and beco
 - Ref inputs are resolved first with Git symbolic-full-name semantics and must produce one existing full `refs/...` name. `HEAD`, local branches, remote-tracking branches, and full ref names are supported; revision expressions, object names, blank/shell-like input, ambiguous/unresolved refs, and detached non-ref names fail closed.
 - Default selection remains deterministic `origin/main` then `main`. The committed diff still runs as `git diff --check <resolved-sha>...HEAD`, followed by an independent worktree check.
 - Red reproduced four failing safety contracts; Green passed DB safety 27/27. The explicit-`main` root runner passed fresh/upgrade/failure/local-real, lint 97 files, typecheck, configured build with existing warnings, ordinary Vitest 672 passed/8 conditional skips of 680 definitions, S-11 inventory 233/233, focused 53/53, committed diff, and worktree diff. The real concurrent lifecycle harness passed and final strict-prefix database residue was 0.
+- Hosted real integration/E2E, resource, Deno, and three direct database prerequisite gates remain `not_run`/exit 2 until their explicit prerequisites are supplied. Verification remains `hosted 7 not_run; merge blocked`.
+
+## Final ship review remediation cycle 14 (2026-07-16)
+
+- Shorthand ref input is expanded to exact candidates in `refs/`, `refs/heads/`, `refs/tags/`, `refs/remotes/`, and remote HEAD, then intersected with the complete `for-each-ref` result. Exactly one match is required; branch/tag, local/remote, and wider namespace collisions fail closed. A full `refs/...` input checks only that exact ref.
+- Symbolic `HEAD` is accepted only when its target is an existing full ref. Detached `HEAD` is not a ref identity and is rejected; callers must provide its complete 40-character SHA-1 commit instead. Shell-like input, short OIDs, revision expressions, and unresolved input remain rejected without shell execution.
+- Quality runs committed `git diff --check <base>...HEAD`, staged `git diff --cached --check`, and unstaged `git diff --check` in that order. A staged-only trailing-whitespace repository fixture returns the staged command's nonzero exit and proves the unstaged phase is not reached.
+- Green passed DB safety 31/31. The explicit-`main` root runner passed fresh/upgrade/failure/local-real, lint 97 files, typecheck, configured build with existing warnings, ordinary Vitest 672 passed/8 conditional skips of 680 definitions, S-11 inventory 233/233, focused 53/53, and all three diff surfaces. The real lifecycle harness passed, the repository index remained clean, and final strict-prefix database residue was 0.
 - Hosted real integration/E2E, resource, Deno, and three direct database prerequisite gates remain `not_run`/exit 2 until their explicit prerequisites are supplied. Verification remains `hosted 7 not_run; merge blocked`.

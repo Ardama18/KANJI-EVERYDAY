@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 
 import {
 	CLUSTER_ROLE_STATE_SQL,
@@ -14,15 +18,50 @@ import {
 	withDisposableS10Database,
 } from "./quality-database.mjs";
 import {
+	buildDiffWhitespacePhases,
 	createTerminationHandler,
 	reconcileRunScopedResidue,
 	resolveQualityDiffBase,
 	resolveProcessExitCode,
 	runActiveCleanups,
 	runCommand,
+	runQualityPhaseSequence,
 } from "./run-quality-with-database.mjs";
 
 const SOURCE_URL = "postgresql://quality_user@127.0.0.1:54322/postgres";
+const execFileAsync = promisify(execFile);
+
+async function withTemporaryGitRepository(callback) {
+	const repository = await mkdtemp(path.join(tmpdir(), "kanji-quality-git-"));
+	const git = async (...arguments_) =>
+		await execFileAsync("git", arguments_, { cwd: repository, env: process.env });
+	try {
+		await git("init", "--quiet");
+		await git("config", "user.name", "Quality Test");
+		await git("config", "user.email", "quality@example.invalid");
+		await writeFile(path.join(repository, "tracked.txt"), "clean\n", "utf8");
+		await git("add", "tracked.txt");
+		await git("commit", "--quiet", "-m", "initial");
+		return await callback({ repository, git });
+	} finally {
+		await rm(repository, { recursive: true, force: true });
+	}
+}
+
+async function withGitRepositoryEnvironment(repository, callback) {
+	const previousGitDir = process.env.GIT_DIR;
+	const previousWorkTree = process.env.GIT_WORK_TREE;
+	process.env.GIT_DIR = path.join(repository, ".git");
+	process.env.GIT_WORK_TREE = repository;
+	try {
+		return await callback();
+	} finally {
+		if (previousGitDir === undefined) delete process.env.GIT_DIR;
+		else process.env.GIT_DIR = previousGitDir;
+		if (previousWorkTree === undefined) delete process.env.GIT_WORK_TREE;
+		else process.env.GIT_WORK_TREE = previousWorkTree;
+	}
+}
 
 function createMemoryAdapter() {
 	const databases = new Set(["postgres"]);
@@ -186,7 +225,114 @@ test("repository quality provisions three distinct S-11 migration databases", as
 	assert.match(runner, /test:s11:local-real-integration/u);
 	assert.match(runner, /committed diff whitespace validation/u);
 	assert.match(runner, /diffBase.*\.\.\.HEAD/u);
-	assert.match(runner, /worktree diff whitespace validation/u);
+	const committed = runner.indexOf("committed diff whitespace validation");
+	const staged = runner.indexOf("staged diff whitespace validation");
+	const unstaged = runner.indexOf("unstaged diff whitespace validation");
+	assert.ok(committed >= 0 && staged > committed && unstaged > staged);
+	assert.match(runner, /\["diff", "--cached", "--check"\]/u);
+	assert.match(runner, /\["diff", "--check"\]/u);
+});
+
+test("quality diff base rejects ambiguous shorthand refs but accepts exact full refs", async () => {
+	const runner = await readFile(new URL("./run-quality-with-database.mjs", import.meta.url), "utf8");
+	assert.match(runner, /for-each-ref/u);
+	await withTemporaryGitRepository(async ({ repository, git }) => {
+		await git("branch", "release");
+		await git("tag", "release");
+		await withGitRepositoryEnvironment(repository, async () => {
+			await assert.rejects(
+				resolveQualityDiffBase({ QUALITY_DIFF_BASE: "release" }),
+				/quality diff base/u
+			);
+			for (const ref of ["refs/heads/release", "refs/tags/release"]) {
+				assert.match(await resolveQualityDiffBase({ QUALITY_DIFF_BASE: ref }), /^[0-9a-f]{40}$/u);
+			}
+		});
+		await git("update-ref", "refs/release", "HEAD");
+		await git("branch", "origin/main");
+		await git("update-ref", "refs/remotes/origin/main", "HEAD");
+		await withGitRepositoryEnvironment(repository, async () => {
+			await assert.rejects(
+				resolveQualityDiffBase({ QUALITY_DIFF_BASE: "release" }),
+				/quality diff base/u
+			);
+			await assert.rejects(
+				resolveQualityDiffBase({ QUALITY_DIFF_BASE: "origin/main" }),
+				/quality diff base/u
+			);
+			for (const ref of [
+				"refs/release",
+				"refs/heads/origin/main",
+				"refs/remotes/origin/main",
+			]) {
+				assert.match(await resolveQualityDiffBase({ QUALITY_DIFF_BASE: ref }), /^[0-9a-f]{40}$/u);
+			}
+		});
+	});
+});
+
+test("quality diff base accepts symbolic HEAD and rejects detached HEAD", async () => {
+	await withTemporaryGitRepository(async ({ repository, git }) => {
+		await withGitRepositoryEnvironment(repository, async () => {
+			assert.match(await resolveQualityDiffBase({ QUALITY_DIFF_BASE: "HEAD" }), /^[0-9a-f]{40}$/u);
+		});
+		await git("checkout", "--quiet", "--detach", "HEAD");
+		await withGitRepositoryEnvironment(repository, async () => {
+			await assert.rejects(
+				resolveQualityDiffBase({ QUALITY_DIFF_BASE: "HEAD" }),
+				/quality diff base/u
+			);
+		});
+	});
+});
+
+test("staged-only whitespace failure is distinct from committed and unstaged checks", async () => {
+	await withTemporaryGitRepository(async ({ repository, git }) => {
+		await writeFile(path.join(repository, "tracked.txt"), "staged trailing whitespace  \n", "utf8");
+		await git("add", "tracked.txt");
+		await withGitRepositoryEnvironment(repository, async () => {
+			const calls = [];
+			const exitCode = await runQualityPhaseSequence(
+				buildDiffWhitespacePhases("HEAD", process.env),
+				async (program, arguments_, environment) => {
+					calls.push([program, arguments_]);
+					return await runCommand(program, arguments_, environment);
+				}
+			);
+			assert.notEqual(exitCode, 0);
+			assert.deepEqual(calls, [
+				["git", ["diff", "--check", "HEAD...HEAD"]],
+				["git", ["diff", "--cached", "--check"]],
+			]);
+		});
+	});
+});
+
+test("diff whitespace phases preserve committed, staged, unstaged argument order and exits", async () => {
+	const environment = { PATH: process.env.PATH };
+	const phases = buildDiffWhitespacePhases("a".repeat(40), environment);
+	assert.deepEqual(phases, [
+		[
+			"committed diff whitespace validation",
+			"git",
+			["diff", "--check", `${"a".repeat(40)}...HEAD`],
+			environment,
+		],
+		["staged diff whitespace validation", "git", ["diff", "--cached", "--check"], environment],
+		["unstaged diff whitespace validation", "git", ["diff", "--check"], environment],
+	]);
+	const calls = [];
+	assert.equal(
+		await runQualityPhaseSequence(phases, async (_program, arguments_) => {
+			calls.push(arguments_);
+			return arguments_.includes("--cached") ? 17 : 0;
+		}),
+		17
+	);
+	assert.deepEqual(calls, [
+		["diff", "--check", `${"a".repeat(40)}...HEAD`],
+		["diff", "--cached", "--check"],
+	]);
 });
 
 test("quality diff base resolves only existing refs or a full SHA-1 commit", async () => {

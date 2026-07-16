@@ -2,7 +2,7 @@
 id: S-11
 feature: ai-card-async-processing
 type: plan
-version: 2.0.11
+version: 2.0.12
 created: 2026-07-15
 updated: 2026-07-16
 based_on: specs/stories/S-11-ai-card-async-processing/design.md
@@ -660,6 +660,15 @@ any post-cycle-8 remediation or any hosted gate.
 - [x] DB safety 27/27、real lifecycle harness、full isolated root quality、external 7件structured `not_run`/exit 2、strict-prefix residue 0を確認する。
 - [ ] hosted full-system acceptance 7件が明示的前提環境でpassする。完了まではmerge blockedを維持する。
 
+## Final ship review remediation cycle 14
+
+- [x] R18-F1 Red/Green: 省略refのlocal/remote/tag/`refs/...`候補を全ref集合から列挙し、完全に一意な1件だけを許可する。
+- [x] R18-F1: full refはexact existenceで許可し、symbolic HEADは許可、detached HEADは拒否してfull SHA指定を要求する。
+- [x] R18-F2 Red/Green: committed `base...HEAD`、staged `--cached`、unstagedの3面diffを順序固定し、最初の非0 exitを伝播する。
+- [x] R18-F3: meta/plan/traceability/operations/tasksをv2.0.12 / cycle 14 / `hosted 7 not_run; merge blocked`へ同期する。
+- [x] DB safety 31/31、real lifecycle harness、full isolated root quality、external 7件structured `not_run`/exit 2、index clean、strict-prefix residue 0を確認する。
+- [ ] hosted full-system acceptance 7件が明示的前提環境でpassする。完了まではmerge blockedを維持する。
+
 ## 変更履歴
 
 | 日付 | 版 | status | 変更内容 |
@@ -687,3 +696,4 @@ any post-cycle-8 remediation or any hosted gate.
 | 2026-07-16 | 2.0.9 | implementation_review | R15-F1/F2、current Integration 200、atomic constraint swapとhosted merge-blocked SSOTを反映 |
 | 2026-07-16 | 2.0.10 | implementation_review | cycle 12、base...HEAD diff gate、uppercase success境界、latest hosted merge-blocked SSOTを反映 |
 | 2026-07-16 | 2.0.11 | implementation_review | cycle 13、full SHA-1/existing-ref境界とshort OID/revision-expression拒否、hosted merge-blocked SSOTを反映 |
+| 2026-07-16 | 2.0.12 | implementation_review | cycle 14、ambiguous short-ref拒否とcommitted/staged/unstaged 3面diff gate、hosted merge-blocked SSOTを反映 |

@@ -269,20 +269,33 @@ async function runQualityPhases({ freshUrl, upgradeUrl, failureUrl }) {
 			],
 			checkEnvironment,
 		],
+		...buildDiffWhitespacePhases(diffBase, checkEnvironment),
+	];
+	const exitCode = await runQualityPhaseSequence(phases);
+	if (exitCode !== 0) return exitCode;
+	process.stdout.write("Repository quality checks passed.\n");
+	return 0;
+}
+
+export function buildDiffWhitespacePhases(diffBase, environment) {
+	return [
 		[
 			"committed diff whitespace validation",
 			"git",
 			["diff", "--check", `${diffBase}...HEAD`],
-			checkEnvironment,
+			environment,
 		],
-		["worktree diff whitespace validation", "git", ["diff", "--check"], checkEnvironment],
+		["staged diff whitespace validation", "git", ["diff", "--cached", "--check"], environment],
+		["unstaged diff whitespace validation", "git", ["diff", "--check"], environment],
 	];
+}
+
+export async function runQualityPhaseSequence(phases, commandRunner = runCommand) {
 	for (const [label, program, arguments_, environment] of phases) {
 		process.stdout.write(`=== ${label} ===\n`);
-		const exitCode = await runCommand(program, arguments_, environment);
+		const exitCode = await commandRunner(program, arguments_, environment);
 		if (exitCode !== 0) return exitCode;
 	}
-	process.stdout.write("Repository quality checks passed.\n");
 	return 0;
 }
 
@@ -298,12 +311,53 @@ async function resolveGitFullCommit(commit) {
 }
 
 async function resolveGitRefCommit(ref) {
-	const resolvedRef = await resolveSingleGitLine(
-		["rev-parse", "--symbolic-full-name", "--verify", "--end-of-options", ref],
-		RESOLVED_REF_PATTERN
-	);
-	if (resolvedRef === undefined) return undefined;
-	return await resolveGitCommit(resolvedRef);
+	let candidates;
+	if (ref === "HEAD") {
+		const symbolicHead = await resolveSingleGitLine(
+			["symbolic-ref", "--quiet", "HEAD"],
+			RESOLVED_REF_PATTERN
+		);
+		if (symbolicHead === undefined) return undefined;
+		candidates = [symbolicHead];
+	} else if (ref.startsWith("refs/")) {
+		candidates = [ref];
+	} else {
+		candidates = [
+			`refs/${ref}`,
+			`refs/tags/${ref}`,
+			`refs/heads/${ref}`,
+			`refs/remotes/${ref}`,
+			`refs/remotes/${ref}/HEAD`,
+		];
+	}
+	const existingRefs = await listGitRefs();
+	if (existingRefs === undefined) return undefined;
+	const matches = [...new Set(candidates)].filter((candidate) => existingRefs.has(candidate));
+	if (matches.length > 1) throw new Error("Ambiguous quality diff base");
+	if (matches.length === 0) return undefined;
+	return await resolveGitCommit(matches[0]);
+}
+
+async function listGitRefs() {
+	return await new Promise((resolve) => {
+		const child = spawn("git", ["for-each-ref", "--format=%(refname)"], {
+			stdio: ["ignore", "pipe", "ignore"],
+		});
+		let output = "";
+		child.stdout.setEncoding("utf8");
+		child.stdout.on("data", (chunk) => {
+			output += chunk;
+		});
+		child.once("error", () => resolve(undefined));
+		child.once("close", (code, signal) => {
+			if (code !== 0 || signal !== null) {
+				resolve(undefined);
+				return;
+			}
+			const refs = output.split("\n").filter((value) => value.length > 0);
+			resolve(refs.every((value) => RESOLVED_REF_PATTERN.test(value)) ? new Set(refs) : undefined);
+		});
+	});
 }
 
 async function resolveSingleGitLine(arguments_, outputPattern) {

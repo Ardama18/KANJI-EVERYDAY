@@ -1008,15 +1008,15 @@ describe("S-11 commit and queue integration", () => {
 			readFile(new URL("../operations.md", import.meta.url), "utf8"),
 		]);
 		const parsedMeta = JSON.parse(meta) as Record<string, unknown>;
-		expect(parsedMeta.remediation_cycle).toBe(13);
-		expect(parsedMeta.ssot_version).toBe("2.0.11");
+		expect(parsedMeta.remediation_cycle).toBe(14);
+		expect(parsedMeta.ssot_version).toBe("2.0.12");
 		expect(parsedMeta.verification_state).toBe("hosted_7_not_run_merge_blocked");
 		expect(meta).not.toMatch(/ready_for_commit|zero_findings|approved/u);
-		expect(plan).toContain("version: 2.0.11");
-		expect(traceability).toContain("version: 2.0.11");
+		expect(plan).toContain("version: 2.0.12");
+		expect(traceability).toContain("version: 2.0.12");
 		expect(plan).toContain("[x] **T6-01L: local boundary E2E");
 		expect(plan).toContain("[ ] **T6-01H: hosted full-system E2E");
-		expect(operations).toContain("Current cycle-13 verification state: `hosted 7 not_run; merge blocked`");
+		expect(operations).toContain("Current cycle-14 verification state: `hosted 7 not_run; merge blocked`");
 		expect(traceability).not.toMatch(/\bcurrent\s+R12\b/iu);
 	});
 
