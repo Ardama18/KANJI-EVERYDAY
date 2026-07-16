@@ -11,9 +11,23 @@ export class ProviderResponseLimitError extends Error {
 	}
 }
 
+export class ProviderResponseNetworkError extends Error {
+	constructor() {
+		super("PROVIDER_TRANSIENT_ERROR");
+		this.name = "ProviderResponseNetworkError";
+	}
+}
+
 export function isProviderResponseLimitError(error: unknown): boolean {
 	return error instanceof ProviderResponseLimitError ||
 		(error instanceof Error && error.name === "ProviderResponseLimitError" && error.message === "IMAGE_TOO_LARGE");
+}
+
+export function isProviderResponseNetworkError(error: unknown): boolean {
+	return error instanceof ProviderResponseNetworkError ||
+		(error instanceof Error &&
+			error.name === "ProviderResponseNetworkError" &&
+			error.message === "PROVIDER_TRANSIENT_ERROR");
 }
 
 interface CancellableBody {
@@ -55,7 +69,15 @@ export async function readBoundedJsonResponse(
 	let total = 0;
 	try {
 		for (;;) {
-			const { done, value } = await reader.read();
+			let result: ReadableStreamReadResult<Uint8Array>;
+			try {
+				result = await reader.read();
+			} catch {
+				// A successful HTTP exchange can still fail while consuming the transport.
+				// Do not expose the raw stream error, which may contain provider details.
+				throw new ProviderResponseNetworkError();
+			}
+			const { done, value } = result;
 			if (done) break;
 			total += value.byteLength;
 			if (total > maxBytes) {

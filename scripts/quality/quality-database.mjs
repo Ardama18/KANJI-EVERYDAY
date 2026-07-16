@@ -4,6 +4,12 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+	DEFAULT_CHILD_KILL_GRACE_MS,
+	runSupervisedChild,
+	superviseSpawnedChild,
+} from "./child-supervisor.mjs";
+
 export const DISPOSABLE_DATABASE_PREFIX = "kanji_everyday_quality_s10_";
 const DISPOSABLE_DATABASE_PATTERN = /^kanji_everyday_quality_s10_([0-9a-f]{16})_([0-9a-f]{16})$/u;
 const RUN_SCOPE_PATTERN = /^[0-9a-f]{16}$/u;
@@ -114,6 +120,10 @@ const S10_BOOTSTRAP_SQL = `
 	GRANT SELECT, INSERT, UPDATE, DELETE ON storage.objects TO authenticated, service_role;
 	GRANT SELECT ON storage.buckets TO anon, authenticated, service_role;
 `;
+export const QUALITY_DATABASE_CONTROL_TIMEOUT_MS = 15_000;
+export const QUALITY_DATABASE_MIGRATION_TIMEOUT_MS = 60_000;
+export const QUALITY_DATABASE_TEARDOWN_TIMEOUT_MS = 20_000;
+export const QUALITY_DATABASE_LEASE_TIMEOUT_MS = 10_000;
 
 export class QualityCheckExitError extends Error {
 	constructor(exitCode) {
@@ -332,14 +342,12 @@ export function createPostgresAdapter() {
 					}
 				);
 				let settled = false;
-				child.stdout.resume();
-				child.once("error", () => {
-					if (!settled) {
-						settled = true;
-						reject(new Error("Disposable database run lease failed"));
-					}
+				const fence = superviseSpawnedChild(child, {
+					timeoutMs: QUALITY_DATABASE_LEASE_TIMEOUT_MS,
+					killGraceMs: DEFAULT_CHILD_KILL_GRACE_MS,
 				});
-				child.once("close", () => {
+				child.stdout.resume();
+				void fence.settled.catch(() => undefined).then(() => {
 					if (!settled) {
 						settled = true;
 						reject(new Error("Disposable database run lease failed"));
@@ -350,18 +358,21 @@ export function createPostgresAdapter() {
 					.then(() => {
 						if (settled) return;
 						settled = true;
+						fence.clearDeadline();
 						resolve(async () => {
 							if (child.exitCode !== null) return;
-							const closed = new Promise((release) => child.once("close", release));
 							child.stdin.end("\\q\n");
-							await closed;
+							fence.armDeadline(2_000);
+							await fence.settled;
 						});
 					})
 					.catch(() => {
 						if (settled) return;
 						settled = true;
-						child.stdin.end("\\q\n");
-						reject(new Error("Disposable database run lease failed"));
+						fence.terminate("lease_failed");
+						void fence.settled.catch(() => undefined).then(() => {
+							reject(new Error("Disposable database run lease failed"));
+						});
 					});
 			});
 		},
@@ -585,26 +596,30 @@ function sanitizeFailure(error) {
 	return new Error("Repository quality database execution failed");
 }
 
-async function runCaptured(program, arguments_, stage, standardInput) {
-	return await new Promise((resolve, reject) => {
-		const child = spawn(program, arguments_, {
-			stdio: [standardInput === undefined ? "ignore" : "pipe", "pipe", "ignore"],
-			env: { ...process.env, PGAPPNAME: "kanji-everyday-quality" },
+export async function runCaptured(program, arguments_, stage, standardInput, runtime = {}) {
+	let result;
+	try {
+		result = await runSupervisedChild({
+			program,
+			arguments: arguments_,
+			standardInput,
+			environment: { ...process.env, PGAPPNAME: "kanji-everyday-quality" },
+			timeoutMs: runtime.timeoutMs ?? qualityDatabaseStageTimeout(stage),
+			killGraceMs: runtime.killGraceMs ?? DEFAULT_CHILD_KILL_GRACE_MS,
+			maxOutputBytes: runtime.maxOutputBytes ?? 1024 * 1024,
+			onSpawn: runtime.onSpawn,
 		});
-		let stdout = "";
-		child.stdout.setEncoding("utf8");
-		child.stdout.on("data", (chunk) => {
-			stdout += chunk;
-			if (stdout.length > 1024 * 1024) child.kill("SIGKILL");
-		});
-		if (standardInput !== undefined) {
-			child.stdin.on("error", () => undefined);
-			child.stdin.end(standardInput);
-		}
-		child.once("error", () => reject(new Error(`Database command unavailable during ${stage}`)));
-		child.once("close", (code, signal) => {
-			if (code === 0 && signal === null) resolve(stdout);
-			else reject(new Error(`Database command failed during ${stage}`));
-		});
-	});
+	} catch {
+		throw new Error(`Database command unavailable during ${stage}`);
+	}
+	if (result.exitCode === 0 && result.signal === null && result.terminationReason === undefined) {
+		return result.stdout;
+	}
+	throw new Error(`Database command failed during ${stage}`);
+}
+
+function qualityDatabaseStageTimeout(stage) {
+	if (/preparation|bootstrap|migration/iu.test(stage)) return QUALITY_DATABASE_MIGRATION_TIMEOUT_MS;
+	if (/cleanup|drop|teardown|residue/iu.test(stage)) return QUALITY_DATABASE_TEARDOWN_TIMEOUT_MS;
+	return QUALITY_DATABASE_CONTROL_TIMEOUT_MS;
 }

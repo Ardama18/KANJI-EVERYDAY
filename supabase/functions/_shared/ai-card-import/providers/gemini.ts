@@ -2,6 +2,7 @@ import type { IllustrationProvider, ProviderResult } from "../contracts.ts";
 import {
 	decodeBase64WithinLimit,
 	isProviderResponseLimitError,
+	isProviderResponseNetworkError,
 	readBoundedJsonResponse,
 } from "../provider-response.ts";
 import { classifyFailure } from "../retry-policy.ts";
@@ -47,6 +48,9 @@ export function createGeminiProvider(input: {
 				if (image === undefined) return { kind: "permanent", code: "PROVIDER_PERMANENT_ERROR" };
 				return { kind: "success", bytes: decodeBase64WithinLimit(image.data), declaredMime: image.mime };
 			} catch (error) {
+				if (isProviderResponseNetworkError(error)) {
+					return { kind: "transient", code: "PROVIDER_TRANSIENT_ERROR" };
+				}
 				if (isProviderResponseLimitError(error)) {
 					return { kind: "permanent", code: "IMAGE_TOO_LARGE" };
 				}

@@ -56,8 +56,13 @@ export async function POST(request: Request): Promise<Response> {
 		return error("SOURCE_READ_FAILED", 503);
 	}
 	if (!sourceResponse.ok) {
-		await sourceResponse.body?.cancel();
-		await markCleanup(service, authData.user.id, uploadId);
+		try {
+			await sourceResponse.body?.cancel();
+		} catch {
+			// The safe response and durable cleanup marker are authoritative.
+		} finally {
+			await markCleanup(service, authData.user.id, uploadId);
+		}
 		return error("SOURCE_READ_FAILED", 503);
 	}
 	let bytes: Uint8Array;

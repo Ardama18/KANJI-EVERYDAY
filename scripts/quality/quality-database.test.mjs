@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -10,13 +10,18 @@ import {
 	CLUSTER_ROLE_STATE_SQL,
 	DISPOSABLE_DATABASE_PREFIX,
 	QualityCheckExitError,
+	QUALITY_DATABASE_CONTROL_TIMEOUT_MS,
+	QUALITY_DATABASE_MIGRATION_TIMEOUT_MS,
+	QUALITY_DATABASE_TEARDOWN_TIMEOUT_MS,
 	assertSafeDisposableDatabaseName,
 	buildCheckEnvironment,
 	createDisposableDatabaseName,
 	parseSourceDatabaseUrl,
 	removeClusterRoleMutations,
+	runCaptured,
 	withDisposableS10Database,
 } from "./quality-database.mjs";
+import { superviseSpawnedChild } from "./child-supervisor.mjs";
 import {
 	buildDiffWhitespacePhases,
 	createTerminationHandler,
@@ -233,7 +238,7 @@ test("repository quality provisions three distinct S-11 migration databases", as
 	assert.match(runner, /\["diff", "--check"\]/u);
 });
 
-test("ordinary Vitest alone serializes file workers without changing later gates", async () => {
+test("ordinary Vitest uses the repository-wide serial-file contract without redundant CLI worker claims", async () => {
 	const [runner, vitestConfig, testkit, integration, e2e, contractWorkflow] = await Promise.all([
 		readFile(new URL("./run-quality-with-database.mjs", import.meta.url), "utf8"),
 		readFile(new URL("../../frontend/vitest.config.ts", import.meta.url), "utf8"),
@@ -244,7 +249,7 @@ test("ordinary Vitest alone serializes file workers without changing later gates
 	]);
 	const ordinaryStart = runner.indexOf('"complete ordinary Vitest"');
 	const inventoryStart = runner.indexOf('"S-11 inventory"', ordinaryStart);
-	const focusedStart = runner.indexOf('"S-11 focused 77 regressions"', inventoryStart);
+	const focusedStart = runner.indexOf('"S-11 focused release regressions"', inventoryStart);
 	const diffStart = runner.indexOf("buildDiffWhitespacePhases", focusedStart);
 	assert.ok(
 		ordinaryStart >= 0 &&
@@ -253,25 +258,17 @@ test("ordinary Vitest alone serializes file workers without changing later gates
 			diffStart > focusedStart
 	);
 	const ordinaryPhase = runner.slice(ordinaryStart, inventoryStart);
-	const inventoryPhase = runner.slice(inventoryStart, focusedStart);
-	const focusedPhase = runner.slice(focusedStart, diffStart);
-	assert.match(
-		ordinaryPhase,
-		/\[\s*"--prefix",\s*"frontend",\s*"run",\s*"test",\s*"--",\s*"--maxWorkers=1",\s*"--minWorkers=1",?\s*\]/u
-	);
-	assert.doesNotMatch(inventoryPhase, /maxWorkers|minWorkers/u);
-	assert.doesNotMatch(focusedPhase, /maxWorkers|minWorkers/u);
-	assert.equal(runner.match(/--maxWorkers=1|--minWorkers=1/gu)?.length, 2);
+	assert.match(ordinaryPhase, /\["--prefix", "frontend", "run", "test"\]/u);
+	assert.doesNotMatch(runner, /maxWorkers|minWorkers/u);
+	assert.match(vitestConfig, /fileParallelism:\s*false/u);
 	assert.doesNotMatch(vitestConfig, /testTimeout/u);
 	assert.match(testkit, /S10_DB_STATEMENT_TIMEOUT_MS = 10_000/u);
 	assert.match(testkit, /S10_DB_LOCK_TIMEOUT_MS = 5_000/u);
 	assert.match(testkit, /S10_DB_PROCESS_TIMEOUT_MS = 12_000/u);
 	assert.match(testkit, /S10_DB_TEST_TIMEOUT_MS = 30_000/u);
-	assert.equal(
-		testkit.match(/timeout: processRuntime\?\.timeoutMs \?\? S10_DB_PROCESS_TIMEOUT_MS/gu)?.length,
-		3
-	);
-	assert.match(testkit, /processRuntime\?\.onSpawn\?\.\(child\)/u);
+	assert.match(testkit, /runSupervisedChild/u);
+	assert.match(testkit, /S10_DB_SCOPE_OPERATION_TIMEOUT_MS = 20_000/u);
+	assert.match(testkit, /S10_DB_SCOPE_CLEANUP_TIMEOUT_MS = 6_000/u);
 	assert.match(testkit, /runS10SettledTestScope/u);
 	for (const databaseSuite of [integration, e2e]) {
 		assert.match(databaseSuite, /\{ timeout: S10_DB_TEST_TIMEOUT_MS \}/u);
@@ -285,6 +282,62 @@ test("ordinary Vitest alone serializes file workers without changing later gates
 	assert.doesNotMatch(integration, /sum\(generated_card_count\).*IT-COMMIT/u);
 	assert.match(contractWorkflow, /pg_advisory_xact_lock\(hashtextextended/u);
 	assert.match(contractWorkflow, /WHERE reservation_key LIKE/u);
+});
+
+test("quality child stage deadlines are finite and migration/control/teardown children settle after SIGKILL", async () => {
+	assert.equal(QUALITY_DATABASE_CONTROL_TIMEOUT_MS, 15_000);
+	assert.equal(QUALITY_DATABASE_MIGRATION_TIMEOUT_MS, 60_000);
+	assert.equal(QUALITY_DATABASE_TEARDOWN_TIMEOUT_MS, 20_000);
+	for (const stage of [
+		"S-10 repository database preparation",
+		"database availability check",
+		"disposable database cleanup",
+	]) {
+		let pid;
+		let signal;
+		await assert.rejects(
+			runCaptured(
+				process.execPath,
+				["-e", "process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"],
+				stage,
+				undefined,
+				{
+					timeoutMs: 500,
+					killGraceMs: 25,
+					onSpawn(child) {
+						pid = child.pid;
+						child.once("exit", (_code, exitSignal) => { signal = exitSignal; });
+					},
+				}
+			),
+			/Database command failed/u
+		);
+		assert.equal(signal, "SIGKILL");
+		if (pid !== undefined) assert.throws(() => process.kill(pid, 0));
+	}
+});
+
+test("quality advisory lease fence escalates a resistant child and awaits zero residue", async () => {
+	const child = spawn(process.execPath, ["-e", "process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"], {
+		stdio: "ignore",
+	});
+	const fence = superviseSpawnedChild(child, { timeoutMs: 500, killGraceMs: 25 });
+	const result = await fence.settled;
+	assert.equal(result.signal, "SIGKILL");
+	assert.equal(result.terminationReason, "timeout");
+	if (child.pid !== undefined) assert.throws(() => process.kill(child.pid, 0));
+});
+
+test("quality child output overflow is bounded and settled before rejection", async () => {
+	let pid;
+	await assert.rejects(runCaptured(
+		process.execPath,
+		["-e", "process.on('SIGTERM',()=>{});setInterval(()=>process.stdout.write('x'.repeat(128)),1)"],
+		"database availability check",
+		undefined,
+		{ timeoutMs: 2_000, killGraceMs: 25, maxOutputBytes: 256, onSpawn(child) { pid = child.pid; } }
+	), /Database command failed/u);
+	if (pid !== undefined) assert.throws(() => process.kill(pid, 0));
 });
 
 test("quality diff base rejects ambiguous shorthand refs but accepts exact full refs", async () => {

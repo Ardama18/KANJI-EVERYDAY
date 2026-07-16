@@ -1136,24 +1136,28 @@ describe("S-11 commit and queue integration", () => {
 		expect(jobs).toContain("assertOwnerSafeSelectMatrix");
 	});
 
-	it("R22-F3 readiness SSOT separates local boundaries from hosted merge acceptance", async () => {
-		const [meta, plan, traceability, operations] = await Promise.all([
+	it("R23-F0 fixed release SSOT separates RC1 work from hosted merge acceptance", async () => {
+		const [meta, plan, traceability, operations, releaseContract, releaseEvidence] = await Promise.all([
 			readFile(new URL("../meta.json", import.meta.url), "utf8"),
 			readFile(new URL("../plan.md", import.meta.url), "utf8"),
 			readFile(new URL("../traceability.md", import.meta.url), "utf8"),
 			readFile(new URL("../operations.md", import.meta.url), "utf8"),
+			readFile(new URL("../../../../.codex/release-contract.json", import.meta.url), "utf8"),
+			readFile(new URL("../../../../.codex/release-evidence.json", import.meta.url), "utf8"),
 		]);
 		const parsedMeta = JSON.parse(meta) as Record<string, unknown>;
-		expect(parsedMeta.remediation_cycle).toBe(18);
-		expect(parsedMeta.ssot_version).toBe("2.0.16");
-		expect(parsedMeta.verification_state).toBe("hosted_7_not_run_merge_blocked");
+		expect(parsedMeta.remediation_cycle).toBe(19);
+		expect(parsedMeta.ssot_version).toBe("2.0.17");
+		expect(parsedMeta.verification_state).toBe("rc1_local_pending_hosted_7_not_run_merge_blocked");
 		expect(meta).not.toMatch(/ready_for_commit|zero_findings|approved/u);
-		expect(plan).toContain("version: 2.0.16");
-		expect(traceability).toContain("version: 2.0.16");
+		expect(plan).toContain("version: 2.0.17");
+		expect(traceability).toContain("version: 2.0.17");
 		expect(plan).toContain("[x] **T6-01L: local boundary E2E");
 		expect(plan).toContain("[ ] **T6-01H: hosted full-system E2E");
-		expect(operations).toContain("Current cycle-18 verification state: `hosted 7 not_run; merge blocked`");
+		expect(operations).toContain("Current cycle-19 verification state: `RC1 local evidence pending; hosted 7 not_run; merge blocked`");
 		expect(traceability).not.toMatch(/\bcurrent\s+R12\b/iu);
+		expect(JSON.parse(releaseContract)).toMatchObject({ issue: 12, story: "S-11" });
+		expect(JSON.parse(releaseEvidence)).toMatchObject({ state: "pending_rc1" });
 	});
 
 	it("R13-F3 schedule migration denies PUBLIC before creating SECURITY DEFINER functions", async () => {
@@ -2757,6 +2761,34 @@ describe("S-11 reviewer regression boundaries", () => {
 		).toMatchObject({ kind: "permanent" });
 	});
 
+	it.each(["openai", "gemini"] as const)(
+		"R23-F1 treats a successful %s HTTP response whose body transport aborts mid-stream as transient",
+		async (providerName) => {
+			const fetchImplementation = async () => midStreamFailureResponse();
+			const provider = providerName === "openai"
+				? createOpenAiProvider({ apiKey: "fixture", model: "fixture", fetchImplementation })
+				: createGeminiProvider({ apiKey: "fixture", model: "fixture", fetchImplementation });
+			expect(
+				await provider.generate({ prompt: "safe fixture", signal: new AbortController().signal })
+			).toEqual({ kind: "transient", code: "PROVIDER_TRANSIENT_ERROR" });
+		}
+	);
+
+	it("R23-F1 persists the provider mid-stream transport retry schedule", async () => {
+		const provider = createOpenAiProvider({
+			apiKey: "fixture",
+			model: "fixture",
+			fetchImplementation: async () => midStreamFailureResponse(),
+		});
+		const harness = createWorkerHarness({ imageMode: "ai" });
+		expect(await processOneConcept({
+			...harness.dependencies,
+			providers: { ...harness.dependencies.providers, openai: provider },
+		})).toBe("retried");
+		expect(harness.state.retryDelays).toEqual([5]);
+		expect(harness.state.failCalls).toBe(0);
+	});
+
 	it("HI-11 schedules persistent retry when conflict verification Storage read has a network error", async () => {
 		const harness = createWorkerHarness({
 			imageMode: "ai",
@@ -2766,6 +2798,31 @@ describe("S-11 reviewer regression boundaries", () => {
 		expect(await processOneConcept(harness.dependencies)).toBe("retried");
 		expect(harness.state.retryDelays).toEqual([5]);
 	});
+
+	it.each(["source", "conflict"] as const)(
+		"R23-F1 treats a Storage %s body controller.error after bytes as retryable",
+		async (path) => {
+			let requests = 0;
+			const storage = createStorageClient({
+				supabaseUrl: "http://supabase.local",
+				serviceRoleKey: "service-fixture",
+				fetchImplementation: async (_input, init) => {
+					requests += 1;
+					if (path === "conflict" && init?.method === "POST") {
+						return new Response(null, { status: 409 });
+					}
+					return midStreamFailureResponse();
+				},
+			});
+			const harness = createWorkerHarness({
+				imageMode: path === "source" ? "upload" : "ai",
+			});
+			expect(await processOneConcept({ ...harness.dependencies, storage })).toBe("retried");
+			expect(harness.state.retryDelays).toEqual([5]);
+			expect(harness.state.failCalls).toBe(0);
+			expect(requests).toBe(path === "source" ? 1 : 2);
+		}
+	);
 
 	it.each([
 		["image/png", sourceFixture("image/png")],
@@ -2854,6 +2911,52 @@ describe("S-11 reviewer regression boundaries", () => {
 		} finally {
 			vi.doUnmock("@/lib/ai-import/source-image-codec");
 			vi.resetModules();
+			vi.unstubAllGlobals();
+			vi.unstubAllEnvs();
+		}
+	});
+
+	it("R23-F1 returns safe source failure and marks cleanup when non-OK body cancellation rejects", async () => {
+		const uploadId = "22000000-0000-4000-8000-000000000023";
+		const rawPath = `${OWNER_ID}/${uploadId}/raw`;
+		const query = { select: vi.fn(), eq: vi.fn(), maybeSingle: vi.fn() };
+		query.select.mockReturnValue(query);
+		query.eq.mockReturnValue(query);
+		query.maybeSingle.mockResolvedValue({
+			data: {
+				id: uploadId,
+				owner_user_id: OWNER_ID,
+				status: "prepared",
+				raw_storage_path: rawPath,
+				mime_type: "image/png",
+				byte_size: 1,
+			},
+			error: null,
+		});
+		routeBoundary.from.mockReturnValue(query);
+		routeBoundary.rpc.mockResolvedValue({ data: null, error: null });
+		vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "http://127.0.0.1:54321");
+		vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "cancel-test-anon");
+		vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "cancel-test-service");
+		vi.stubGlobal("fetch", async () => new Response(new ReadableStream({
+			cancel() {
+				return Promise.reject(new TypeError("transport detail"));
+			},
+		}), { status: 503 }));
+		try {
+			const { POST } = await import("../../../../frontend/app/api/ai/imports/sources/complete/route");
+			const response = await POST(new Request("http://local/api/ai/imports/sources/complete", {
+				method: "POST",
+				body: JSON.stringify({ uploadId }),
+			}));
+			expect(response.status).toBe(503);
+			expect(await response.json()).toEqual({ error: { code: "SOURCE_READ_FAILED" } });
+			expect(routeBoundary.rpc.mock.calls).toEqual([["mark_ai_upload_cleanup", {
+				p_owner_user_id: OWNER_ID,
+				p_upload_id: uploadId,
+				p_source_path: null,
+			}]]);
+		} finally {
 			vi.unstubAllGlobals();
 			vi.unstubAllEnvs();
 		}
@@ -3560,6 +3663,15 @@ function oversizedStorageResponse(mode: "declared" | "missing" | "lying"): Respo
 		status: 200,
 		headers: mode === "lying" ? { "Content-Length": "1" } : undefined,
 	});
+}
+
+function midStreamFailureResponse(): Response {
+	return new Response(new ReadableStream<Uint8Array>({
+		start(controller) {
+			controller.enqueue(new Uint8Array([123]));
+			controller.error(new TypeError("transport detail"));
+		},
+	}), { status: 200 });
 }
 
 function workerFailureLogs(logs: readonly string[]): Record<string, unknown>[] {

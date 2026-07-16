@@ -162,7 +162,15 @@ async function readResponseBytesWithLimit(
 	let total = 0;
 	try {
 		for (;;) {
-			const { done, value } = await reader.read();
+			let result: ReadableStreamReadResult<Uint8Array>;
+			try {
+				result = await reader.read();
+			} catch {
+				// The HTTP response was accepted, but its body transport failed mid-stream.
+				// Preserve a typed retryable boundary without leaking the raw failure.
+				throw new StorageNetworkError();
+			}
+			const { done, value } = result;
 			if (done) break;
 			total += value.byteLength;
 			if (total > maxBytes) {
@@ -175,9 +183,6 @@ async function readResponseBytesWithLimit(
 			}
 			chunks.push(value);
 		}
-	} catch (error) {
-		if (error instanceof StorageSizeLimitError) throw error;
-		throw new StorageContractError();
 	} finally {
 		reader.releaseLock();
 	}
