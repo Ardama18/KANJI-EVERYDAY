@@ -50,6 +50,7 @@ export interface S10ProcessRuntime {
 	readonly timeoutMs?: number;
 	readonly killGraceMs?: number;
 	readonly maxOutputBytes?: number;
+	readonly signal?: AbortSignal;
 	readonly onSpawn?: (child: ChildProcess) => void;
 }
 
@@ -499,11 +500,20 @@ async function runS10Command(
 			killGraceMs: processRuntime?.killGraceMs ?? DEFAULT_CHILD_KILL_GRACE_MS,
 			maxOutputBytes: processRuntime?.maxOutputBytes,
 			onSpawn: processRuntime?.onSpawn,
-			signal: s10ScopeSignal.getStore(),
+			signal: combineS10AbortSignals(processRuntime?.signal, s10ScopeSignal.getStore()),
 		});
 	} catch {
 		throw new S10DatabaseCommandError(null);
 	}
+}
+
+function combineS10AbortSignals(
+	runtimeSignal: AbortSignal | undefined,
+	scopeSignal: AbortSignal | undefined
+): AbortSignal | undefined {
+	if (runtimeSignal === undefined) return scopeSignal;
+	if (scopeSignal === undefined) return runtimeSignal;
+	return AbortSignal.any([runtimeSignal, scopeSignal]);
 }
 
 export function buildS10DatabaseCommandEnvironment(

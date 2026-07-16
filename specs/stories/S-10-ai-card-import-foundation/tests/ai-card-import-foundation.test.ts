@@ -124,6 +124,45 @@ async function expectSafePreviewFailure(
 	}
 }
 
+function createReadyStubbornRuntime(events: string[], startupDelayMs = 0) {
+	const deadline = new AbortController();
+	let ready = false;
+	let output = "";
+	let pid: number | undefined;
+	let terminationSignal: NodeJS.Signals | null = null;
+	const runtime: S10ProcessRuntime = {
+		executable: process.execPath,
+		arguments: [
+			"-e",
+			`setTimeout(()=>{process.on('SIGTERM',()=>{});process.stdout.write('READY\\n')},${startupDelayMs});setInterval(()=>{},1000)`,
+		],
+		timeoutMs: 2_000,
+		killGraceMs: 25,
+		signal: deadline.signal,
+		onSpawn(child) {
+			pid = child.pid;
+			child.stdout?.on("data", (chunk) => {
+				output += String(chunk);
+				if (!ready && output.includes("READY\n")) {
+					ready = true;
+					events.push("ready");
+					deadline.abort();
+				}
+			});
+			child.once("exit", (_code, signal) => {
+				terminationSignal = signal;
+				events.push("exit");
+			});
+		},
+	};
+	return {
+		runtime,
+		get pid() { return pid; },
+		get ready() { return ready; },
+		get terminationSignal() { return terminationSignal; },
+	};
+}
+
 describe("S-10 AIカード登録基盤 Unit契約", () => {
 	describe("DB test settlement contract", () => {
 		it("UT-DB-01: test timeout相当のraceはunderlying Promiseをcancelせず後から完了し得る", async () => {
@@ -204,22 +243,9 @@ describe("S-10 AIカード登録基盤 Unit契約", () => {
 
 		it("UT-DB-04: resistant real childはTERM後KILLで全psql境界をsettleしてrejectする", async () => {
 			for (const api of ["run", "capture", "settle", "autocommit", "file"] as const) {
-				let childTerminated = false;
-				let terminationSignal: NodeJS.Signals | null = null;
 				const events: string[] = [];
-				const runtime: S10ProcessRuntime = {
-					executable: process.execPath,
-					arguments: ["-e", "process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"],
-					timeoutMs: 200,
-					killGraceMs: 25,
-					onSpawn(child) {
-						child.once("exit", (_code, signal) => {
-							childTerminated = true;
-							terminationSignal = signal;
-							events.push("exit");
-						});
-					},
-				};
+				const stubborn = createReadyStubbornRuntime(events);
+				const { runtime } = stubborn;
 				const client = createS10DbClient("postgresql://unused.invalid/test", runtime);
 				const operation = api === "run"
 					? runS10Psql("postgresql://unused.invalid/test", "SELECT 1", runtime)
@@ -235,11 +261,25 @@ describe("S-10 AIカード登録基盤 Unit契約", () => {
 					throw error;
 				});
 				await expect(observedOperation).rejects.toBeInstanceOf(S10DatabaseCommandError);
-				expect(childTerminated).toBe(true);
-				expect(terminationSignal).toBe("SIGKILL");
+				expect(stubborn.ready).toBe(true);
+				expect(stubborn.terminationSignal).toBe("SIGKILL");
 				events.push("next-snapshot");
-				expect(events).toEqual(["exit", "rejected", "next-snapshot"]);
+				expect(events).toEqual(["ready", "exit", "rejected", "next-snapshot"]);
+				if (stubborn.pid !== undefined) expect(() => process.kill(stubborn.pid as number, 0)).toThrow();
 			}
+		});
+
+		it("UT-DB-04b: delayed startup waits for explicit readiness before TERM-to-KILL assertion", async () => {
+			const events: string[] = [];
+			const stubborn = createReadyStubbornRuntime(events, 300);
+			await expect(
+				runS10Psql("postgresql://unused.invalid/test", "SELECT 1", stubborn.runtime)
+			).rejects.toBeInstanceOf(S10DatabaseCommandError);
+			expect(stubborn.ready).toBe(true);
+			expect(stubborn.terminationSignal).toBe("SIGKILL");
+			events.push("next-snapshot");
+			expect(events).toEqual(["ready", "exit", "next-snapshot"]);
+			if (stubborn.pid !== undefined) expect(() => process.kill(stubborn.pid as number, 0)).toThrow();
 		});
 
 		it("UT-DB-05: aggregate deadline aborts and settles a resistant child before cleanup and next scope", async () => {
