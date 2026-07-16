@@ -234,7 +234,7 @@ test("repository quality provisions three distinct S-11 migration databases", as
 		upgradeUrl: "postgresql://quality/upgrade",
 		failureUrl: "postgresql://quality/failure",
 	});
-	const dispatched = [...plan.databaseScoped, ...plan.postCleanup];
+	const dispatched = [...plan.preProvision, ...plan.disposable, ...plan.postCleanup];
 	assert.deepEqual(
 		dispatched.map(([id, program, arguments_]) => [id, program, arguments_]),
 		contract.localGates.map((gate) => [
@@ -253,17 +253,62 @@ test("repository quality provisions three distinct S-11 migration databases", as
 		observed.push([program, arguments_]);
 		return 0;
 	};
-	assert.equal(await runQualityPhaseSequence(plan.databaseScoped, commandRunner), 0);
+	assert.equal(await runQualityPhaseSequence(plan.preProvision, commandRunner), 0);
+	assert.equal(await runQualityPhaseSequence(plan.disposable, commandRunner), 0);
 	assert.equal(await runQualityPhaseSequence(plan.postCleanup, commandRunner), 0);
 	assert.deepEqual(observed, dispatched.map(([, program, arguments_]) => [program, arguments_]));
 	const preflight = runner.indexOf("const preflightFailures = validateReleaseContractDefinition");
-	const dispatch = runner.indexOf("runQualityPhaseSequence(plan.databaseScoped)");
+	const dispatch = runner.indexOf("runQualityPhaseSequence(preProvisionPlan.preProvision)");
 	assert.ok(preflight >= 0 && dispatch > preflight);
 	assert.doesNotMatch(runner, /validateReleaseState|validateRepositoryEvidenceBinding|readReleaseFiles/u);
 	assert.match(runner, /S11_FRESH_DATABASE_URL/u);
 	assert.match(runner, /S11_UPGRADE_DATABASE_URL/u);
 	assert.match(runner, /S11_FAILURE_DATABASE_URL/u);
+	assert.deepEqual(plan.preProvision.map(([id]) => id), [
+		"release-contract",
+		"quality-database-unit",
+		"quality-database-harness",
+	]);
 	assert.deepEqual(plan.postCleanup.map(([id]) => id), ["database-residue", "source-continuity"]);
+});
+
+test("contract execution phases fence parent residue and clean every failure path", async () => {
+	const { contract } = await readReleaseFiles();
+	const plan = buildContractLocalQualityPhases({
+		contract,
+		diffBase: "b".repeat(40),
+		sourceEnvironment: { S10_ADMIN_DATABASE_URL: SOURCE_URL },
+		freshUrl: "postgresql://quality/fresh",
+		upgradeUrl: "postgresql://quality/upgrade",
+		failureUrl: "postgresql://quality/failure",
+	});
+	for (const failurePhase of [undefined, "pre-provision", "disposable", "post-cleanup"]) {
+		let databaseCount = 0;
+		const observations = [];
+		const runGroup = async (phase, phases) => await runQualityPhaseSequence(
+			phases,
+			async (_program, _arguments, _environment) => {
+				observations.push([phase, databaseCount]);
+				return failurePhase === phase ? 29 : 0;
+			}
+		);
+		const preExit = await runGroup("pre-provision", plan.preProvision);
+		if (preExit === 0) {
+			databaseCount = 3;
+			let disposableExit;
+			try {
+				disposableExit = await runGroup("disposable", plan.disposable);
+			} finally {
+				databaseCount = 0;
+			}
+			if (disposableExit === 0) await runGroup("post-cleanup", plan.postCleanup);
+		}
+		assert.equal(databaseCount, 0);
+		assert.ok(observations.filter(([phase]) => phase === "pre-provision").every(([, count]) => count === 0));
+		assert.ok(observations.filter(([phase]) => phase === "disposable").every(([, count]) => count === 3));
+		assert.ok(observations.filter(([phase]) => phase === "post-cleanup").every(([, count]) => count === 0));
+	}
+	assert.equal(plan.preProvision.find(([id]) => id === "quality-database-harness")?.[0], "quality-database-harness");
 });
 
 test("ordinary Vitest uses the repository-wide serial-file contract without redundant CLI worker claims", async () => {
@@ -432,7 +477,7 @@ test("staged-only whitespace failure is distinct from committed and unstaged che
 				upgradeUrl: "postgresql://quality/upgrade",
 				failureUrl: "postgresql://quality/failure",
 			});
-			const phases = plan.databaseScoped.filter(([id]) => id.startsWith("diff-"));
+			const phases = plan.disposable.filter(([id]) => id.startsWith("diff-"));
 			const exitCode = await runQualityPhaseSequence(
 				phases,
 				async (program, arguments_, environment) => {
@@ -460,7 +505,7 @@ test("contract diff gates preserve committed, staged, unstaged argument order an
 		upgradeUrl: "postgresql://quality/upgrade",
 		failureUrl: "postgresql://quality/failure",
 	});
-	const phases = plan.databaseScoped.filter(([id]) => id.startsWith("diff-"));
+	const phases = plan.disposable.filter(([id]) => id.startsWith("diff-"));
 	assert.deepEqual(phases.map(([id, program, arguments_]) => [id, program, arguments_]), [
 		[
 			"diff-committed",

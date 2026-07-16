@@ -16,8 +16,6 @@ import {
 	validateReleaseContractDefinition,
 } from "./release-contract.mjs";
 
-const POST_CLEANUP_LOCAL_GATE_IDS = new Set(["database-residue", "source-continuity"]);
-
 export function createTerminationHandler({
 	getCleanup,
 	exit,
@@ -164,6 +162,13 @@ export async function runRepositoryQuality() {
 			process.stderr.write(`${JSON.stringify({ gate: "s11-release-contract-preflight", status: "blocked", failures: preflightFailures })}\n`);
 			return 2;
 		}
+		const preProvisionPlan = buildContractLocalQualityPhases({
+			contract: releaseContract,
+			diffBase,
+			sourceEnvironment: process.env,
+		});
+		const preProvisionExitCode = await runQualityPhaseSequence(preProvisionPlan.preProvision);
+		if (preProvisionExitCode !== 0) return preProvisionExitCode;
 		await reconcileRunScopedResidue(residueInput);
 		await assertNoCurrentRunResidue(runScope, residueInput.listDatabaseNames);
 		releaseLease = await adapter.acquireRunLease(sourceUrl, runScope);
@@ -200,13 +205,16 @@ export async function runRepositoryQuality() {
 									failureUrl,
 								});
 								postCleanupPhases = plan.postCleanup;
-								return await runQualityPhaseSequence(plan.databaseScoped);
+								return await runQualityPhaseSequence(plan.disposable);
 							},
 						}),
 				}),
 		});
 		await auditCleanup();
 		if (postCleanupPhases === undefined) throw new Error("Repository local quality plan was not dispatched");
+		activeCleanups.delete(releaseLease);
+		await releaseLease();
+		releaseLease = undefined;
 		const postCleanupExitCode = await runQualityPhaseSequence(postCleanupPhases);
 		if (postCleanupExitCode !== 0) return postCleanupExitCode;
 		await auditCleanup();
@@ -269,22 +277,17 @@ export function buildContractLocalQualityPhases({
 		const arguments_ = declaredArguments.map((argument) =>
 			argument === "BASE...HEAD" ? `${diffBase}...HEAD` : argument
 		);
-		const environment = gate.id === "build"
-			? buildEnvironment
-			: new Set(["quality-database-harness", "database-residue", "source-continuity"]).has(gate.id)
-				? sourceEnvironment
+		const environment = gate.context === "source"
+			? sourceEnvironment
+			: gate.context === "build"
+				? buildEnvironment
 				: checkEnvironment;
 		return [gate.id, program, arguments_, environment];
 	});
-	const firstPostCleanupIndex = phases.findIndex(([id]) => POST_CLEANUP_LOCAL_GATE_IDS.has(id));
-	if (firstPostCleanupIndex < 0 ||
-		phases.slice(firstPostCleanupIndex).some(([id]) => !POST_CLEANUP_LOCAL_GATE_IDS.has(id)) ||
-		phases.length - firstPostCleanupIndex !== POST_CLEANUP_LOCAL_GATE_IDS.size) {
-		throw new Error("Release contract post-cleanup gate order drifted");
-	}
 	return {
-		databaseScoped: phases.slice(0, firstPostCleanupIndex),
-		postCleanup: phases.slice(firstPostCleanupIndex),
+		preProvision: phases.filter((_, index) => contract.localGates[index].phase === "pre-provision"),
+		disposable: phases.filter((_, index) => contract.localGates[index].phase === "disposable"),
+		postCleanup: phases.filter((_, index) => contract.localGates[index].phase === "post-cleanup"),
 	};
 }
 

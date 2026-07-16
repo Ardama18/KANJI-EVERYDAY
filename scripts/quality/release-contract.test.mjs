@@ -92,6 +92,20 @@ test("release contract fails closed for contract drift and bad identities", asyn
 	}
 });
 
+test("release preflight rejects missing, unknown, empty, and out-of-order execution phases", async () => {
+	const { contract } = await readReleaseFiles();
+	for (const mutate of [
+		(drifted) => { delete drifted.localGates[0].phase; },
+		(drifted) => { drifted.localGates[0].phase = "unknown-phase"; },
+		(drifted) => { drifted.localGates = drifted.localGates.filter((gate) => gate.phase !== "pre-provision"); },
+		(drifted) => { drifted.localGates.push(drifted.localGates.shift()); },
+	]) {
+		const drifted = clone(contract);
+		mutate(drifted);
+		assert.notEqual(validateReleaseContractDefinition(drifted).length, 0);
+	}
+});
+
 test("release contract rejects unresolved gates, reviews, redaction, and candidate mismatch", async () => {
 	const { contract } = await readReleaseFiles();
 	for (const mutate of [

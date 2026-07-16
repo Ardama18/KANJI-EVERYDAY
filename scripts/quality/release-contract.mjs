@@ -6,8 +6,10 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 const SHA_PATTERN = /^[0-9a-f]{40}$/u;
-const CONTRACT_VERSION = "S11-RC1-1.0.2";
-const CONTRACT_DIGEST = "8743c2805b9024981af64918c55b75a3183e09887c5d7b34235d0ca706cc7dab";
+const CONTRACT_VERSION = "S11-RC1-1.0.3";
+const CONTRACT_DIGEST = "d62a3959253a6af9eeb2a130fb7f479c6ed2452aca66f0e1e359bc63bb39bc24";
+const LOCAL_GATE_PHASES = ["pre-provision", "disposable", "post-cleanup"];
+const LOCAL_GATE_CONTEXTS = new Set(["source", "disposable", "build"]);
 const EXPECTED_ACCEPTANCE_CRITERIA = [
 	"AC-01-async-commit-under-two-seconds",
 	"AC-02-reconnectable-owner-status",
@@ -63,6 +65,7 @@ export function validateReleaseContractDefinition(contract, options = {}) {
 	checkExactIds(scope.acceptanceCriteria, EXPECTED_ACCEPTANCE_CRITERIA, "acceptance criteria", failures);
 	check(Array.isArray(scope.outOfScope) && scope.outOfScope.length === 5, "out-of-scope contract drift", failures);
 	checkGateDefinitions(contract.localGates, "local", failures);
+	validateLocalGateExecutionModel(contract.localGates, failures);
 	checkGateDefinitions(contract.hostedGates, "hosted", failures);
 	checkExactIds(readIds(contract.hostedGates), EXPECTED_HOSTED_IDS, "hosted gates", failures);
 	checkGateDefinitions(contract.secretScans, "secret scan", failures);
@@ -162,6 +165,31 @@ function checkGateDefinitions(value, label, failures) {
 		check(isRecord(gate) && typeof gate.id === "string", `${label} gate has an invalid id`, failures);
 		check(isRecord(gate) && Array.isArray(gate.command) && gate.command.every((part) => typeof part === "string" && part.length > 0), `${label} gate command is invalid`, failures);
 		check(isRecord(gate) && isRecord(gate.expected) && gate.expected.status === "passed" && gate.expected.exitCode === 0, `${label} gate expected result drift`, failures);
+	}
+}
+
+function validateLocalGateExecutionModel(value, failures) {
+	if (!Array.isArray(value)) return;
+	const phases = value.map((gate) => isRecord(gate) ? gate.phase : undefined);
+	const transitions = phases.filter((phase, index) => index === 0 || phase !== phases[index - 1]);
+	checkExactIds(transitions, LOCAL_GATE_PHASES, "local gate execution phases", failures);
+	check(
+		transitions.every((phase, index) => phase === LOCAL_GATE_PHASES[index]),
+		"local gate execution phases are out of order",
+		failures
+	);
+	for (const phase of LOCAL_GATE_PHASES) {
+		check(phases.some((candidate) => candidate === phase), `local gate phase ${phase} is empty`, failures);
+	}
+	for (const gate of value) {
+		if (!isRecord(gate)) continue;
+		check(LOCAL_GATE_PHASES.includes(gate.phase), `local gate ${gate.id} has an unknown phase`, failures);
+		check(LOCAL_GATE_CONTEXTS.has(gate.context), `local gate ${gate.id} has an unknown context`, failures);
+		if (gate.phase === "pre-provision" || gate.phase === "post-cleanup") {
+			check(gate.context === "source", `local gate ${gate.id} must use source context`, failures);
+		} else if (gate.phase === "disposable") {
+			check(gate.context === "disposable" || gate.context === "build", `local gate ${gate.id} must use disposable or build context`, failures);
+		}
 	}
 }
 
