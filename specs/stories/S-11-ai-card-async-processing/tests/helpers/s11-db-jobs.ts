@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import {
 	runS10Psql,
+	runS10PsqlAutocommitScript,
 	runS10PsqlFile,
 } from "../../../S-10-ai-card-import-foundation/tests/helpers/s10-db-testkit";
 import { requireDistinctS11DatabaseUrls } from "./s11-db-testkit";
@@ -51,6 +52,9 @@ export async function runS11DatabaseJob(
 				version text PRIMARY KEY
 			)`
 		);
+		const baselineNonServiceAcl = (
+			await runS10Psql(databaseUrl, NON_SERVICE_SECURITY_DEFINER_ACL_SQL)
+		).trim();
 		for (const failpoint of [
 			"after_expand_tables",
 			"after_runtime_functions",
@@ -58,14 +62,17 @@ export async function runS11DatabaseJob(
 		] as const) {
 			let failed = false;
 			try {
-				await runS10Psql(databaseUrl, `SET app.s11_failpoint='${failpoint}';\n${migration}`);
+				await runS10PsqlAutocommitScript(
+					databaseUrl,
+					`SET app.s11_failpoint='${failpoint}';\n${migration}`
+				);
 			} catch {
 				failed = true;
 			}
 			if (!failed) throw new Error(`S-11 ${failpoint} injection unexpectedly completed`);
-			await assertAutocommitFailureState(databaseUrl);
+			await assertAutocommitFailureState(databaseUrl, failpoint, baselineNonServiceAcl);
 		}
-		await runS10Psql(databaseUrl, migration);
+		await runS10PsqlAutocommitScript(databaseUrl, migration);
 		await backfillAndValidate(databaseUrl);
 		await runS10Psql(
 			databaseUrl,
@@ -87,25 +94,85 @@ export async function runS11DatabaseJob(
 	await assertS11Contracts(databaseUrl, job, !coreOnly);
 }
 
-async function assertAutocommitFailureState(databaseUrl: string): Promise<void> {
+async function assertAutocommitFailureState(
+	databaseUrl: string,
+	failpoint: "after_expand_tables" | "after_runtime_functions" | "before_core_commit",
+	baselineNonServiceAcl: string
+): Promise<void> {
+	const expectsRuntime = failpoint !== "after_expand_tables";
+	const expectsFinalGrants = failpoint === "before_core_commit";
 	const result = await runS10Psql(
 		databaseUrl,
 		`SELECT (
 			NOT EXISTS (
 				SELECT 1 FROM supabase_migrations.schema_migrations
 				WHERE version='20260715000000'
-			) AND NOT EXISTS (
-				SELECT 1 FROM pg_proc procedures
+			) AND to_regclass('public.ai_import_concept_jobs') IS NOT NULL
+			AND EXISTS (
+				SELECT 1 FROM pg_constraint
+				WHERE conrelid='public.ai_uploads'::regclass
+					AND conname='ai_uploads_s11_status_check' AND NOT convalidated
+			) AND EXISTS (
+				SELECT 1 FROM pg_policy WHERE polname='ai_import_concept_jobs_select_owner'
+			) AND NOT has_table_privilege('authenticated','public.ai_import_concept_jobs','INSERT')
+			AND ((SELECT count(*) FROM pg_trigger
+				WHERE tgname IN ('ai_s11_sync_upload_compat','ai_s11_track_card_reference_removal',
+					'ai_s11_guard_illustration_lifecycle','ai_s11_guard_illustration_reference')
+					AND NOT tgisinternal) = ${expectsRuntime ? 4 : 0})
+			AND (to_regprocedure('public.commit_import_async(uuid,text,text,text,jsonb,text)') IS NOT NULL) = ${expectsRuntime}
+			AND COALESCE((
+				SELECT EXISTS (
+					SELECT 1 FROM aclexplode(COALESCE(procedures.proacl,acldefault('f',procedures.proowner))) acl
+					JOIN pg_roles roles ON roles.oid=acl.grantee
+					WHERE roles.rolname='service_role' AND acl.privilege_type='EXECUTE'
+				)
+				FROM pg_proc procedures
 				JOIN pg_namespace namespaces ON namespaces.oid=procedures.pronamespace
-				WHERE namespaces.nspname='public'
-					AND procedures.prosecdef
-					AND has_function_privilege('public',procedures.oid,'EXECUTE')
-			)
+				WHERE namespaces.nspname='public' AND procedures.proname='commit_import_async'
+			),false) = ${expectsFinalGrants}
+			AND (${NON_SERVICE_SECURITY_DEFINER_ACL_SQL})=${sqlLiteral(baselineNonServiceAcl)}
 		)::text`
 	);
 	if (!result.includes("true")) {
-		throw new Error("S-11 autocommit failure exposed a function or advanced the ledger");
+		const diagnostics = await runS10Psql(
+			databaseUrl,
+			`SELECT concat_ws(',',
+				(to_regclass('public.ai_import_concept_jobs') IS NOT NULL)::text,
+				(EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.ai_uploads'::regclass
+					AND conname='ai_uploads_s11_status_check' AND NOT convalidated))::text,
+				(EXISTS (SELECT 1 FROM pg_policy WHERE polname='ai_import_concept_jobs_select_owner'))::text,
+				((SELECT count(*) FROM pg_trigger WHERE tgname IN
+					('ai_s11_sync_upload_compat','ai_s11_track_card_reference_removal',
+					'ai_s11_guard_illustration_lifecycle','ai_s11_guard_illustration_reference')
+					AND NOT tgisinternal))::text,
+				(to_regprocedure('public.commit_import_async(uuid,text,text,text,jsonb,text)') IS NOT NULL)::text,
+				(COALESCE((SELECT EXISTS (SELECT 1 FROM
+					aclexplode(COALESCE(procedures.proacl,acldefault('f',procedures.proowner))) acl
+					JOIN pg_roles roles ON roles.oid=acl.grantee
+					WHERE roles.rolname='service_role' AND acl.privilege_type='EXECUTE')
+					FROM pg_proc procedures JOIN pg_namespace namespaces ON namespaces.oid=procedures.pronamespace
+					WHERE namespaces.nspname='public' AND procedures.proname='commit_import_async'),false))::text,
+				((${NON_SERVICE_SECURITY_DEFINER_ACL_SQL})=${sqlLiteral(baselineNonServiceAcl)})::text)`
+		);
+		throw new Error(
+			`S-11 ${failpoint} autocommit durable-state verification failed (${diagnostics.trim()})`
+		);
 	}
+}
+
+const NON_SERVICE_SECURITY_DEFINER_ACL_SQL = `SELECT COALESCE(string_agg(
+	procedures.oid::regprocedure::text||':'||COALESCE(roles.rolname,'PUBLIC'),','
+	ORDER BY procedures.oid::regprocedure::text,COALESCE(roles.rolname,'PUBLIC')
+),'') FROM pg_proc procedures
+JOIN pg_namespace namespaces ON namespaces.oid=procedures.pronamespace
+CROSS JOIN LATERAL aclexplode(COALESCE(procedures.proacl,acldefault('f',procedures.proowner))) acl
+LEFT JOIN pg_roles roles ON roles.oid=acl.grantee
+WHERE namespaces.nspname='public' AND procedures.prosecdef
+	AND acl.privilege_type='EXECUTE'
+	AND (acl.grantee=0 OR roles.rolname IN ('anon','authenticated'))`;
+
+function sqlLiteral(value: string): string {
+	return `'${value.replaceAll("'", "''")}'`;
 }
 
 async function backfillAndValidate(databaseUrl: string): Promise<void> {

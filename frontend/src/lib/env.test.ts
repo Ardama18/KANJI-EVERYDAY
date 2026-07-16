@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { getEnvConfig } from "./env";
+import { getAiPreviewHmacSecret, getEnvConfig } from "./env";
 
 const REQUIRED_KEYS = [
 	"NEXT_PUBLIC_SUPABASE_URL",
 	"NEXT_PUBLIC_SUPABASE_ANON_KEY",
 	"SUPABASE_SERVICE_ROLE_KEY",
 ] as const;
-const OPTIONAL_KEYS = ["GEMINI_API_KEY"] as const;
+const OPTIONAL_KEYS = ["GEMINI_API_KEY", "AI_PREVIEW_HMAC_SECRET"] as const;
 const TEST_KEYS = [...REQUIRED_KEYS, ...OPTIONAL_KEYS] as const;
 
 const SNAPSHOT: Partial<Record<(typeof TEST_KEYS)[number], string>> = {};
@@ -110,5 +110,13 @@ describe("getEnvConfig", () => {
 
 		expect(Object.hasOwn(config, "geminiApiKey")).toBe(true);
 		expect(config.geminiApiKey).toBeUndefined();
+	});
+
+	it("AI_PREVIEW_HMAC_SECRET をtrimし、missing/blankはundefinedとして安全に扱う", () => {
+		expect(getAiPreviewHmacSecret()).toBeUndefined();
+		process.env.AI_PREVIEW_HMAC_SECRET = "   ";
+		expect(getAiPreviewHmacSecret()).toBeUndefined();
+		process.env.AI_PREVIEW_HMAC_SECRET = "  preview-secret  ";
+		expect(getAiPreviewHmacSecret()).toBe("preview-secret");
 	});
 });

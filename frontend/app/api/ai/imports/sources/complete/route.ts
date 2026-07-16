@@ -31,11 +31,12 @@ export async function POST(request: Request): Promise<Response> {
 	}
 	if (!isRecord(body) || typeof body.uploadId !== "string" || !UUID_PATTERN.test(body.uploadId))
 		return error("VALIDATION_ERROR", 400);
+	const uploadId = body.uploadId.toLowerCase();
 	const service = createServiceRoleClient();
 	const { data: rowData, error: lookupError } = await service
 		.from("ai_uploads")
 		.select("id,owner_user_id,status,raw_storage_path,mime_type,byte_size")
-		.eq("id", body.uploadId)
+		.eq("id", uploadId)
 		.eq("owner_user_id", authData.user.id)
 		.maybeSingle();
 	const row = rowData as UploadRow | null;
@@ -51,12 +52,12 @@ export async function POST(request: Request): Promise<Response> {
 	try {
 		sourceResponse = await fetchSourceObject(row.raw_storage_path);
 	} catch {
-		await markCleanup(service, authData.user.id, body.uploadId);
+		await markCleanup(service, authData.user.id, uploadId);
 		return error("SOURCE_READ_FAILED", 503);
 	}
 	if (!sourceResponse.ok) {
 		await sourceResponse.body?.cancel();
-		await markCleanup(service, authData.user.id, body.uploadId);
+		await markCleanup(service, authData.user.id, uploadId);
 		return error("SOURCE_READ_FAILED", 503);
 	}
 	let bytes: Uint8Array;
@@ -64,11 +65,11 @@ export async function POST(request: Request): Promise<Response> {
 		bytes = await readSourceResponseWithLimit(sourceResponse, MAX_SOURCE_BYTES);
 	} catch (failure) {
 		if (!(failure instanceof SourceReadLimitError)) {
-			await markCleanup(service, authData.user.id, body.uploadId);
+			await markCleanup(service, authData.user.id, uploadId);
 			return error("SOURCE_READ_FAILED", 503);
 		}
 		await bucket.remove([row.raw_storage_path]);
-		await markCleanup(service, authData.user.id, body.uploadId);
+		await markCleanup(service, authData.user.id, uploadId);
 		return error("IMAGE_TOO_LARGE", 413);
 	}
 	let sanitized: NormalizedImage;
@@ -79,17 +80,17 @@ export async function POST(request: Request): Promise<Response> {
 		);
 	} catch (failure) {
 		await bucket.remove([row.raw_storage_path]);
-		await markCleanup(service, authData.user.id, body.uploadId);
+		await markCleanup(service, authData.user.id, uploadId);
 		return error(safeImageCode(failure), 422);
 	}
-	const sourcePath = `${authData.user.id}/${body.uploadId}/source`;
+	const sourcePath = `${authData.user.id}/${uploadId}/source`;
 	const { error: intentError } = await service.rpc("mark_ai_source_write_intent", {
 		p_owner_user_id: authData.user.id,
-		p_upload_id: body.uploadId,
+		p_upload_id: uploadId,
 		p_source_path: sourcePath,
 	});
 	if (intentError !== null) {
-		await markCleanup(service, authData.user.id, body.uploadId, sourcePath);
+		await markCleanup(service, authData.user.id, uploadId, sourcePath);
 		return error("SOURCE_FINALIZE_FAILED", 503);
 	}
 	const { error: uploadError } = await bucket.upload(sourcePath, sanitized.bytes, {
@@ -104,7 +105,7 @@ export async function POST(request: Request): Promise<Response> {
 	const digest = await sha256Hex(sanitized.bytes);
 	const readyArguments = {
 		p_owner_user_id: authData.user.id,
-		p_upload_id: body.uploadId,
+		p_upload_id: uploadId,
 		p_detected_mime: sanitized.mime,
 		p_actual_byte_size: sanitized.bytes.byteLength,
 		p_width: sanitized.width,
@@ -121,19 +122,19 @@ export async function POST(request: Request): Promise<Response> {
 			"reconcile_ai_source_ready",
 			readyArguments
 		);
-		const reconciliation = parseReadyReconciliation(reconciliationData, body.uploadId, sourcePath);
+		const reconciliation = parseReadyReconciliation(reconciliationData, uploadId, sourcePath);
 		if (reconciliationError !== null || reconciliation === undefined) {
 			return error("SOURCE_FINALIZE_FAILED", 503);
 		}
 		if (reconciliation.outcome === "ready") {
 			readyResponse = {
-				uploadId: body.uploadId,
+				uploadId,
 				status: "ready",
 				path: sourcePath,
 			};
 		} else if (reconciliation.outcome === "uncommitted") {
 			await bucket.remove([row.raw_storage_path, sourcePath]);
-			await markCleanup(service, authData.user.id, body.uploadId, sourcePath);
+			await markCleanup(service, authData.user.id, uploadId, sourcePath);
 			return error("SOURCE_FINALIZE_FAILED", 503);
 		} else {
 			return error("SOURCE_FINALIZE_FAILED", 503);
@@ -143,7 +144,7 @@ export async function POST(request: Request): Promise<Response> {
 	if (rawDeleteError === null) {
 		await service.rpc("mark_ai_source_raw_deleted", {
 			p_owner_user_id: authData.user.id,
-			p_upload_id: body.uploadId,
+			p_upload_id: uploadId,
 		});
 	}
 	return NextResponse.json(readyResponse);

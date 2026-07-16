@@ -657,6 +657,26 @@ describe("S-11 commit and queue integration", () => {
 		expect(routeBoundary.remove).not.toHaveBeenCalled();
 	});
 
+	it("R14-F1 complete canonicalizes an uppercase UUID before every downstream boundary", async () => {
+		const uploadId = "A0B1C2D3-E4F5-4678-9ABC-DEF012345678";
+		const { POST } = await import("../../../../frontend/app/api/ai/imports/sources/complete/route");
+		const response = await POST(
+			new Request("http://local/api/ai/imports/sources/complete", {
+				method: "POST",
+				body: JSON.stringify({ uploadId }),
+			})
+		);
+		expect(response.status).toBe(404);
+		expect(routeBoundary.from).toHaveBeenCalledTimes(1);
+		expect(routeBoundary.from.mock.results[0]?.value.eq).toHaveBeenCalledWith(
+			"id",
+			uploadId.toLowerCase()
+		);
+		expect(routeBoundary.rpc).not.toHaveBeenCalled();
+		expect(routeBoundary.upload).not.toHaveBeenCalled();
+		expect(routeBoundary.remove).not.toHaveBeenCalled();
+	});
+
 	it("R13-F1 reconciles a committed mark-ready response loss before any Storage delete", async () => {
 		const [route, migration] = await Promise.all([
 			readFile(
@@ -806,6 +826,56 @@ describe("S-11 commit and queue integration", () => {
 		expect(jobs).toContain("supabase_migrations.schema_migrations");
 		expect(jobs).toContain("after_expand_tables");
 		expect(jobs).toContain("after_runtime_functions");
+	});
+
+	it("R14-F2 failure migration uses psql stdin file autocommit and verifies each durable boundary", async () => {
+		const [jobs, toolkit] = await Promise.all([
+			readFile(new URL("./helpers/s11-db-jobs.ts", import.meta.url), "utf8"),
+			readFile(
+				new URL(
+					"../../S-10-ai-card-import-foundation/tests/helpers/s10-db-testkit.ts",
+					import.meta.url
+				),
+				"utf8"
+			),
+		]);
+		expect(jobs).toContain("runS10PsqlAutocommitScript");
+		expect(jobs).toContain("assertAutocommitFailureState(databaseUrl, failpoint, baselineNonServiceAcl)");
+		expect(jobs).toContain("procedures.prosecdef");
+		expect(jobs).toContain("aclexplode(COALESCE(procedures.proacl");
+		expect(jobs).toContain("roles.rolname IN ('anon','authenticated')");
+		expect(jobs).toContain("roles.rolname='service_role'");
+		expect(jobs).toContain("after_expand_tables");
+		expect(jobs).toContain("after_runtime_functions");
+		expect(jobs).toContain("before_core_commit");
+		expect(toolkit).toMatch(/psql[\s\S]+"-f",\s*"-"/u);
+	});
+
+	it("R14-F3 commit reads the preview secret only through the typed environment layer", async () => {
+		const [route, environment] = await Promise.all([
+			readFile(
+				new URL("../../../../frontend/app/api/ai/imports/commit/route.ts", import.meta.url),
+				"utf8"
+			),
+			readFile(new URL("../../../../frontend/src/lib/env.ts", import.meta.url), "utf8"),
+		]);
+		expect(route).not.toContain("process.env.AI_PREVIEW_HMAC_SECRET");
+		expect(route).toContain("getAiPreviewHmacSecret()");
+		expect(environment).toContain('"AI_PREVIEW_HMAC_SECRET"');
+		expect(environment).toContain("getAiPreviewHmacSecret");
+		const { POST } = await import("../../../../frontend/app/api/ai/imports/commit/route");
+		for (const [suffix, configuredSecret] of [
+			["missing-secret", undefined],
+			["blank-secret", "   "],
+		] as const) {
+			const request = await validCommitRequest(suffix);
+			if (configuredSecret === undefined) delete process.env.AI_PREVIEW_HMAC_SECRET;
+			else process.env.AI_PREVIEW_HMAC_SECRET = configuredSecret;
+			const response = await POST(request);
+			expect(response.status).toBe(500);
+			expect(await response.json()).toEqual({ error: { code: "INTERNAL_ERROR" } });
+		}
+		expect(routeBoundary.rpc).not.toHaveBeenCalled();
 	});
 
 	it("R13-F3 schedule migration denies PUBLIC before creating SECURITY DEFINER functions", async () => {
@@ -2488,7 +2558,7 @@ describe("S-11 reviewer regression boundaries", () => {
 			/AND NOT \(\s*uploads\.source_storage_path IS NOT NULL[\s\S]+uploads\.status IN \('prepared','ready','consumed','cleanup_pending','cleaning'\)\s*\)/u
 		);
 		expect(route).toContain('service.rpc("mark_ai_source_write_intent"');
-		expect(route).toContain("await markCleanup(service, authData.user.id, body.uploadId, sourcePath)");
+		expect(route).toContain("await markCleanup(service, authData.user.id, uploadId, sourcePath)");
 		expect(realGate).toContain("source-and-raw-first-run");
 	});
 

@@ -389,7 +389,7 @@ git status --short
 | AC-08 concept失敗分離 | T1-04, T4-02 | - | F-08 fail-closed PostgreSQL pair-failure/sibling-success | E2E-04 (local) |
 | AC-09 ログ秘匿 | T2-03, T5-01 | #15 | IT-25 | E2E-10 |
 
-数量gateは現行Unit 23件、Integration 195件、E2E 10件である。93/102/110/127/139/142/147/153/154/155/162/163/168/179/181/189 Integrationは各変更履歴時点のhistorical inventoryでありcurrent evidenceではない。R13-F1〜F5はresponse-loss reconciliation、autocommit recovery、default privilege、schedule value validation、run-scoped residueへ接続する。R12-F1〜F5はcompletion/cleanup競合、入力境界、段階migration、resource secret、3 DB分離品質gateへ接続する。cycle 7 R11-F1/F2はQueue RPCのempty/malformed分離とoutbox safe-code runtime allowlistへ接続し、R11-R2-F2はactual prepare routeの5件受理/6件副作用前拒否へ接続する。cycle 6 R10-F1/F2は全production lock pathのcards→illustrations→tracking順、bounded complete/attach concurrency、provider cancellation-safe oversize classificationへ接続する。review-attempt-1 R10-R1-F1はS-10 different-key attachのOLD+NEW一括canonical lockとA↔B二順序gateへ接続する。review-attempt-2 R10-R2-F1/F2はcaller JWT lifecycle authorityとterminal outbox fault後のsource releaseへ接続する。
+数量gateは現行Unit 23件、Integration 198件、E2E 10件である。93/102/110/127/139/142/147/153/154/155/162/163/168/179/181/189/195 Integrationは各変更履歴時点のhistorical inventoryでありcurrent evidenceではない。R14-F1〜F3はtrue autocommit、global default privilege、canonical UUID、typed preview secretへ接続する。R13-F1〜F5はresponse-loss reconciliation、autocommit recovery、default privilege、schedule value validation、run-scoped residueへ接続する。R12-F1〜F5はcompletion/cleanup競合、入力境界、段階migration、resource secret、3 DB分離品質gateへ接続する。cycle 7 R11-F1/F2はQueue RPCのempty/malformed分離とoutbox safe-code runtime allowlistへ接続し、R11-R2-F2はactual prepare routeの5件受理/6件副作用前拒否へ接続する。cycle 6 R10-F1/F2は全production lock pathのcards→illustrations→tracking順、bounded complete/attach concurrency、provider cancellation-safe oversize classificationへ接続する。review-attempt-1 R10-R1-F1はS-10 different-key attachのOLD+NEW一括canonical lockとA↔B二順序gateへ接続する。review-attempt-2 R10-R2-F1/F2はcaller JWT lifecycle authorityとterminal outbox fault後のsource releaseへ接続する。
 
 ## Rollback・compensation
 
@@ -633,6 +633,13 @@ current R12 remediation or any hosted gate is approved.
 - [x] R13-F5: strict run scope/advisory leaseでstale residueだけを除去し、active concurrent/malformed prefixを保護し、current-scope residueを終了時にfail closed検証する。
 - [x] malformed upload UUIDをservice DB/Storage前400にし、DB safety 23/23、full quality、external 7件`not_run`/exit 2を再確認する。
 
+## True-autocommit review remediation cycle 10
+
+- [x] `psql -f -`でproduction同等のstatement-level autocommitを再現し、3 failpointのpartial DDL/constraint/policy/trigger/grant/ACL/ledgerを新sessionで検査する。
+- [x] schema-localでは無効だったdefault function privilege revokeをglobal revokeへ修正し、中断時PUBLIC executeを実DBで拒否する。
+- [x] uppercase UUIDを入力直後lowercase canonical化し、typed env layerへpreview HMAC secretを集約する。
+- [x] full isolated qualityをexit 0にし、hosted gateをPR本文の明示留保かつmerge blockerとして維持する。
+
 ## 変更履歴
 
 | 日付 | 版 | status | 変更内容 |
@@ -656,3 +663,4 @@ current R12 remediation or any hosted gate is approved.
 | 2026-07-16 | 2.0.4 | quality_review | cycle 6 review 1 remediation、current Integration 163、S-10 OLD+NEW canonical attach/cross-swap gateを反映 |
 | 2026-07-16 | 2.0.5 | quality_review | cycle 6 review 2 remediation、current Integration 168、JWT lifecycle fence/post-terminal outbox source releaseを反映 |
 | 2026-07-16 | 2.0.7 | remediation | ship review R13-F1〜F5、current Integration 195、autocommit recovery、privilege/schedule/residue hardeningを反映 |
+| 2026-07-16 | 2.0.8 | remediation | R14-F1〜F3、current Integration 198、true autocommit/global default privilege/UUID/env hardeningを反映 |

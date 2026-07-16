@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 
 export type S10ActorKind = "ownerA" | "ownerB" | "anonymous" | "service";
 
@@ -314,6 +314,39 @@ export async function runS10Psql(databaseUrl: string, sql: string): Promise<stri
 				resolve(stdout);
 			}
 		);
+	});
+}
+
+export async function runS10PsqlAutocommitScript(
+	databaseUrl: string,
+	sql: string
+): Promise<string> {
+	return await new Promise((resolve, reject) => {
+		const child = spawn(
+			"psql",
+			[databaseUrl, "-v", "ON_ERROR_STOP=1", "-X", "-A", "-t", "-q", "-f", "-"],
+			{
+				stdio: ["pipe", "pipe", "pipe"],
+				env: { ...process.env, PGAPPNAME: "s10-ai-card-import-autocommit-tests" },
+			}
+		);
+		let stdout = "";
+		let stderr = "";
+		child.stdout.setEncoding("utf8");
+		child.stderr.setEncoding("utf8");
+		child.stdout.on("data", (chunk) => {
+			stdout += chunk;
+		});
+		child.stderr.on("data", (chunk) => {
+			stderr += chunk;
+		});
+		child.once("error", () => reject(new S10DatabaseCommandError(null)));
+		child.once("close", (code, signal) => {
+			if (code === 0 && signal === null) resolve(stdout);
+			else reject(new S10DatabaseCommandError(code, stderr));
+		});
+		child.stdin.on("error", () => undefined);
+		child.stdin.end(sql);
 	});
 }
 

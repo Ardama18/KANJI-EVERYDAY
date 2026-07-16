@@ -7,7 +7,7 @@ SET statement_timeout = '15min';
 -- PostgreSQL grants EXECUTE on new functions to PUBLIC by default. Deny that
 -- before the first CREATE FUNCTION so an autocommit interruption cannot expose
 -- a partially installed SECURITY DEFINER surface.
-ALTER DEFAULT PRIVILEGES IN SCHEMA public
+ALTER DEFAULT PRIVILEGES
 	REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 
 CREATE EXTENSION IF NOT EXISTS pgmq;

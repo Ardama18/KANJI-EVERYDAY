@@ -3,6 +3,7 @@ type RequiredEnvKey =
 	| "NEXT_PUBLIC_SUPABASE_ANON_KEY"
 	| "SUPABASE_SERVICE_ROLE_KEY";
 type OptionalEnvKey = "GEMINI_API_KEY";
+type RouteSecretEnvKey = "AI_PREVIEW_HMAC_SECRET";
 
 export type EnvConfig = {
 	supabaseUrl: string;
@@ -32,6 +33,15 @@ const getOptionalEnv = (key: OptionalEnvKey): string | undefined => {
 
 	return trimmedValue.length > 0 ? trimmedValue : undefined;
 };
+
+const getRouteSecret = (key: RouteSecretEnvKey): string | undefined => {
+	const value = process.env[key]?.trim();
+	return value === undefined || value.length === 0 ? undefined : value;
+};
+
+export function getAiPreviewHmacSecret(): string | undefined {
+	return getRouteSecret("AI_PREVIEW_HMAC_SECRET");
+}
 
 export function requireEnv(keys: readonly RequiredEnvKey[]): void {
 	const missingKeys = keys.filter((key) => {

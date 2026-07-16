@@ -5,6 +5,7 @@ import { hashImportRequest } from "@/lib/ai-import/canonical-request";
 import { mapAiImportError } from "@/lib/ai-import/errors";
 import { PreviewTokenError, verifyPreviewToken } from "@/lib/ai-import/preview-token";
 import { validateImportRequest } from "@/lib/ai-import/schema";
+import { getAiPreviewHmacSecret } from "@/lib/env";
 import { createServerClient, createServiceRoleClient } from "@/lib/supabase/server";
 
 export async function POST(request: Request): Promise<Response> {
@@ -37,8 +38,8 @@ export async function POST(request: Request): Promise<Response> {
 			return safeError(validated.code, validated.code === "DUPLICATE_IN_REQUEST" ? 409 : 400);
 		if ((await hashImportRequest(validated.data)) !== importRequestHash)
 			return safeError("VALIDATION_ERROR", 400);
-		const secret = process.env.AI_PREVIEW_HMAC_SECRET?.trim();
-		if (secret === undefined || secret.length === 0) return safeError("INTERNAL_ERROR", 500);
+		const secret = getAiPreviewHmacSecret();
+		if (secret === undefined) return safeError("INTERNAL_ERROR", 500);
 		try {
 			await verifyPreviewToken(
 				previewToken,
