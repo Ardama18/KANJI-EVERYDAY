@@ -54,24 +54,37 @@ export async function runActiveCleanups(activeCleanups) {
 }
 
 const QUALITY_BASE_REF_PATTERN = /^(?!.*(?:\.\.|@\{|\/\/))[A-Za-z0-9][A-Za-z0-9._\/-]{0,255}$/u;
-const COMMIT_SHA_PATTERN = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/u;
+const FULL_SHA1_PATTERN = /^[0-9a-f]{40}$/iu;
+const HEX_OBJECT_ID_PATTERN = /^[0-9a-f]+$/iu;
+const RESOLVED_COMMIT_SHA_PATTERN = /^[0-9a-f]{40}$/u;
+const RESOLVED_REF_PATTERN = /^refs\/(?!.*(?:\.\.|@\{|\/\/))[A-Za-z0-9][A-Za-z0-9._\/-]{0,255}$/u;
 
 export async function resolveQualityDiffBase(
 	environment = process.env,
-	resolveCommit = resolveGitCommit
+	resolvers = {}
 ) {
+	const resolveFullCommit = resolvers.resolveFullCommit ?? resolveGitFullCommit;
+	const resolveRef = resolvers.resolveRef ?? resolveGitRefCommit;
 	const configuredInput = environment.QUALITY_DIFF_BASE;
 	if (configuredInput !== undefined) {
 		const configured = configuredInput.trim();
-		if (configured.length === 0 || !QUALITY_BASE_REF_PATTERN.test(configured)) {
+		if (configured.length === 0) {
 			throw new Error("Invalid quality diff base");
 		}
-		const resolved = await resolveCommit(configured);
+		if (HEX_OBJECT_ID_PATTERN.test(configured)) {
+			if (!FULL_SHA1_PATTERN.test(configured)) throw new Error("Invalid quality diff base");
+			const canonicalCommit = configured.toLowerCase();
+			const resolved = await resolveFullCommit(canonicalCommit);
+			if (resolved !== canonicalCommit) throw new Error("Unable to resolve quality diff base");
+			return resolved;
+		}
+		if (!QUALITY_BASE_REF_PATTERN.test(configured)) throw new Error("Invalid quality diff base");
+		const resolved = await resolveRef(configured);
 		if (resolved === undefined) throw new Error("Unable to resolve quality diff base");
 		return resolved;
 	}
 	for (const candidate of ["origin/main", "main"]) {
-		const resolved = await resolveCommit(candidate);
+		const resolved = await resolveRef(candidate);
 		if (resolved !== undefined) return resolved;
 	}
 	throw new Error("Unable to resolve quality diff base");
@@ -274,8 +287,28 @@ async function runQualityPhases({ freshUrl, upgradeUrl, failureUrl }) {
 }
 
 async function resolveGitCommit(ref) {
+	return await resolveSingleGitLine(
+		["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`],
+		RESOLVED_COMMIT_SHA_PATTERN
+	);
+}
+
+async function resolveGitFullCommit(commit) {
+	return await resolveGitCommit(commit);
+}
+
+async function resolveGitRefCommit(ref) {
+	const resolvedRef = await resolveSingleGitLine(
+		["rev-parse", "--symbolic-full-name", "--verify", "--end-of-options", ref],
+		RESOLVED_REF_PATTERN
+	);
+	if (resolvedRef === undefined) return undefined;
+	return await resolveGitCommit(resolvedRef);
+}
+
+async function resolveSingleGitLine(arguments_, outputPattern) {
 	return await new Promise((resolve) => {
-		const child = spawn("git", ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`], {
+		const child = spawn("git", arguments_, {
 			stdio: ["ignore", "pipe", "ignore"],
 		});
 		let output = "";
@@ -285,8 +318,8 @@ async function resolveGitCommit(ref) {
 		});
 		child.once("error", () => resolve(undefined));
 		child.once("close", (code, signal) => {
-			const sha = output.trim().toLowerCase();
-			resolve(code === 0 && signal === null && COMMIT_SHA_PATTERN.test(sha) ? sha : undefined);
+			const value = output.trim();
+			resolve(code === 0 && signal === null && outputPattern.test(value) ? value : undefined);
 		});
 	});
 }

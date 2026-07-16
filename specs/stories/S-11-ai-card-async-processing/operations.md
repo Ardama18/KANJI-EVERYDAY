@@ -1,6 +1,6 @@
 # S-11 operations and rollback runbook
 
-Current cycle-12 verification state: `hosted 7 not_run; merge blocked`. Local boundary
+Current cycle-13 verification state: `hosted 7 not_run; merge blocked`. Local boundary
 E2E, isolated PostgreSQL, and code-readiness results do not complete hosted
 full-system E2E or authorize merge.
 
@@ -291,3 +291,11 @@ Age cleanup is exact: source/orphan rows are protected through 23:59:59 and beco
 - The actual prepared completion route accepts an uppercase valid UUID and proves its lowercase canonical UUID/path at both lookup predicates, source fetch/upload/removal, every ready/reconciliation/raw-delete RPC, cleanup RPC, and the 200 ready response. A write-intent failure also targets only the canonical cleanup identity/path.
 - DB safety passed 25/25 and the concurrent real database lifecycle harness passed. The explicit-`main` root runner passed fresh, upgrade, true-autocommit failure, local real PostgreSQL, lint 97 files, typecheck, configured build with existing warnings, ordinary Vitest 672 passed/8 conditional skips of 680 definitions, S-11 inventory 233/233 (Unit 23, Integration 200, E2E 10), focused 53/53, committed `base...HEAD`, and worktree diff checks.
 - Fresh, upgrade, failure, hosted real integration, hosted real E2E, resource, and Deno were separately rerun without prerequisites. All seven emitted structured `not_run` and exit 2; none is a pass. Verification remains `hosted 7 not_run; merge blocked`.
+
+## Final ship review remediation cycle 13 (2026-07-16)
+
+- This repository reports `sha1` object format, so a raw `QUALITY_DIFF_BASE` object ID must contain exactly 40 hexadecimal characters and resolve to that same commit. Shortened current/base IDs and every other hex length are rejected before Git resolution.
+- Ref inputs are resolved first with Git symbolic-full-name semantics and must produce one existing full `refs/...` name. `HEAD`, local branches, remote-tracking branches, and full ref names are supported; revision expressions, object names, blank/shell-like input, ambiguous/unresolved refs, and detached non-ref names fail closed.
+- Default selection remains deterministic `origin/main` then `main`. The committed diff still runs as `git diff --check <resolved-sha>...HEAD`, followed by an independent worktree check.
+- Red reproduced four failing safety contracts; Green passed DB safety 27/27. The explicit-`main` root runner passed fresh/upgrade/failure/local-real, lint 97 files, typecheck, configured build with existing warnings, ordinary Vitest 672 passed/8 conditional skips of 680 definitions, S-11 inventory 233/233, focused 53/53, committed diff, and worktree diff. The real concurrent lifecycle harness passed and final strict-prefix database residue was 0.
+- Hosted real integration/E2E, resource, Deno, and three direct database prerequisite gates remain `not_run`/exit 2 until their explicit prerequisites are supplied. Verification remains `hosted 7 not_run; merge blocked`.

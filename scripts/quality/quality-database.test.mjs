@@ -189,33 +189,111 @@ test("repository quality provisions three distinct S-11 migration databases", as
 	assert.match(runner, /worktree diff whitespace validation/u);
 });
 
-test("quality diff base resolves explicit refs to a commit without shell interpretation", async () => {
-	const calls = [];
+test("quality diff base resolves only existing refs or a full SHA-1 commit", async () => {
+	const refCalls = [];
+	const commitCalls = [];
 	const sha = "a".repeat(40);
-	assert.equal(
-		await resolveQualityDiffBase({ QUALITY_DIFF_BASE: "refs/remotes/origin/main" }, async (ref) => {
-			calls.push(ref);
-			return sha;
-		}),
-		sha
-	);
-	assert.deepEqual(calls, ["refs/remotes/origin/main"]);
-	assert.equal(
-		await resolveQualityDiffBase({ QUALITY_DIFF_BASE: sha }, async (ref) =>
-			ref === sha ? sha : undefined
+	const resolvers = {
+		resolveFullCommit: async (commit) => {
+			commitCalls.push(commit);
+			return commit === sha ? sha : undefined;
+		},
+		resolveRef: async (ref) => {
+			refCalls.push(ref);
+			return ["HEAD", "main", "origin/main", "refs/remotes/origin/main"].includes(ref)
+				? sha
+				: undefined;
+		},
+	};
+	for (const ref of ["HEAD", "main", "origin/main", "refs/remotes/origin/main"]) {
+		assert.equal(await resolveQualityDiffBase({ QUALITY_DIFF_BASE: ref }, resolvers), sha);
+	}
+	assert.deepEqual(refCalls, ["HEAD", "main", "origin/main", "refs/remotes/origin/main"]);
+	assert.equal(await resolveQualityDiffBase({ QUALITY_DIFF_BASE: sha }, resolvers), sha);
+	assert.deepEqual(commitCalls, [sha]);
+	await assert.rejects(
+		resolveQualityDiffBase(
+			{ QUALITY_DIFF_BASE: "b".repeat(40) },
+			{ ...resolvers, resolveFullCommit: async () => sha }
 		),
-		sha
-	);
-	await assert.rejects(
-		resolveQualityDiffBase({ QUALITY_DIFF_BASE: "missing-safe-ref" }, async () => undefined),
 		/quality diff base/u
 	);
 	await assert.rejects(
-		resolveQualityDiffBase({ QUALITY_DIFF_BASE: "main;touch /tmp/injected" }, async () => sha),
+		resolveQualityDiffBase({ QUALITY_DIFF_BASE: "missing-safe-ref" }, resolvers),
+		/quality diff base/u
+	);
+	assert.deepEqual(refCalls.at(-1), "missing-safe-ref");
+});
+
+test("quality diff base rejects abbreviated OIDs and revision expressions before resolution", async () => {
+	const calls = [];
+	const resolvers = {
+		resolveFullCommit: async (value) => {
+			calls.push(["commit", value]);
+			return "a".repeat(40);
+		},
+		resolveRef: async (value) => {
+			calls.push(["ref", value]);
+			return "a".repeat(40);
+		},
+	};
+	for (const value of [
+		"9d49eeb",
+		"45969b1",
+		...Array.from({ length: 36 }, (_, index) => "a".repeat(index + 4)),
+		...Array.from({ length: 23 }, (_, index) => "a".repeat(index + 41)),
+		"a".repeat(64),
+		"HEAD~1",
+		"main^{commit}",
+		"main:README.md",
+	]) {
+		await assert.rejects(
+			resolveQualityDiffBase({ QUALITY_DIFF_BASE: value }, resolvers),
+			/quality diff base/u
+		);
+	}
+	assert.deepEqual(calls, []);
+	await assert.rejects(
+		resolveQualityDiffBase({ QUALITY_DIFF_BASE: "main;touch /tmp/injected" }, resolvers),
 		/quality diff base/u
 	);
 	await assert.rejects(
-		resolveQualityDiffBase({ QUALITY_DIFF_BASE: "   " }, async () => sha),
+		resolveQualityDiffBase({ QUALITY_DIFF_BASE: "   " }, resolvers),
+		/quality diff base/u
+	);
+	assert.deepEqual(calls, []);
+});
+
+test("quality diff base resolves real symbolic, local, remote-tracking, and full SHA inputs", async () => {
+	for (const ref of [
+		"HEAD",
+		"main",
+		"origin/main",
+		"refs/heads/main",
+		"refs/remotes/origin/main",
+	]) {
+		assert.match(await resolveQualityDiffBase({ QUALITY_DIFF_BASE: ref }), /^[0-9a-f]{40}$/u);
+	}
+	const head = await resolveQualityDiffBase({ QUALITY_DIFF_BASE: "HEAD" });
+	assert.equal(await resolveQualityDiffBase({ QUALITY_DIFF_BASE: head }), head);
+	await assert.rejects(
+		resolveQualityDiffBase({ QUALITY_DIFF_BASE: head.slice(0, 12) }),
+		/quality diff base/u
+	);
+	await assert.rejects(
+		resolveQualityDiffBase({ QUALITY_DIFF_BASE: "45969b1" }),
+		/quality diff base/u
+	);
+	await assert.rejects(
+		resolveQualityDiffBase({ QUALITY_DIFF_BASE: "HEAD~1" }),
+		/quality diff base/u
+	);
+	await assert.rejects(
+		resolveQualityDiffBase({ QUALITY_DIFF_BASE: "main^{commit}" }),
+		/quality diff base/u
+	);
+	await assert.rejects(
+		resolveQualityDiffBase({ QUALITY_DIFF_BASE: "main:README.md" }),
 		/quality diff base/u
 	);
 });
@@ -224,14 +302,23 @@ test("quality diff base deterministically falls back to origin/main then main an
 	const sha = "b".repeat(40);
 	const calls = [];
 	assert.equal(
-		await resolveQualityDiffBase({}, async (ref) => {
-			calls.push(ref);
-			return ref === "main" ? sha : undefined;
+		await resolveQualityDiffBase({}, {
+			resolveFullCommit: async () => undefined,
+			resolveRef: async (ref) => {
+				calls.push(ref);
+				return ref === "main" ? sha : undefined;
+			},
 		}),
 		sha
 	);
 	assert.deepEqual(calls, ["origin/main", "main"]);
-	await assert.rejects(resolveQualityDiffBase({}, async () => undefined), /quality diff base/u);
+	await assert.rejects(
+		resolveQualityDiffBase({}, {
+			resolveFullCommit: async () => undefined,
+			resolveRef: async () => undefined,
+		}),
+		/quality diff base/u
+	);
 });
 
 test("signal cleanup attempts every active database in reverse order before failing", async () => {
