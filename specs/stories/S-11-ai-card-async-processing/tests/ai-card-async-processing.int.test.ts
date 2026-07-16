@@ -878,6 +878,43 @@ describe("S-11 commit and queue integration", () => {
 		expect(routeBoundary.rpc).not.toHaveBeenCalled();
 	});
 
+	it("R15-F1 swaps legacy and S-11 upload constraints in one atomic ALTER boundary", async () => {
+		const [migration, jobs] = await Promise.all([
+			readFile(new URL("../../../../supabase/migrations/20260715000000_s11_ai_card_async_processing.sql", import.meta.url), "utf8"),
+			readFile(new URL("./helpers/s11-db-jobs.ts", import.meta.url), "utf8"),
+		]);
+		const swap = migration.slice(
+			migration.indexOf("ALTER TABLE public.ai_uploads\n  DROP CONSTRAINT IF EXISTS ai_uploads_status_check"),
+			migration.indexOf("CREATE TABLE IF NOT EXISTS public.ai_import_concept_jobs")
+		);
+		expect(swap).toContain("ADD CONSTRAINT ai_uploads_s11_status_check");
+		expect(swap).toContain("ADD CONSTRAINT ai_uploads_s11_status_time_check");
+		expect(migration).toContain("before_constraint_swap");
+		expect(jobs).toContain('"before_constraint_swap"');
+		expect(jobs).toContain("ai_uploads_status_check");
+		expect(jobs).toContain("ai_uploads_s11_status_check");
+		expect(jobs).toContain("atomic_swap_error");
+	});
+
+	it("R15-F2 readiness SSOT separates local boundaries from hosted merge acceptance", async () => {
+		const [meta, plan, traceability, operations] = await Promise.all([
+			readFile(new URL("../meta.json", import.meta.url), "utf8"),
+			readFile(new URL("../plan.md", import.meta.url), "utf8"),
+			readFile(new URL("../traceability.md", import.meta.url), "utf8"),
+			readFile(new URL("../operations.md", import.meta.url), "utf8"),
+		]);
+		const parsedMeta = JSON.parse(meta) as Record<string, unknown>;
+		expect(parsedMeta.remediation_cycle).toBe(11);
+		expect(parsedMeta.ssot_version).toBe("2.0.9");
+		expect(parsedMeta.verification_state).toBe("hosted_7_not_run_merge_blocked");
+		expect(meta).not.toMatch(/ready_for_commit|zero_findings|approved/u);
+		expect(plan).toContain("version: 2.0.9");
+		expect(traceability).toContain("version: 2.0.9");
+		expect(plan).toContain("[x] **T6-01L: local boundary E2E");
+		expect(plan).toContain("[ ] **T6-01H: hosted full-system E2E");
+		expect(operations).toContain("verification state: `hosted 7 not_run; merge blocked`");
+	});
+
 	it("R13-F3 schedule migration denies PUBLIC before creating SECURITY DEFINER functions", async () => {
 		const schedule = await readFile(
 			new URL(

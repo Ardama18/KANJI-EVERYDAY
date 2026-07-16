@@ -56,6 +56,7 @@ export async function runS11DatabaseJob(
 			await runS10Psql(databaseUrl, NON_SERVICE_SECURITY_DEFINER_ACL_SQL)
 		).trim();
 		for (const failpoint of [
+			"before_constraint_swap",
 			"after_expand_tables",
 			"after_runtime_functions",
 			"before_core_commit",
@@ -71,6 +72,22 @@ export async function runS11DatabaseJob(
 			}
 			if (!failed) throw new Error(`S-11 ${failpoint} injection unexpectedly completed`);
 			await assertAutocommitFailureState(databaseUrl, failpoint, baselineNonServiceAcl);
+			if (failpoint === "before_constraint_swap") {
+				let atomicSwapFailed = false;
+				try {
+					await runS10PsqlAutocommitScript(
+						databaseUrl,
+						`ALTER TABLE public.ai_uploads
+							DROP CONSTRAINT ai_uploads_status_check,
+							ADD CONSTRAINT ai_uploads_s11_status_check CHECK (true) NOT VALID,
+							ADD CONSTRAINT ai_uploads_s11_status_check CHECK (true) NOT VALID;`
+					);
+				} catch {
+					atomicSwapFailed = true;
+				}
+				if (!atomicSwapFailed) throw new Error("S-11 atomic_swap_error injection completed");
+				await assertAutocommitFailureState(databaseUrl, failpoint, baselineNonServiceAcl);
+			}
 		}
 		await runS10PsqlAutocommitScript(databaseUrl, migration);
 		await backfillAndValidate(databaseUrl);
@@ -96,25 +113,36 @@ export async function runS11DatabaseJob(
 
 async function assertAutocommitFailureState(
 	databaseUrl: string,
-	failpoint: "after_expand_tables" | "after_runtime_functions" | "before_core_commit",
+	failpoint:
+		| "before_constraint_swap"
+		| "after_expand_tables"
+		| "after_runtime_functions"
+		| "before_core_commit",
 	baselineNonServiceAcl: string
 ): Promise<void> {
-	const expectsRuntime = failpoint !== "after_expand_tables";
+	const expectsExpand = failpoint !== "before_constraint_swap";
+	const expectsRuntime = ["after_runtime_functions", "before_core_commit"].includes(failpoint);
 	const expectsFinalGrants = failpoint === "before_core_commit";
+	const constraintState = expectsExpand
+		? `EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.ai_uploads'::regclass
+			AND conname='ai_uploads_s11_status_check' AND NOT convalidated)
+			AND NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.ai_uploads'::regclass
+				AND conname IN ('ai_uploads_status_check','ai_uploads_status_time_check'))`
+		: `(SELECT count(*)=2 FROM pg_constraint WHERE conrelid='public.ai_uploads'::regclass
+			AND conname IN ('ai_uploads_status_check','ai_uploads_status_time_check'))
+			AND NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.ai_uploads'::regclass
+				AND conname='ai_uploads_s11_status_check')`;
 	const result = await runS10Psql(
 		databaseUrl,
 		`SELECT (
 			NOT EXISTS (
 				SELECT 1 FROM supabase_migrations.schema_migrations
 				WHERE version='20260715000000'
-			) AND to_regclass('public.ai_import_concept_jobs') IS NOT NULL
-			AND EXISTS (
-				SELECT 1 FROM pg_constraint
-				WHERE conrelid='public.ai_uploads'::regclass
-					AND conname='ai_uploads_s11_status_check' AND NOT convalidated
-			) AND EXISTS (
-				SELECT 1 FROM pg_policy WHERE polname='ai_import_concept_jobs_select_owner'
-			) AND NOT has_table_privilege('authenticated','public.ai_import_concept_jobs','INSERT')
+			) AND (to_regclass('public.ai_import_concept_jobs') IS NOT NULL) = ${expectsExpand}
+			AND (${constraintState})
+			AND (EXISTS (SELECT 1 FROM pg_policy
+				WHERE polname='ai_import_concept_jobs_select_owner')) = ${expectsExpand}
+			AND (${expectsExpand ? "NOT has_table_privilege('authenticated','public.ai_import_concept_jobs','INSERT')" : "true"})
 			AND ((SELECT count(*) FROM pg_trigger
 				WHERE tgname IN ('ai_s11_sync_upload_compat','ai_s11_track_card_reference_removal',
 					'ai_s11_guard_illustration_lifecycle','ai_s11_guard_illustration_reference')

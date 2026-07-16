@@ -2,14 +2,14 @@
 id: S-11
 feature: ai-card-async-processing
 type: traceability
-version: 2.0.6
+version: 2.0.9
 created: 2026-07-15
 updated: 2026-07-16
-status: quality_review
+status: implementation_review
 requirements: specs/stories/S-11-ai-card-async-processing/requirements.md@2.0.5
 adr: specs/adr/ADR-008-ai-card-async-queue-image-processing.md@2.0.5
 design: specs/stories/S-11-ai-card-async-processing/design.md@2.0.5
-plan: specs/stories/S-11-ai-card-async-processing/plan.md@2.0.5
+plan: specs/stories/S-11-ai-card-async-processing/plan.md@2.0.9
 ---
 
 # S-11 implementation traceability
@@ -28,7 +28,7 @@ plan: specs/stories/S-11-ai-card-async-processing/plan.md@2.0.5
 
 Integration includes authenticated routes, service-role RPC, provider HTTP, private Storage, recorded legacy/fresh buckets, shared-source ordering, cleanup lease recovery, pinned ImageMagick decode/re-encode, and finalize/failure reconciliation. `test:s11:real-integration`, `test:s11:real-e2e`, and `test:s11:resource` are fail-closed gates: missing real environment/fixtures produce `not_run` and exit 2, never a mock pass. Configured real E2E obtains owner A/B through Supabase password login, sends package-generated SSR cookies to Next routes, and uses access-token Authorization only for PostgREST RPC/RLS; rejection scenarios require the exact Next 404/`NOT_FOUND`, PostgREST 404/`PGRST202`, or Storage 400/`404`/`not_found` contract. The resource gate directly serves the exact self-contained local bundle plus pinned WASM, independently hashes/sizes both, measures spawned PID CPU/external RSS and codec peak RSS, enforces request abort/process kill at CPU/RSS/120-second limits, and exercises direct 16MP/decode-bomb/independent decode-failure plus OpenAI-adapter maximum response/110-second timeout cases.
 
-Fresh/upgrade/failure database jobs are also fail-closed when invoked directly: absent or non-distinct database URLs emit structured `not_run` and exit 2. The repository quality runner now provisions three distinct disposable databases and executes local core fresh/upgrade/failure plus the real two-session completion/cleanup race. Current inventory is Unit 23/23, Integration 198/198, E2E 10/10. Hosted `pg_cron`, real integration/E2E, resource artifact, and Deno gates remain explicit `not_run`/exit 2 until their target prerequisites exist; no local result promotes them to pass.
+Fresh/upgrade/failure database jobs are also fail-closed when invoked directly: absent or non-distinct database URLs emit structured `not_run` and exit 2. The repository quality runner now provisions three distinct disposable databases and executes local core fresh/upgrade/failure plus the real two-session completion/cleanup race. Current inventory is Unit 23/23, Integration 200/200, E2E 10/10. Hosted `pg_cron`, real integration/E2E, resource artifact, and Deno gates remain explicit `not_run`/exit 2 until their target prerequisites exist; no local result promotes them to pass.
 
 Fresh bounded remediation cycle 7 corrects only the three stale plan SSOT labels to current v2.0.5 and resets the independent review counter to attempt 1/3. Its repeatable documentation-consistency and unchanged-code regression evidence is recorded in `tasks/remediation-cycle-7.md`; the subsequent independent review outcome is recorded below.
 
@@ -131,6 +131,8 @@ Fresh remediation cycle 3 adds P3-01/P3-02 focused evidence: `worker_failure` is
 | R14-F1 | canonical completion UUID | uppercase valid UUID is normalized once before DB/path/RPC/response use; unresolved lookup performs no mutation RPC or Storage side effect |
 | R14-F2 | true statement-level autocommit recovery | `psql -f -` leaves and inspects each partial boundary in a new session, proves global default privilege safety, then converges through validate and one ledger row |
 | R14-F3 | typed preview HMAC environment access | commit route has no direct environment read; typed helper trims values and missing/blank route calls fail safely before RPC |
+| R15-F1 | atomic upload constraint replacement | one ALTER drops legacy/current names and adds S-11 NOT VALID checks; pre-swap interruption preserves both legacy checks in a new session before true-autocommit recovery |
+| R15-F2 | readiness SSOT | v2.0.9/cycle 11 states hosted 7 not_run and merge blocked; local boundary E2E is complete while hosted full-system E2E remains incomplete |
 
 ## Change history
 
@@ -157,3 +159,4 @@ Fresh remediation cycle 3 adds P3-01/P3-02 focused evidence: `worker_failure` is
 | 2026-07-16 | 2.0.6 | remediation | Mapped R12-F1–F5 and current 23/189/10 inventory; local DB/race evidence is separated from still-unrun hosted gates |
 | 2026-07-16 | 2.0.7 | remediation | Mapped R13-F1–F5 and current 23/195/10 inventory; response-loss, autocommit, privilege, schedule, and residue evidence added while hosted gates remain not_run |
 | 2026-07-16 | 2.0.8 | remediation | Mapped R14-F1–F3 and current 23/198/10 inventory; true autocommit, global default privilege, canonical UUID, and typed preview-secret evidence added |
+| 2026-07-16 | 2.0.9 | remediation | Mapped R15-F1/F2 and current 23/200/10 inventory; atomic constraint swap and hosted merge-blocked readiness SSOT added |

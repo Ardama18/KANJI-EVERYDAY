@@ -17,13 +17,6 @@ INSERT INTO storage.buckets (id, name, public, file_size_limit)
 VALUES ('ai-card-sources', 'ai-card-sources', false, 10485760)
 ON CONFLICT (id) DO UPDATE SET public = false, file_size_limit = 10485760;
 
-ALTER TABLE public.ai_uploads DROP CONSTRAINT IF EXISTS ai_uploads_status_check;
-ALTER TABLE public.ai_uploads DROP CONSTRAINT IF EXISTS ai_uploads_status_time_check;
-ALTER TABLE public.ai_uploads DROP CONSTRAINT IF EXISTS ai_uploads_s11_status_check;
-ALTER TABLE public.ai_uploads DROP CONSTRAINT IF EXISTS ai_uploads_s11_dimensions_check;
-ALTER TABLE public.ai_uploads DROP CONSTRAINT IF EXISTS ai_uploads_s11_digest_check;
-ALTER TABLE public.ai_uploads DROP CONSTRAINT IF EXISTS ai_uploads_s11_bucket_check;
-ALTER TABLE public.ai_uploads DROP CONSTRAINT IF EXISTS ai_uploads_s11_status_time_check;
 ALTER TABLE public.ai_uploads
   ADD COLUMN IF NOT EXISTS raw_storage_path text,
 	ADD COLUMN IF NOT EXISTS raw_storage_bucket text,
@@ -43,7 +36,22 @@ ALTER TABLE public.ai_uploads
   ADD COLUMN IF NOT EXISTS raw_cleanup_claimed_at timestamptz,
 	ADD COLUMN IF NOT EXISTS raw_cleanup_claim_token uuid;
 
+DO $$
+BEGIN
+	IF current_setting('app.s11_failpoint',true)='before_constraint_swap' THEN
+		RAISE EXCEPTION 'S-11 injected autocommit failure before constraint swap';
+	END IF;
+END;
+$$;
+
 ALTER TABLE public.ai_uploads
+  DROP CONSTRAINT IF EXISTS ai_uploads_status_check,
+	DROP CONSTRAINT IF EXISTS ai_uploads_status_time_check,
+	DROP CONSTRAINT IF EXISTS ai_uploads_s11_status_check,
+	DROP CONSTRAINT IF EXISTS ai_uploads_s11_dimensions_check,
+	DROP CONSTRAINT IF EXISTS ai_uploads_s11_digest_check,
+	DROP CONSTRAINT IF EXISTS ai_uploads_s11_bucket_check,
+	DROP CONSTRAINT IF EXISTS ai_uploads_s11_status_time_check,
   ADD CONSTRAINT ai_uploads_s11_status_check
     CHECK (status IN ('prepared', 'ready', 'consumed', 'cleanup_pending', 'cleaning', 'deleted')) NOT VALID,
   ADD CONSTRAINT ai_uploads_s11_dimensions_check CHECK (

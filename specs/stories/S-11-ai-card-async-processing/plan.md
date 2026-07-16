@@ -2,14 +2,14 @@
 id: S-11
 feature: ai-card-async-processing
 type: plan
-version: 2.0.5
+version: 2.0.9
 created: 2026-07-15
 updated: 2026-07-16
 based_on: specs/stories/S-11-ai-card-async-processing/design.md
 requirements: specs/stories/S-11-ai-card-async-processing/requirements.md
 adr: specs/adr/ADR-008-ai-card-async-queue-image-processing.md
 ui_design: none
-status: quality_review
+status: implementation_review
 ---
 
 # 作業計画書: AIカード非同期Queue・画像処理
@@ -25,7 +25,7 @@ status: quality_review
 - ADR: `specs/adr/ADR-008-ai-card-async-queue-image-processing.md` v2.0.5 Accepted
 - Design Doc: `specs/stories/S-11-ai-card-async-processing/design.md` v2.0.5 Approved
 - Unit suite: `specs/stories/S-11-ai-card-async-processing/tests/ai-card-async-processing.test.ts`（現行23件）
-- Integration suite: `specs/stories/S-11-ai-card-async-processing/tests/ai-card-async-processing.int.test.ts`（現行189件。127/139/142/147/153/154/155/162/163/168/179/181件は履歴値）
+- Integration suite: `specs/stories/S-11-ai-card-async-processing/tests/ai-card-async-processing.int.test.ts`（現行200件。127/139/142/147/153/154/155/162/163/168/179/181/189/195/198件は履歴値）
 - E2E suite: `specs/stories/S-11-ai-card-async-processing/tests/ai-card-async-processing.e2e.test.ts`（10件）
 - 先行実装: `supabase/migrations/20260714000000_s10_ai_card_import_foundation.sql`
 - 先行testkit: `specs/stories/S-10-ai-card-import-foundation/tests/helpers/s10-db-testkit.ts`, `s10-db-jobs.ts`
@@ -350,9 +350,12 @@ npx supabase functions deploy ai-card-import-cleanup --no-verify-jwt
 
 ### タスク
 
-- [x] **T6-01: E2E骨格10件を実装しfull-systemで実行する**
-  - テスト: E2E-01〜10を`it.todo`から実テストへ置換する。UI/Playwrightは追加せず、authenticated HTTP、実pgmq、local/staging Edge、private Storage、owner statusを通し、providerだけfake serverにする。
-  - 完了条件: 実装=10/10実行、品質=固定clock/failpoint後始末とsecret非使用、統合=2秒commit/reconnect/retry/restart/concept分離/source/共有削除/cleanup/log秘匿を端から端まで確認。
+- [x] **T6-01L: local boundary E2E 10件を実装・実行する**
+  - テスト: fixture/harnessを使うlocal boundary E2E-01〜10でworkflow契約と副作用境界を確認する。これはhosted Edge/Storage/認証を通すfull-system acceptanceではない。
+  - 完了条件: local 10/10 Green、固定clock/failpoint後始末とsecret非使用を確認する。
+- [ ] **T6-01H: hosted full-system E2Eを実行する**
+  - テスト: authenticated HTTP、実pgmq、hosted Edge、private Storage、owner statusを通し、providerだけbound fake serverにする。
+  - 完了条件: `test:s11:real-e2e`を含むhosted 7 gateがtarget prerequisites付きでpassする。現状は`not_run`/exit 2でmerge blocker。
 - [ ] **T6-02: 全品質ゲート、traceability、rollback/compensation rehearsalを完了する**
   - 実装: `traceability.md`にAC↔task↔Unit/IT/E2E↔証跡を確定し、`operations.md`で新規enqueue停止、schedule deactivate、Queue保持/監査、worker rollback、orphan補償、再開順を演習する。 populated DBに破壊的down migrationを適用せず、schema/job/message/trackingを保持して旧同期経路へ自動fallbackしない。
   - 完了条件: 実装=全ACの未対応0、品質=lint/typecheck/build/Unit 15+/Integration 25+/E2E 10+全Green、統合=deactivate中も既存status取得とQueue監査が可能で、再deploy→manual smoke→schedule再開順が再現可能。
@@ -389,7 +392,7 @@ git status --short
 | AC-08 concept失敗分離 | T1-04, T4-02 | - | F-08 fail-closed PostgreSQL pair-failure/sibling-success | E2E-04 (local) |
 | AC-09 ログ秘匿 | T2-03, T5-01 | #15 | IT-25 | E2E-10 |
 
-数量gateは現行Unit 23件、Integration 198件、E2E 10件である。93/102/110/127/139/142/147/153/154/155/162/163/168/179/181/189/195 Integrationは各変更履歴時点のhistorical inventoryでありcurrent evidenceではない。R14-F1〜F3はtrue autocommit、global default privilege、canonical UUID、typed preview secretへ接続する。R13-F1〜F5はresponse-loss reconciliation、autocommit recovery、default privilege、schedule value validation、run-scoped residueへ接続する。R12-F1〜F5はcompletion/cleanup競合、入力境界、段階migration、resource secret、3 DB分離品質gateへ接続する。cycle 7 R11-F1/F2はQueue RPCのempty/malformed分離とoutbox safe-code runtime allowlistへ接続し、R11-R2-F2はactual prepare routeの5件受理/6件副作用前拒否へ接続する。cycle 6 R10-F1/F2は全production lock pathのcards→illustrations→tracking順、bounded complete/attach concurrency、provider cancellation-safe oversize classificationへ接続する。review-attempt-1 R10-R1-F1はS-10 different-key attachのOLD+NEW一括canonical lockとA↔B二順序gateへ接続する。review-attempt-2 R10-R2-F1/F2はcaller JWT lifecycle authorityとterminal outbox fault後のsource releaseへ接続する。
+数量gateは現行Unit 23件、Integration 200件、E2E 10件である。93/102/110/127/139/142/147/153/154/155/162/163/168/179/181/189/195/198 Integrationは各変更履歴時点のhistorical inventoryでありcurrent evidenceではない。R15-F1/F2はatomic constraint swapとhosted merge-blocked SSOTへ接続する。R14-F1〜F3はtrue autocommit、global default privilege、canonical UUID、typed preview secretへ接続する。R13-F1〜F5はresponse-loss reconciliation、autocommit recovery、default privilege、schedule value validation、run-scoped residueへ接続する。R12-F1〜F5はcompletion/cleanup競合、入力境界、段階migration、resource secret、3 DB分離品質gateへ接続する。cycle 7 R11-F1/F2はQueue RPCのempty/malformed分離とoutbox safe-code runtime allowlistへ接続し、R11-R2-F2はactual prepare routeの5件受理/6件副作用前拒否へ接続する。cycle 6 R10-F1/F2は全production lock pathのcards→illustrations→tracking順、bounded complete/attach concurrency、provider cancellation-safe oversize classificationへ接続する。review-attempt-1 R10-R1-F1はS-10 different-key attachのOLD+NEW一括canonical lockとA↔B二順序gateへ接続する。review-attempt-2 R10-R2-F1/F2はcaller JWT lifecycle authorityとterminal outbox fault後のsource releaseへ接続する。
 
 ## Rollback・compensation
 
@@ -664,3 +667,4 @@ current R12 remediation or any hosted gate is approved.
 | 2026-07-16 | 2.0.5 | quality_review | cycle 6 review 2 remediation、current Integration 168、JWT lifecycle fence/post-terminal outbox source releaseを反映 |
 | 2026-07-16 | 2.0.7 | remediation | ship review R13-F1〜F5、current Integration 195、autocommit recovery、privilege/schedule/residue hardeningを反映 |
 | 2026-07-16 | 2.0.8 | remediation | R14-F1〜F3、current Integration 198、true autocommit/global default privilege/UUID/env hardeningを反映 |
+| 2026-07-16 | 2.0.9 | implementation_review | R15-F1/F2、current Integration 200、atomic constraint swapとhosted merge-blocked SSOTを反映 |
