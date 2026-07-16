@@ -3,6 +3,142 @@ export type Json = string | number | boolean | null | { [key: string]: Json | un
 export type Database = {
 	public: {
 		Tables: {
+			ai_upload_consumers: {
+				Row: {
+					created_at: string;
+					job_id: string;
+					owner_user_id: string;
+					upload_id: string;
+				};
+				Insert: {
+					created_at?: string;
+					job_id: string;
+					owner_user_id: string;
+					upload_id: string;
+				};
+				Update: Partial<Database["public"]["Tables"]["ai_upload_consumers"]["Insert"]>;
+				Relationships: [];
+			};
+			ai_import_concept_jobs: {
+				Row: {
+					attempt: number;
+					batch_id: string;
+					claim_expires_at: string | null;
+					claim_token: string | null;
+					terminal_claim_token_hash: string | null;
+					terminal_message_id: number | null;
+					completed_at: string | null;
+					concept_id: string;
+					created_at: string;
+					error_code: string | null;
+					id: string;
+					illustration_id: string | null;
+					next_attempt_at: string | null;
+					owner_user_id: string;
+					queue_message_id: number | null;
+					state: string;
+					updated_at: string;
+				};
+				Insert: {
+					attempt?: number;
+					batch_id: string;
+					claim_expires_at?: string | null;
+					claim_token?: string | null;
+					terminal_claim_token_hash?: string | null;
+					terminal_message_id?: number | null;
+					completed_at?: string | null;
+					concept_id: string;
+					created_at?: string;
+					error_code?: string | null;
+					id?: string;
+					illustration_id?: string | null;
+					next_attempt_at?: string | null;
+					owner_user_id: string;
+					queue_message_id?: number | null;
+					state?: string;
+					updated_at?: string;
+				};
+				Update: Partial<Database["public"]["Tables"]["ai_import_concept_jobs"]["Insert"]>;
+				Relationships: [];
+			};
+			ai_illustration_objects: {
+				Row: {
+					cleanup_claimed_at: string | null;
+					cleanup_claim_token: string | null;
+					cleanup_previous_state: string | null;
+					created_at: string;
+					delete_due_at: string | null;
+					deleted_at: string | null;
+					digest: string | null;
+					error_code: string | null;
+					height: number | null;
+					id: string;
+					illustration_id: string;
+					job_id: string;
+					owner_user_id: string;
+					reference_count: number;
+					state: string;
+					storage_bucket: string;
+					storage_path: string;
+					updated_at: string;
+					width: number | null;
+				};
+				Insert: {
+					cleanup_claimed_at?: string | null;
+					cleanup_claim_token?: string | null;
+					cleanup_previous_state?: string | null;
+					created_at?: string;
+					delete_due_at?: string | null;
+					deleted_at?: string | null;
+					digest?: string | null;
+					error_code?: string | null;
+					height?: number | null;
+					id?: string;
+					illustration_id: string;
+					job_id: string;
+					owner_user_id: string;
+					reference_count?: number;
+					state?: string;
+					storage_bucket?: string;
+					storage_path: string;
+					updated_at?: string;
+					width?: number | null;
+				};
+				Update: Partial<Database["public"]["Tables"]["ai_illustration_objects"]["Insert"]>;
+				Relationships: [];
+			};
+			ai_worker_log_outbox: {
+				Row: {
+					attempt: number | null;
+					batch_id: string | null;
+					created_at: string;
+					dispatch_claim_token: string | null;
+					dispatch_claimed_at: string | null;
+					dispatched_at: string | null;
+					error_code: string | null;
+					event_id: string;
+					event_type: string;
+					job_id: string | null;
+					queue_message_id: number;
+					reason: string | null;
+				};
+				Insert: {
+					attempt?: number | null;
+					batch_id?: string | null;
+					created_at?: string;
+					dispatch_claim_token?: string | null;
+					dispatch_claimed_at?: string | null;
+					dispatched_at?: string | null;
+					error_code?: string | null;
+					event_id?: string;
+					event_type: string;
+					job_id?: string | null;
+					queue_message_id: number;
+					reason?: string | null;
+				};
+				Update: Partial<Database["public"]["Tables"]["ai_worker_log_outbox"]["Insert"]>;
+				Relationships: [];
+			};
 			ai_import_batches: {
 				Row: {
 					auto_created_deck_id: string | null;
@@ -298,39 +434,90 @@ export type Database = {
 			ai_uploads: {
 				Row: {
 					byte_size: number;
+					cleanup_claimed_at: string | null;
+					cleanup_claim_token: string | null;
+					cleanup_previous_status: string | null;
 					consumed_at: string | null;
 					created_at: string;
+					delete_due_at: string | null;
+					deleted_at: string | null;
+					detected_mime_type: string | null;
+					height: number | null;
 					id: string;
 					mime_type: string;
 					owner_user_id: string;
 					purpose: string;
+					raw_storage_path: string | null;
+					raw_storage_bucket: string | null;
+					raw_cleanup_claimed_at: string | null;
+					raw_cleanup_claim_token: string | null;
+					sha256: string | null;
+					source_storage_path: string | null;
+					source_storage_bucket: string | null;
+					source_write_intent_path: string | null;
+					source_write_intent_bucket: string | null;
 					status: string;
 					storage_path: string;
 					upload_key: string;
+					width: number | null;
 				};
 				Insert: {
 					byte_size: number;
 					consumed_at?: string | null;
 					created_at?: string;
+					cleanup_claimed_at?: string | null;
+					cleanup_claim_token?: string | null;
+					cleanup_previous_status?: string | null;
+					delete_due_at?: string | null;
+					deleted_at?: string | null;
+					detected_mime_type?: string | null;
+					height?: number | null;
 					id?: string;
 					mime_type: string;
 					owner_user_id: string;
 					purpose: string;
+					raw_storage_path?: string | null;
+					raw_storage_bucket?: string | null;
+					raw_cleanup_claimed_at?: string | null;
+					raw_cleanup_claim_token?: string | null;
+					sha256?: string | null;
+					source_storage_path?: string | null;
+					source_storage_bucket?: string | null;
+					source_write_intent_path?: string | null;
+					source_write_intent_bucket?: string | null;
 					status?: string;
 					storage_path: string;
 					upload_key: string;
+					width?: number | null;
 				};
 				Update: {
 					byte_size?: number;
 					consumed_at?: string | null;
 					created_at?: string;
+					cleanup_claimed_at?: string | null;
+					cleanup_claim_token?: string | null;
+					cleanup_previous_status?: string | null;
+					delete_due_at?: string | null;
+					deleted_at?: string | null;
+					detected_mime_type?: string | null;
+					height?: number | null;
 					id?: string;
 					mime_type?: string;
 					owner_user_id?: string;
 					purpose?: string;
+					raw_storage_path?: string | null;
+					raw_storage_bucket?: string | null;
+					raw_cleanup_claimed_at?: string | null;
+					raw_cleanup_claim_token?: string | null;
+					sha256?: string | null;
+					source_storage_path?: string | null;
+					source_storage_bucket?: string | null;
+					source_write_intent_path?: string | null;
+					source_write_intent_bucket?: string | null;
 					status?: string;
 					storage_path?: string;
 					upload_key?: string;
+					width?: number | null;
 				};
 				Relationships: [];
 			};
@@ -683,6 +870,106 @@ export type Database = {
 			[_ in never]: never;
 		};
 		Functions: {
+			claim_ai_import_concept: {
+				Args: { p_job_id: string; p_message_id: number; p_claim_token: string };
+				Returns: Json;
+			};
+			claim_ai_import_cleanup: {
+				Args: { p_limit: number };
+				Returns: {
+					trackingId: string;
+					bucket: string;
+					path: string;
+					claimToken: string;
+				}[];
+			};
+			verify_ai_import_cleanup: {
+				Args: {
+					p_tracking_id: string;
+					p_bucket: string;
+					p_path: string;
+					p_claim_token: string;
+				};
+				Returns: Json;
+			};
+			complete_ai_import_cleanup: {
+				Args: {
+					p_tracking_id: string;
+					p_bucket: string;
+					p_path: string;
+					p_claim_token: string;
+					p_outcome: string;
+				};
+				Returns: undefined;
+			};
+			claim_ai_worker_log_outbox: {
+				Args: { p_claim_token: string };
+				Returns: Json;
+			};
+			complete_ai_worker_log_outbox: {
+				Args: { p_event_id: string; p_claim_token: string };
+				Returns: undefined;
+			};
+			commit_import_async: {
+				Args: {
+					p_actor_user_id: string;
+					p_card_reservation_key: string;
+					p_idempotency_key: string;
+					p_import_request_hash: string;
+					p_request: Json;
+					p_source: string;
+				};
+				Returns: Json;
+			};
+			get_ai_import_status: {
+				Args: {
+					p_actor_user_id: string;
+					p_batch_id?: string | null;
+					p_idempotency_key?: string | null;
+				};
+				Returns: Json;
+			};
+			prepare_ai_source_upload: {
+				Args: {
+					p_owner_user_id: string;
+					p_upload_key: string;
+					p_declared_mime: string;
+					p_byte_size: number;
+				};
+				Returns: Json;
+			};
+			mark_ai_source_ready: {
+				Args: {
+					p_owner_user_id: string;
+					p_upload_id: string;
+					p_detected_mime: string;
+					p_actual_byte_size: number;
+					p_width: number;
+					p_height: number;
+					p_digest: string;
+				};
+				Returns: Json;
+			};
+			mark_ai_source_write_intent: {
+				Args: {
+					p_owner_user_id: string;
+					p_upload_id: string;
+					p_source_path: string;
+				};
+				Returns: undefined;
+			};
+			mark_ai_source_raw_deleted: {
+				Args: { p_owner_user_id: string; p_upload_id: string };
+				Returns: undefined;
+			};
+			mark_ai_upload_cleanup: {
+				Args: {
+					p_owner_user_id: string;
+					p_upload_id: string;
+					p_source_path?: string | null;
+				};
+				Returns: undefined;
+			};
 			ai_assert_card_inactive: {
 				Args: { p_card_id: string; p_owner_user_id: string };
 				Returns: undefined;

@@ -1,5 +1,12 @@
 /** @type {import("next").NextConfig} */
 const nextConfig = {
+	experimental: {
+		outputFileTracingIncludes: {
+			"/api/ai/imports/sources/complete": [
+				"./node_modules/@imagemagick/magick-wasm/dist/magick.wasm",
+			],
+		},
+	},
 	images: {
 		remotePatterns: [
 			{

@@ -30,6 +30,7 @@
       "node"
     ],
     "allowJs": true,
+		"allowImportingTsExtensions": true,
     "plugins": [
       {
         "name": "next"
@@ -42,6 +43,7 @@
     "**/*.js",
     "**/*.jsx",
     "../specs/stories/S-10-ai-card-import-foundation/tests/**/*.ts",
+		"../specs/stories/S-11-ai-card-async-processing/tests/**/*.ts",
     ".next/types/**/*.ts"
   ],
   "exclude": [

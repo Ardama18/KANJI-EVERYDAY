@@ -1,0 +1,32 @@
+# Fresh remediation cycle 4 (new authorized cycle; review attempt 1 of maximum 3)
+
+- [x] F1 Red: non-normal terminal/setup/validation/contract/business/recoverable outcomes expose an over-broad `worker_failure`
+- [x] F1 Green: only DB-confirmed normal permanent provider/Storage failures or retry exhaustion emit exactly one `worker_failure`
+- [x] F2 Red: unconfirmed poison ACK/finalization can emit `worker_poison`
+- [x] F2 Green: exact-delivery ACK confirmation precedes exactly one safe poison event; unconfirmed ACK remains recoverable
+- [x] F3 Red: failed cleanup deletion loses durable `delete_pending` immediate-retry intent
+- [x] F3 Green: cleanup retry preserves lifecycle intent and rechecks lease, owner path, and zero references before idempotent deletion
+- [x] F4 Red: cleanup blank/missing/config-read/setup authentication faults escape the safe boundary or authenticate blank values
+- [x] F4 Green: trimmed non-empty cleanup secret and setup execute inside one safe 500 boundary; valid-secret auth denials remain log-free 401
+- [x] SSOT/test inventory: requirements/ADR/design/plan/traceability/operations/meta synchronized with the four executable contracts
+- [x] Verification: focused/full local gates Green and unavailable hosted/DB/resource/Deno gates remain explicit `not_run`/exit 2
+- [x] Review attempt 1/3: independent review returned High 2 + Medium 1
+- [x] R5-F1 Red: crash after terminal/archive commit and before stdout can lose exactly-once terminal observability
+- [x] R5-F1 Green: transactionally durable unique outbox event with stable event ID and idempotent dispatch/dedup
+- [x] R5-F2 Red: cleanup verify/complete lacks exact lease identity and stale workers can consume a newer claim
+- [x] R5-F2 Green: claim UUID fences claim/verify/complete and stale completion is `CLAIM_LOST`
+- [x] R5-F3 Red: fabricated source paths and raw suppression require a second scheduled cleanup run
+- [x] R5-F3 Green: only real source uploads are tracked and source/raw are independently claimed in the first eligible run
+- [x] Review-attempt-1 verification: focused/full local gates Green; unavailable gates explicit `not_run`/exit 2
+- [x] Review attempt 2/3: independent review returned High 2 + Medium 3
+- [x] R6-F1 Red: expired business claims can still mutate retry/upload/orphan/failure/finalize state
+- [x] R6-F1 Green: every business side-effect uses one DB-clock active-claim fence, including reconciles
+- [x] R6-F2 Red: source Storage write can succeed before any durable cleanup intent exists
+- [x] R6-F2 Green: exact deterministic source write intent is durable before Storage and drives 404-safe cleanup
+- [x] R6-F3 Red: global object LIMIT can split a due source/raw pair for one upload
+- [x] R6-F3 Green: LIMIT selects tracking entities and expands every due object for each selected entity
+- [x] R6-F4 Red: cleanup completion accepts a claim after its five-minute lease expires
+- [x] R6-F4 Green: cleanup completion applies the same DB-clock lease expiry fence as verification
+- [x] R6-F5 Red: a deleted illustration remains attachable through the authenticated card RPC
+- [x] R6-F5 Green: cleanup completion atomically makes the deleted illustration nonattachable
+- [x] Review-attempt-2 verification: focused/full local gates Green; unavailable gates explicit `not_run`/exit 2

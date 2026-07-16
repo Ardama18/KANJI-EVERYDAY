@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "wasmPackage": "@imagemagick/magick-wasm",
+  "wasmPackageVersion": "0.0.35",
+  "packageLockPath": "frontend/package-lock.json",
+  "packageLockKey": "node_modules/@imagemagick/magick-wasm",
+  "packageIntegrity": "sha512-Wh5C15QyOkJb1i37j9Vpi5OhqCoXwZ/v9LBxo+LUAhiBBtBnRK7Nlg98KGHdtiJocBE3C4FJ+rv+BMrFevzwnw==",
+  "wasmRelativePath": "frontend/node_modules/@imagemagick/magick-wasm/dist/magick.wasm",
+  "wasmBytes": 14291459,
+  "wasmSha256": "1560619807d9e83eedd796c434f852885f6142b571132036c36ce53a9bb8286e"
+}
