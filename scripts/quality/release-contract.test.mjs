@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -11,6 +11,7 @@ import {
 	resolveReleaseGateCommand,
 	validateEvidenceCommitBinding,
 	validateReleaseContractDefinition,
+	validateRepositoryEvidenceBinding,
 	validateReleaseState,
 } from "./release-contract.mjs";
 
@@ -56,7 +57,7 @@ test("release contract accepts one complete candidate-bound evidence set", async
 
 test("pending RC1 evidence passes immutable contract-definition preflight", async () => {
 	const { contract, evidence } = await readReleaseFiles();
-	assert.equal(evidence.state, "pending_rc1");
+	assert.equal(evidence.state, "pending_hosted");
 	assert.deepEqual(validateReleaseContractDefinition(contract, {
 		expectedBaseSha: contract.baseSha,
 	}), []);
@@ -131,25 +132,74 @@ test("release contract rejects unresolved gates, reviews, redaction, and candida
 test("repository evidence remains an explicit Hosted7 merge blocker during RC1", async () => {
 	const { contract, evidence } = await readReleaseFiles();
 	const failures = validateReleaseState(contract, evidence);
-	assert.equal(evidence.state, "pending_rc1");
+	assert.equal(evidence.state, "pending_hosted");
 	assert.equal(evidence.hostedGates.length, 7);
 	assert.ok(evidence.hostedGates.every((gate) => gate.status === "not_run" && gate.exitCode === 2));
 	assert.ok(failures.some((failure) => /unresolved/u.test(failure)));
 });
 
-test("post-commit evidence must bind its parent candidate and change only allowlisted evidence paths", async () => {
+test("post-candidate evidence accepts multiple allowlisted commits and rejects invalid ancestry or paths", async () => {
 	const { contract } = await readReleaseFiles();
 	const evidence = acceptedEvidence(contract);
 	assert.deepEqual(validateEvidenceCommitBinding(contract, evidence, {
-		parentSha: CANDIDATE,
-		changedPaths: [".codex/release-evidence.json"],
+		candidateIsAncestor: true,
+		changedPaths: [
+			".codex/release-evidence.json",
+			"specs/stories/S-11-ai-card-async-processing/tasks/remediation-cycle-19.md",
+		],
 	}), []);
 	for (const repositoryState of [
-		{ parentSha: contract.baseSha, changedPaths: [".codex/release-evidence.json"] },
-		{ parentSha: CANDIDATE, changedPaths: ["supabase/functions/changed.ts"] },
-		{ parentSha: CANDIDATE, changedPaths: [] },
+		{ candidateIsAncestor: false, changedPaths: [".codex/release-evidence.json"] },
+		{ candidateIsAncestor: true, changedPaths: ["supabase/functions/changed.ts"] },
+		{ candidateIsAncestor: true, changedPaths: [] },
 	]) {
 		assert.notEqual(validateEvidenceCommitBinding(contract, evidence, repositoryState).length, 0);
+	}
+});
+
+test("repository binding rejects an unauthorized intermediate path even after it is removed", async () => {
+	const repository = await mkdtemp(path.join(tmpdir(), "kanji-release-evidence-chain-"));
+	const git = async (...arguments_) => {
+		assert.equal(await runExit("git", arguments_, repository), 0);
+	};
+	try {
+		await git("init", "--quiet");
+		await git("config", "user.name", "Release Contract Test");
+		await git("config", "user.email", "release-contract@example.invalid");
+		await writeFile(path.join(repository, "candidate.txt"), "candidate\n", "utf8");
+		await git("add", "candidate.txt");
+		await git("commit", "--quiet", "-m", "candidate");
+		const candidateSha = await readGitHead(repository);
+		const contract = {
+			evidenceBinding: {
+				postCandidateCommitsMayChangeOnly: [
+					".codex/release-evidence.json",
+					"specs/stories/S-11-ai-card-async-processing/tasks/remediation-cycle-19.md",
+				],
+			},
+		};
+		const evidence = { candidateSha };
+		await mkdir(path.join(repository, ".codex"), { recursive: true });
+		await writeFile(path.join(repository, ".codex/release-evidence.json"), "{}\n", "utf8");
+		await git("add", ".codex/release-evidence.json");
+		await git("commit", "--quiet", "-m", "first evidence");
+		await mkdir(path.join(repository, "specs/stories/S-11-ai-card-async-processing/tasks"), { recursive: true });
+		await writeFile(path.join(repository, "specs/stories/S-11-ai-card-async-processing/tasks/remediation-cycle-19.md"), "evidence\n", "utf8");
+		await git("add", "specs/stories/S-11-ai-card-async-processing/tasks/remediation-cycle-19.md");
+		await git("commit", "--quiet", "-m", "second evidence");
+		assert.deepEqual(await validateRepositoryEvidenceBinding(contract, evidence, repository), []);
+
+		await writeFile(path.join(repository, "unauthorized.txt"), "temporary\n", "utf8");
+		await git("add", "unauthorized.txt");
+		await git("commit", "--quiet", "-m", "unauthorized intermediate path");
+		await rm(path.join(repository, "unauthorized.txt"));
+		await git("add", "--all");
+		await git("commit", "--quiet", "-m", "remove unauthorized path");
+		assert.ok((await validateRepositoryEvidenceBinding(contract, evidence, repository)).includes(
+			"release evidence commit changed an unauthorized path: unauthorized.txt"
+		));
+	} finally {
+		await rm(repository, { recursive: true, force: true });
 	}
 });
 

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "contractVersion": "S11-RC1-1.0.4",
+  "contractVersion": "S11-RC1-1.0.5",
   "issue": 12,
   "story": "S-11",
   "baseSha": "45969b140d1817be143fe6331159b88b647c2e29",
@@ -67,10 +67,17 @@
     "askAllowedOnlyFor": "frozen-contract-ambiguity"
   },
   "evidenceBinding": {
-    "mode": "post-commit-evidence",
+    "mode": "post-candidate-evidence-chain",
     "candidateShaFormat": "^[0-9a-f]{40}$",
     "allGateRunsMustUseCandidateSha": true,
-    "evidenceCommitMayChangeOnly": [".codex/release-evidence.json", "specs/stories/S-11-ai-card-async-processing/tasks/remediation-cycle-19.md"]
+    "candidateMustBeAncestorOfHead": true,
+    "postCandidateCommitsMayChangeOnly": [
+      ".codex/release-contract.json",
+      ".codex/release-evidence.json",
+      "scripts/quality/release-contract.mjs",
+      "scripts/quality/release-contract.test.mjs",
+      "specs/stories/S-11-ai-card-async-processing/tasks/remediation-cycle-19.md"
+    ]
   },
   "mergePolicy": { "hostedSevenRequired": true, "unresolvedStatusBlocksMerge": true }
 }

@@ -6,8 +6,8 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 const SHA_PATTERN = /^[0-9a-f]{40}$/u;
-const CONTRACT_VERSION = "S11-RC1-1.0.4";
-const CONTRACT_DIGEST = "d05570ca865242984f5c97ae5bd50fd36690426104ce84a7f37de433454e753c";
+const CONTRACT_VERSION = "S11-RC1-1.0.5";
+const CONTRACT_DIGEST = "cac498b88716331f6b05ea3a2988ceddffca0bff211c5afe01d9be48ed2eb125";
 const LOCAL_GATE_PHASES = ["pre-provision", "disposable", "post-cleanup"];
 const LOCAL_GATE_CONTEXTS = new Set(["source", "disposable", "build"]);
 const EXPECTED_ACCEPTANCE_CRITERIA = [
@@ -76,8 +76,16 @@ export function validateReleaseContractDefinition(contract, options = {}) {
 	], contract.baseSha, failures);
 	validateReviewPolicy(contract.reviewPolicy, failures);
 	const binding = isRecord(contract.evidenceBinding) ? contract.evidenceBinding : {};
-	check(binding.mode === "post-commit-evidence", "release evidence binding mode drift", failures);
+	check(binding.mode === "post-candidate-evidence-chain", "release evidence binding mode drift", failures);
 	check(binding.allGateRunsMustUseCandidateSha === true, "candidate binding must cover every gate", failures);
+	check(binding.candidateMustBeAncestorOfHead === true, "release evidence candidate ancestry drift", failures);
+	check(
+		Array.isArray(binding.postCandidateCommitsMayChangeOnly)
+			&& binding.postCandidateCommitsMayChangeOnly.length > 0
+			&& binding.postCandidateCommitsMayChangeOnly.every((path) => typeof path === "string" && path.length > 0),
+		"release evidence path allowlist drift",
+		failures
+	);
 	const merge = isRecord(contract.mergePolicy) ? contract.mergePolicy : {};
 	check(merge.hostedSevenRequired === true && merge.unresolvedStatusBlocksMerge === true, "hosted merge blocker drift", failures);
 	return failures;
@@ -112,17 +120,41 @@ export function validateReleaseState(contract, evidence, options = {}) {
 }
 
 export async function validateRepositoryEvidenceBinding(contract, evidence, cwd = process.cwd()) {
+	if (!isRecord(evidence) || !SHA_PATTERN.test(String(evidence.candidateSha))) {
+		return ["release evidence commit binding is unavailable"];
+	}
 	try {
-		const [{ stdout: parentOutput }, { stdout: pathsOutput }] = await Promise.all([
-			execFileAsync("git", ["rev-parse", "--verify", "HEAD^"], { cwd, encoding: "utf8" }),
-			execFileAsync("git", ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"], {
+		await execFileAsync("git", ["rev-parse", "--verify", `${evidence.candidateSha}^{commit}`], {
+			cwd,
+			encoding: "utf8",
+		});
+		let candidateIsAncestor = true;
+		try {
+			await execFileAsync("git", ["merge-base", "--is-ancestor", evidence.candidateSha, "HEAD"], {
 				cwd,
 				encoding: "utf8",
-			}),
-		]);
+			});
+		} catch (error) {
+			if (!isRecord(error) || error.code !== 1) throw error;
+			candidateIsAncestor = false;
+		}
+		if (!candidateIsAncestor) {
+			return validateEvidenceCommitBinding(contract, evidence, {
+				candidateIsAncestor,
+				changedPaths: [],
+			});
+		}
+		const { stdout: pathsOutput } = await execFileAsync("git", [
+			"log",
+			"--format=",
+			"--name-only",
+			"--no-renames",
+			`${evidence.candidateSha}..HEAD`,
+			"--",
+		], { cwd, encoding: "utf8" });
 		return validateEvidenceCommitBinding(contract, evidence, {
-			parentSha: parentOutput.trim(),
-			changedPaths: pathsOutput.split(/\r?\n/u).filter(Boolean),
+			candidateIsAncestor,
+			changedPaths: [...new Set(pathsOutput.split(/\r?\n/u).filter(Boolean))],
 		});
 	} catch {
 		return ["release evidence commit binding is unavailable"];
@@ -134,12 +166,14 @@ export function validateEvidenceCommitBinding(contract, evidence, repositoryStat
 	const binding = isRecord(contract) && isRecord(contract.evidenceBinding)
 		? contract.evidenceBinding
 		: {};
-	check(repositoryState.parentSha === evidence.candidateSha, "release evidence commit parent does not match candidate SHA", failures);
-	const allowed = new Set(Array.isArray(binding.evidenceCommitMayChangeOnly)
-		? binding.evidenceCommitMayChangeOnly
+	const state = isRecord(repositoryState) ? repositoryState : {};
+	check(state.candidateIsAncestor === true, "release evidence candidate is not an ancestor of HEAD", failures);
+	const allowed = new Set(Array.isArray(binding.postCandidateCommitsMayChangeOnly)
+		? binding.postCandidateCommitsMayChangeOnly
 		: []);
-	check(repositoryState.changedPaths.length > 0, "release evidence commit has no tracked evidence", failures);
-	for (const changedPath of repositoryState.changedPaths) {
+	const changedPaths = Array.isArray(state.changedPaths) ? state.changedPaths : [];
+	check(changedPaths.length > 0, "release evidence commit has no tracked evidence", failures);
+	for (const changedPath of changedPaths) {
 		check(allowed.has(changedPath), `release evidence commit changed an unauthorized path: ${changedPath}`, failures);
 	}
 	return failures;
