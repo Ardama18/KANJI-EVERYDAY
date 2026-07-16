@@ -38,6 +38,59 @@ import {
 } from "./helpers/s11-real-e2e-data-boundary";
 
 const OWNER_ID = "22000000-0000-4000-8000-000000000001";
+const SERVICE_TEST_API_KEY = "service-role-fixture";
+const SERVICE_TEST_AUTHORIZATION = `Bearer ${SERVICE_TEST_API_KEY}`;
+const OWNER_TEST_AUTHORIZATION = "Bearer owner-fixture";
+const ANON_TEST_API_KEY = "anon-fixture";
+
+const SERVICE_SNAPSHOT_CREDENTIAL_CASES: ReadonlyArray<{
+	readonly label: string;
+	readonly headers: Readonly<Record<string, string>>;
+	readonly valid: boolean;
+}> = [
+	{
+		label: "canonical pair",
+		headers: {
+			Authorization: SERVICE_TEST_AUTHORIZATION,
+			apikey: SERVICE_TEST_API_KEY,
+		},
+		valid: true,
+	},
+	{
+		label: "case-variant pair",
+		headers: {
+			AUTHORIZATION: SERVICE_TEST_AUTHORIZATION,
+			APIKEY: SERVICE_TEST_API_KEY,
+		},
+		valid: true,
+	},
+	{
+		label: "missing authorization",
+		headers: { apikey: SERVICE_TEST_API_KEY },
+		valid: false,
+	},
+	{
+		label: "missing api key",
+		headers: { Authorization: SERVICE_TEST_AUTHORIZATION },
+		valid: false,
+	},
+	{
+		label: "owner bearer with anonymous api key",
+		headers: {
+			Authorization: OWNER_TEST_AUTHORIZATION,
+			apikey: ANON_TEST_API_KEY,
+		},
+		valid: false,
+	},
+	{
+		label: "mismatched service credentials",
+		headers: {
+			Authorization: SERVICE_TEST_AUTHORIZATION,
+			apikey: "different-service-fixture",
+		},
+		valid: false,
+	},
+];
 
 function statusFixture(status: string, states: readonly string[]) {
 	return {
@@ -1083,7 +1136,7 @@ describe("S-11 commit and queue integration", () => {
 		expect(jobs).toContain("assertOwnerSafeSelectMatrix");
 	});
 
-	it("R20-F4 readiness SSOT separates local boundaries from hosted merge acceptance", async () => {
+	it("R21-F2 readiness SSOT separates local boundaries from hosted merge acceptance", async () => {
 		const [meta, plan, traceability, operations] = await Promise.all([
 			readFile(new URL("../meta.json", import.meta.url), "utf8"),
 			readFile(new URL("../plan.md", import.meta.url), "utf8"),
@@ -1091,15 +1144,15 @@ describe("S-11 commit and queue integration", () => {
 			readFile(new URL("../operations.md", import.meta.url), "utf8"),
 		]);
 		const parsedMeta = JSON.parse(meta) as Record<string, unknown>;
-		expect(parsedMeta.remediation_cycle).toBe(16);
-		expect(parsedMeta.ssot_version).toBe("2.0.14");
+		expect(parsedMeta.remediation_cycle).toBe(17);
+		expect(parsedMeta.ssot_version).toBe("2.0.15");
 		expect(parsedMeta.verification_state).toBe("hosted_7_not_run_merge_blocked");
 		expect(meta).not.toMatch(/ready_for_commit|zero_findings|approved/u);
-		expect(plan).toContain("version: 2.0.14");
-		expect(traceability).toContain("version: 2.0.14");
+		expect(plan).toContain("version: 2.0.15");
+		expect(traceability).toContain("version: 2.0.15");
 		expect(plan).toContain("[x] **T6-01L: local boundary E2E");
 		expect(plan).toContain("[ ] **T6-01H: hosted full-system E2E");
-		expect(operations).toContain("Current cycle-16 verification state: `hosted 7 not_run; merge blocked`");
+		expect(operations).toContain("Current cycle-17 verification state: `hosted 7 not_run; merge blocked`");
 		expect(traceability).not.toMatch(/\bcurrent\s+R12\b/iu);
 	});
 
@@ -2286,6 +2339,46 @@ describe("S-11 reviewer regression boundaries", () => {
 			"ai_illustration_objects?select=storage_path,state"
 		);
 	});
+
+	it.each(SERVICE_SNAPSHOT_CREDENTIAL_CASES)(
+		"R21-F1 accepts only a normalized service bearer/api-key pair: $label",
+		async ({ headers, valid }) => {
+			const outgoingHeaders: Headers[] = [];
+			const fetchImplementation = vi.fn(
+				async (_input: string | URL | Request, init?: RequestInit) => {
+					outgoingHeaders.push(new Headers(init?.headers));
+					return Response.json([{ id: "safe-row" }]);
+				}
+			) as typeof fetch;
+			const boundary = {
+				fetch: fetchImplementation,
+				supabaseBase: "https://project.supabase.co",
+				anonKey: ANON_TEST_API_KEY,
+			};
+			const request = fetchServiceOwnerRows(
+				boundary,
+				headers,
+				OWNER_ID,
+				"ai_illustration_objects?select=id,storage_path"
+			);
+
+			if (!valid) {
+				await expect(request).rejects.toThrow(
+					"service owner snapshot requires the service-role bearer/apikey pair"
+				);
+				expect(fetchImplementation).not.toHaveBeenCalled();
+				return;
+			}
+
+			await expect(request).resolves.toHaveLength(1);
+			expect(fetchImplementation).toHaveBeenCalledTimes(1);
+			expect(outgoingHeaders).toHaveLength(1);
+			expect(outgoingHeaders[0]?.get("Authorization")).toBe(
+				SERVICE_TEST_AUTHORIZATION
+			);
+			expect(outgoingHeaders[0]?.get("apikey")).toBe(SERVICE_TEST_API_KEY);
+		}
+	);
 
 	it("NR-16 maps only existence-hidden status errors to 404 and backend errors to 5xx", async () => {
 		const { GET } = await import("../../../../frontend/app/api/ai/imports/status/route");

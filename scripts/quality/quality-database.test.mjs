@@ -233,6 +233,30 @@ test("repository quality provisions three distinct S-11 migration databases", as
 	assert.match(runner, /\["diff", "--check"\]/u);
 });
 
+test("ordinary Vitest alone serializes file workers without changing later gates", async () => {
+	const runner = await readFile(new URL("./run-quality-with-database.mjs", import.meta.url), "utf8");
+	const ordinaryStart = runner.indexOf('"complete ordinary Vitest"');
+	const inventoryStart = runner.indexOf('"S-11 inventory"', ordinaryStart);
+	const focusedStart = runner.indexOf('"S-11 focused 77 regressions"', inventoryStart);
+	const diffStart = runner.indexOf("buildDiffWhitespacePhases", focusedStart);
+	assert.ok(
+		ordinaryStart >= 0 &&
+			inventoryStart > ordinaryStart &&
+			focusedStart > inventoryStart &&
+			diffStart > focusedStart
+	);
+	const ordinaryPhase = runner.slice(ordinaryStart, inventoryStart);
+	const inventoryPhase = runner.slice(inventoryStart, focusedStart);
+	const focusedPhase = runner.slice(focusedStart, diffStart);
+	assert.match(
+		ordinaryPhase,
+		/\[\s*"--prefix",\s*"frontend",\s*"run",\s*"test",\s*"--",\s*"--maxWorkers=1",\s*"--minWorkers=1",?\s*\]/u
+	);
+	assert.doesNotMatch(inventoryPhase, /maxWorkers|minWorkers/u);
+	assert.doesNotMatch(focusedPhase, /maxWorkers|minWorkers/u);
+	assert.equal(runner.match(/--maxWorkers=1|--minWorkers=1/gu)?.length, 2);
+});
+
 test("quality diff base rejects ambiguous shorthand refs but accepts exact full refs", async () => {
 	const runner = await readFile(new URL("./run-quality-with-database.mjs", import.meta.url), "utf8");
 	assert.match(runner, /for-each-ref/u);

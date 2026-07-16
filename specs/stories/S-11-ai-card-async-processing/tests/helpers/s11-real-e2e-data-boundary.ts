@@ -110,9 +110,13 @@ async function fetchRows(
 	headers: Readonly<Record<string, string>>,
 	label: string
 ): Promise<Record<string, unknown>[]> {
+	const requestHeaders = new Headers(headers);
+	if (!requestHeaders.has("apikey")) {
+		requestHeaders.set("apikey", boundary.anonKey);
+	}
 	const response = await boundary.fetch(
 		`${boundary.supabaseBase}/rest/v1/${resourceAndQuery}`,
-		{ headers: { apikey: boundary.anonKey, ...headers } }
+		{ headers: requestHeaders }
 	);
 	const body: unknown = await response.json();
 	if (response.status !== 200 || !Array.isArray(body) || !body.every(isRecord)) {
