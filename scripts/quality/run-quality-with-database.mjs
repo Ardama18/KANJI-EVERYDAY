@@ -12,12 +12,11 @@ import {
 	withDisposableS10Database,
 } from "./quality-database.mjs";
 import {
-	readReleaseFiles,
 	readReleaseContract,
 	validateReleaseContractDefinition,
-	validateReleaseState,
-	validateRepositoryEvidenceBinding,
 } from "./release-contract.mjs";
+
+const POST_CLEANUP_LOCAL_GATE_IDS = new Set(["database-residue", "source-continuity"]);
 
 export function createTerminationHandler({
 	getCleanup,
@@ -154,7 +153,17 @@ export async function runRepositoryQuality() {
 	};
 	let releaseLease;
 	let auditCleanup;
+	let postCleanupPhases;
 	try {
+		const diffBase = await resolveQualityDiffBase(process.env);
+		const releaseContract = await readReleaseContract();
+		const preflightFailures = validateReleaseContractDefinition(releaseContract, {
+			expectedBaseSha: diffBase,
+		});
+		if (preflightFailures.length > 0) {
+			process.stderr.write(`${JSON.stringify({ gate: "s11-release-contract-preflight", status: "blocked", failures: preflightFailures })}\n`);
+			return 2;
+		}
 		await reconcileRunScopedResidue(residueInput);
 		await assertNoCurrentRunResidue(runScope, residueInput.listDatabaseNames);
 		releaseLease = await adapter.acquireRunLease(sourceUrl, runScope);
@@ -181,12 +190,27 @@ export async function runRepositoryQuality() {
 							adapter,
 							runScope,
 							onCleanupReady: cleanupRegistration(activeCleanups),
-							check: async (failureUrl) =>
-								await runQualityPhases({ freshUrl, upgradeUrl, failureUrl }),
+							check: async (failureUrl) => {
+								const plan = buildContractLocalQualityPhases({
+									contract: releaseContract,
+									diffBase,
+									sourceEnvironment: process.env,
+									freshUrl,
+									upgradeUrl,
+									failureUrl,
+								});
+								postCleanupPhases = plan.postCleanup;
+								return await runQualityPhaseSequence(plan.databaseScoped);
+							},
 						}),
 				}),
 		});
 		await auditCleanup();
+		if (postCleanupPhases === undefined) throw new Error("Repository local quality plan was not dispatched");
+		const postCleanupExitCode = await runQualityPhaseSequence(postCleanupPhases);
+		if (postCleanupExitCode !== 0) return postCleanupExitCode;
+		await auditCleanup();
+		process.stdout.write("Repository local quality checks passed.\n");
 		return 0;
 	} catch (error) {
 		if (error instanceof QualityCheckExitError) return error.exitCode;
@@ -212,106 +236,56 @@ function cleanupRegistration(activeCleanups) {
 	};
 }
 
-async function runQualityPhases({ freshUrl, upgradeUrl, failureUrl }) {
-	const diffBase = await resolveQualityDiffBase(process.env);
-	const releaseContract = await readReleaseContract();
-	const preflightFailures = validateReleaseContractDefinition(releaseContract, {
-		expectedBaseSha: diffBase,
-	});
-	if (preflightFailures.length > 0) {
-		process.stderr.write(`${JSON.stringify({ gate: "s11-release-contract-preflight", status: "blocked", failures: preflightFailures })}\n`);
-		return 2;
-	}
+export function buildContractLocalQualityPhases({
+	contract,
+	diffBase,
+	sourceEnvironment,
+	freshUrl,
+	upgradeUrl,
+	failureUrl,
+}) {
+	if (!RESOLVED_COMMIT_SHA_PATTERN.test(diffBase)) throw new Error("Invalid resolved quality diff base");
 	const checkEnvironment = {
 		// Keep legacy S-10 integration on the rollback-verified S-10 target;
 		// S-11 DB gates use their explicit fresh/upgrade URLs below.
-		...buildCheckEnvironment(process.env, failureUrl),
+		...buildCheckEnvironment(sourceEnvironment, failureUrl),
 		S11_FRESH_DATABASE_URL: freshUrl,
 		S11_UPGRADE_DATABASE_URL: upgradeUrl,
 		S11_FAILURE_DATABASE_URL: failureUrl,
 		S11_LOCAL_DATABASE_URL: freshUrl,
 		S11_LOCAL_CORE_ONLY: "1",
 	};
-	const phases = [
-		["S-11 local core fresh migration", "npm", ["--prefix", "frontend", "run", "test:s11:fresh"], checkEnvironment],
-		["S-11 local core upgrade migration", "npm", ["--prefix", "frontend", "run", "test:s11:upgrade"], checkEnvironment],
-		["S-11 local core failure rollback", "npm", ["--prefix", "frontend", "run", "test:s11:failure"], checkEnvironment],
-		["S-11 local real PostgreSQL integration", "npm", ["--prefix", "frontend", "run", "test:s11:local-real-integration"], checkEnvironment],
-		["frontend lint", "npm", ["--prefix", "frontend", "run", "lint"], checkEnvironment],
-		[
-			"frontend typecheck",
-			"npm",
-			["--prefix", "frontend", "run", "typecheck"],
-			checkEnvironment,
-		],
-		[
-			"configured frontend production build",
-			"npm",
-			["--prefix", "frontend", "run", "build"],
-			{
-				...checkEnvironment,
-				NEXT_PUBLIC_SUPABASE_URL:
-					checkEnvironment.NEXT_PUBLIC_SUPABASE_URL ?? "http://127.0.0.1:54321",
-				NEXT_PUBLIC_SUPABASE_ANON_KEY:
-					checkEnvironment.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "quality-build-anon-key",
-				SUPABASE_SERVICE_ROLE_KEY:
-					checkEnvironment.SUPABASE_SERVICE_ROLE_KEY ?? "quality-build-service-role-key",
-			},
-		],
-		[
-			"complete ordinary Vitest",
-			"npm",
-			["--prefix", "frontend", "run", "test"],
-			checkEnvironment,
-		],
-		[
-			"S-11 inventory",
-			"npm",
-			["--prefix", "frontend", "run", "test:s11:inventory"],
-			checkEnvironment,
-		],
-		[
-			"S-11 focused release regressions",
-			"npm",
-			[
-				"--prefix",
-				"frontend",
-				"run",
-				"test:s11:integration",
-				"--",
-				"-t",
-				"R[789]-F|R10-(R[12]-)?F|R11-(R2-)?F[12]|R12-F|R13-F|R14-F|R15-F|R19-F|R20-F|R21-F|R22-F|F-(18|19)",
-			],
-			checkEnvironment,
-		],
-		...buildDiffWhitespacePhases(diffBase, checkEnvironment),
-	];
-	const exitCode = await runQualityPhaseSequence(phases);
-	if (exitCode !== 0) return exitCode;
-	const { contract, evidence } = await readReleaseFiles();
-	const releaseFailures = [
-		...validateReleaseState(contract, evidence, { expectedBaseSha: diffBase }),
-		...await validateRepositoryEvidenceBinding(contract, evidence),
-	];
-	if (releaseFailures.length > 0) {
-		process.stderr.write(`${JSON.stringify({ gate: "s11-release-contract", status: "blocked", failures: releaseFailures })}\n`);
-		return 2;
+	const buildEnvironment = {
+		...checkEnvironment,
+		NEXT_PUBLIC_SUPABASE_URL:
+			checkEnvironment.NEXT_PUBLIC_SUPABASE_URL ?? "http://127.0.0.1:54321",
+		NEXT_PUBLIC_SUPABASE_ANON_KEY:
+			checkEnvironment.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "quality-build-anon-key",
+		SUPABASE_SERVICE_ROLE_KEY:
+			checkEnvironment.SUPABASE_SERVICE_ROLE_KEY ?? "quality-build-service-role-key",
+	};
+	const phases = contract.localGates.map((gate) => {
+		const [program, ...declaredArguments] = gate.command;
+		const arguments_ = declaredArguments.map((argument) =>
+			argument === "BASE...HEAD" ? `${diffBase}...HEAD` : argument
+		);
+		const environment = gate.id === "build"
+			? buildEnvironment
+			: new Set(["quality-database-harness", "database-residue", "source-continuity"]).has(gate.id)
+				? sourceEnvironment
+				: checkEnvironment;
+		return [gate.id, program, arguments_, environment];
+	});
+	const firstPostCleanupIndex = phases.findIndex(([id]) => POST_CLEANUP_LOCAL_GATE_IDS.has(id));
+	if (firstPostCleanupIndex < 0 ||
+		phases.slice(firstPostCleanupIndex).some(([id]) => !POST_CLEANUP_LOCAL_GATE_IDS.has(id)) ||
+		phases.length - firstPostCleanupIndex !== POST_CLEANUP_LOCAL_GATE_IDS.size) {
+		throw new Error("Release contract post-cleanup gate order drifted");
 	}
-	process.stdout.write("Repository quality checks passed.\n");
-	return 0;
-}
-
-export function buildDiffWhitespacePhases(diffBase, environment) {
-	return [
-		[
-			"committed diff whitespace validation",
-			"git",
-			["diff", "--check", `${diffBase}...HEAD`],
-			environment,
-		],
-		["staged diff whitespace validation", "git", ["diff", "--cached", "--check"], environment],
-		["unstaged diff whitespace validation", "git", ["diff", "--check"], environment],
-	];
+	return {
+		databaseScoped: phases.slice(0, firstPostCleanupIndex),
+		postCleanup: phases.slice(firstPostCleanupIndex),
+	};
 }
 
 export async function runQualityPhaseSequence(phases, commandRunner = runCommand) {

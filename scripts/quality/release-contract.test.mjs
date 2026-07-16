@@ -76,9 +76,15 @@ test("release contract fails closed for missing, duplicate, and unknown gates", 
 
 test("release contract fails closed for contract drift and bad identities", async () => {
 	const { contract } = await readReleaseFiles();
-	const drifted = clone(contract);
-	drifted.hostedGates[0].command.push("--drift");
-	assert.ok(validateReleaseContractDefinition(drifted).includes("release contract drift"));
+	for (const mutate of [
+		(drifted) => drifted.hostedGates[0].command.push("--drift"),
+		(drifted) => drifted.localGates.push(clone(drifted.localGates[0])),
+		(drifted) => { drifted.localGates[0].id = "unknown-local-gate"; },
+	]) {
+		const drifted = clone(contract);
+		mutate(drifted);
+		assert.ok(validateReleaseContractDefinition(drifted).includes("release contract drift"));
+	}
 	for (const field of ["baseSha", "candidateSha"]) {
 		const evidence = acceptedEvidence(contract);
 		evidence[field] = "not-a-sha";

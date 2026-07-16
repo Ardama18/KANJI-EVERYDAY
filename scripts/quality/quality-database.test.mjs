@@ -22,8 +22,9 @@ import {
 	withDisposableS10Database,
 } from "./quality-database.mjs";
 import { superviseSpawnedChild } from "./child-supervisor.mjs";
+import { readReleaseFiles } from "./release-contract.mjs";
 import {
-	buildDiffWhitespacePhases,
+	buildContractLocalQualityPhases,
 	createTerminationHandler,
 	reconcileRunScopedResidue,
 	resolveQualityDiffBase,
@@ -220,51 +221,65 @@ test("success keeps the source available and the target exists only inside the c
 });
 
 test("repository quality provisions three distinct S-11 migration databases", async () => {
-	const runner = await readFile(new URL("./run-quality-with-database.mjs", import.meta.url), "utf8");
+	const [runner, { contract, evidence }] = await Promise.all([
+		readFile(new URL("./run-quality-with-database.mjs", import.meta.url), "utf8"),
+		readReleaseFiles(),
+	]);
+	const diffBase = "a".repeat(40);
+	const plan = buildContractLocalQualityPhases({
+		contract,
+		diffBase,
+		sourceEnvironment: { S10_ADMIN_DATABASE_URL: SOURCE_URL },
+		freshUrl: "postgresql://quality/fresh",
+		upgradeUrl: "postgresql://quality/upgrade",
+		failureUrl: "postgresql://quality/failure",
+	});
+	const dispatched = [...plan.databaseScoped, ...plan.postCleanup];
+	assert.deepEqual(
+		dispatched.map(([id, program, arguments_]) => [id, program, arguments_]),
+		contract.localGates.map((gate) => [
+			gate.id,
+			gate.command[0],
+			gate.command.slice(1).map((argument) =>
+				argument === "BASE...HEAD" ? `${diffBase}...HEAD` : argument
+			),
+		])
+	);
+	assert.equal(dispatched[0]?.[0], "release-contract");
+	assert.match(dispatched.find(([id]) => id === "s11-focused")?.[2].join(" ") ?? "", /R23-F/u);
+	assert.equal(evidence.state, "pending_rc1");
+	const observed = [];
+	const commandRunner = async (program, arguments_) => {
+		observed.push([program, arguments_]);
+		return 0;
+	};
+	assert.equal(await runQualityPhaseSequence(plan.databaseScoped, commandRunner), 0);
+	assert.equal(await runQualityPhaseSequence(plan.postCleanup, commandRunner), 0);
+	assert.deepEqual(observed, dispatched.map(([, program, arguments_]) => [program, arguments_]));
 	const preflight = runner.indexOf("const preflightFailures = validateReleaseContractDefinition");
-	const firstPhase = runner.indexOf('"S-11 local core fresh migration"');
-	const finalValidation = runner.indexOf("const releaseFailures = [", firstPhase);
-	assert.ok(preflight >= 0 && firstPhase > preflight && finalValidation > firstPhase);
-	assert.match(runner.slice(preflight, firstPhase), /return 2/u);
-	assert.doesNotMatch(runner.slice(preflight, firstPhase), /validateReleaseState|validateRepositoryEvidenceBinding/u);
+	const dispatch = runner.indexOf("runQualityPhaseSequence(plan.databaseScoped)");
+	assert.ok(preflight >= 0 && dispatch > preflight);
+	assert.doesNotMatch(runner, /validateReleaseState|validateRepositoryEvidenceBinding|readReleaseFiles/u);
 	assert.match(runner, /S11_FRESH_DATABASE_URL/u);
 	assert.match(runner, /S11_UPGRADE_DATABASE_URL/u);
 	assert.match(runner, /S11_FAILURE_DATABASE_URL/u);
-	assert.match(runner, /test:s11:fresh/u);
-	assert.match(runner, /test:s11:upgrade/u);
-	assert.match(runner, /test:s11:failure/u);
-	assert.match(runner, /test:s11:local-real-integration/u);
-	assert.match(runner, /committed diff whitespace validation/u);
-	assert.match(runner, /diffBase.*\.\.\.HEAD/u);
-	const committed = runner.indexOf("committed diff whitespace validation");
-	const staged = runner.indexOf("staged diff whitespace validation");
-	const unstaged = runner.indexOf("unstaged diff whitespace validation");
-	assert.ok(committed >= 0 && staged > committed && unstaged > staged);
-	assert.match(runner, /\["diff", "--cached", "--check"\]/u);
-	assert.match(runner, /\["diff", "--check"\]/u);
+	assert.deepEqual(plan.postCleanup.map(([id]) => id), ["database-residue", "source-continuity"]);
 });
 
 test("ordinary Vitest uses the repository-wide serial-file contract without redundant CLI worker claims", async () => {
-	const [runner, vitestConfig, testkit, integration, e2e, contractWorkflow] = await Promise.all([
+	const [runner, vitestConfig, testkit, integration, e2e, contractWorkflow, { contract }] = await Promise.all([
 		readFile(new URL("./run-quality-with-database.mjs", import.meta.url), "utf8"),
 		readFile(new URL("../../frontend/vitest.config.ts", import.meta.url), "utf8"),
 		readFile(new URL("../../specs/stories/S-10-ai-card-import-foundation/tests/helpers/s10-db-testkit.ts", import.meta.url), "utf8"),
 		readFile(new URL("../../specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.int.test.ts", import.meta.url), "utf8"),
 		readFile(new URL("../../specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.e2e.test.ts", import.meta.url), "utf8"),
 		readFile(new URL("../../specs/stories/S-10-ai-card-import-foundation/tests/helpers/s10-contract-workflow.ts", import.meta.url), "utf8"),
+		readReleaseFiles(),
 	]);
-	const ordinaryStart = runner.indexOf('"complete ordinary Vitest"');
-	const inventoryStart = runner.indexOf('"S-11 inventory"', ordinaryStart);
-	const focusedStart = runner.indexOf('"S-11 focused release regressions"', inventoryStart);
-	const diffStart = runner.indexOf("buildDiffWhitespacePhases", focusedStart);
-	assert.ok(
-		ordinaryStart >= 0 &&
-			inventoryStart > ordinaryStart &&
-			focusedStart > inventoryStart &&
-			diffStart > focusedStart
+	assert.deepEqual(
+		contract.localGates.find((gate) => gate.id === "ordinary-vitest")?.command,
+		["npm", "--prefix", "frontend", "run", "test"]
 	);
-	const ordinaryPhase = runner.slice(ordinaryStart, inventoryStart);
-	assert.match(ordinaryPhase, /\["--prefix", "frontend", "run", "test"\]/u);
 	assert.doesNotMatch(runner, /maxWorkers|minWorkers/u);
 	assert.match(vitestConfig, /fileParallelism:\s*false/u);
 	assert.doesNotMatch(vitestConfig, /testTimeout/u);
@@ -324,10 +339,12 @@ test("quality child stage deadlines are finite and migration/control/teardown ch
 });
 
 test("quality advisory lease fence escalates a resistant child and awaits zero residue", async () => {
-	const child = spawn(process.execPath, ["-e", "process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"], {
-		stdio: "ignore",
+	const child = spawn(process.execPath, ["-e", "process.on('SIGTERM',()=>{});process.stdout.write('ready');setInterval(()=>{},1000)"], {
+		stdio: ["ignore", "pipe", "ignore"],
 	});
-	const fence = superviseSpawnedChild(child, { timeoutMs: 500, killGraceMs: 25 });
+	const fence = superviseSpawnedChild(child, { killGraceMs: 25 });
+	await new Promise((resolve) => child.stdout.once("data", resolve));
+	fence.armDeadline(50);
 	const result = await fence.settled;
 	assert.equal(result.signal, "SIGKILL");
 	assert.equal(result.terminationReason, "timeout");
@@ -401,12 +418,23 @@ test("quality diff base accepts symbolic HEAD and rejects detached HEAD", async 
 
 test("staged-only whitespace failure is distinct from committed and unstaged checks", async () => {
 	await withTemporaryGitRepository(async ({ repository, git }) => {
+		const { contract } = await readReleaseFiles();
+		const base = String((await git("rev-parse", "HEAD")).stdout).trim();
 		await writeFile(path.join(repository, "tracked.txt"), "staged trailing whitespace  \n", "utf8");
 		await git("add", "tracked.txt");
 		await withGitRepositoryEnvironment(repository, async () => {
 			const calls = [];
+			const plan = buildContractLocalQualityPhases({
+				contract,
+				diffBase: base,
+				sourceEnvironment: process.env,
+				freshUrl: "postgresql://quality/fresh",
+				upgradeUrl: "postgresql://quality/upgrade",
+				failureUrl: "postgresql://quality/failure",
+			});
+			const phases = plan.databaseScoped.filter(([id]) => id.startsWith("diff-"));
 			const exitCode = await runQualityPhaseSequence(
-				buildDiffWhitespacePhases("HEAD", process.env),
+				phases,
 				async (program, arguments_, environment) => {
 					calls.push([program, arguments_]);
 					return await runCommand(program, arguments_, environment);
@@ -414,25 +442,33 @@ test("staged-only whitespace failure is distinct from committed and unstaged che
 			);
 			assert.notEqual(exitCode, 0);
 			assert.deepEqual(calls, [
-				["git", ["diff", "--check", "HEAD...HEAD"]],
+				["git", ["diff", "--check", `${base}...HEAD`]],
 				["git", ["diff", "--cached", "--check"]],
 			]);
 		});
 	});
 });
 
-test("diff whitespace phases preserve committed, staged, unstaged argument order and exits", async () => {
+test("contract diff gates preserve committed, staged, unstaged argument order and exits", async () => {
 	const environment = { PATH: process.env.PATH };
-	const phases = buildDiffWhitespacePhases("a".repeat(40), environment);
-	assert.deepEqual(phases, [
+	const { contract } = await readReleaseFiles();
+	const plan = buildContractLocalQualityPhases({
+		contract,
+		diffBase: "a".repeat(40),
+		sourceEnvironment: environment,
+		freshUrl: "postgresql://quality/fresh",
+		upgradeUrl: "postgresql://quality/upgrade",
+		failureUrl: "postgresql://quality/failure",
+	});
+	const phases = plan.databaseScoped.filter(([id]) => id.startsWith("diff-"));
+	assert.deepEqual(phases.map(([id, program, arguments_]) => [id, program, arguments_]), [
 		[
-			"committed diff whitespace validation",
+			"diff-committed",
 			"git",
 			["diff", "--check", `${"a".repeat(40)}...HEAD`],
-			environment,
 		],
-		["staged diff whitespace validation", "git", ["diff", "--cached", "--check"], environment],
-		["unstaged diff whitespace validation", "git", ["diff", "--check"], environment],
+		["diff-staged", "git", ["diff", "--cached", "--check"]],
+		["diff-unstaged", "git", ["diff", "--check"]],
 	]);
 	const calls = [];
 	assert.equal(

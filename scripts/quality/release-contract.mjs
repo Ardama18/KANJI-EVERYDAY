@@ -6,8 +6,8 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 const SHA_PATTERN = /^[0-9a-f]{40}$/u;
-const CONTRACT_VERSION = "S11-RC1-1.0.1";
-const CONTRACT_DIGEST = "878f9f364e5118371a59096f74e8fb4bc39279f1a1f94fd1c75e5fe7c256acb8";
+const CONTRACT_VERSION = "S11-RC1-1.0.2";
+const CONTRACT_DIGEST = "8743c2805b9024981af64918c55b75a3183e09887c5d7b34235d0ca706cc7dab";
 const EXPECTED_ACCEPTANCE_CRITERIA = [
 	"AC-01-async-commit-under-two-seconds",
 	"AC-02-reconnectable-owner-status",

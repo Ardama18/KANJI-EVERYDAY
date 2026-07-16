@@ -10,7 +10,8 @@
 - [x] Fail closed on contract drift, missing/duplicate/unknown or unresolved gates, bad identities, evidence mismatch, unresolved reviews, and unredacted evidence.
 - [x] Wire validation into the authoritative repository quality runner.
 - [x] Bootstrap correction before RC candidate freeze: run immutable definition-only preflight before phase 1, while keeping completed candidate evidence and evidence-only child-commit binding exclusively in the final validator. Pending RC1 evidence may start local gates but cannot pass final acceptance.
-- [x] Freeze release contract `S11-RC1-1.0.1` after this bootstrap correction; no policy or scope expansion is permitted.
+- [x] Final bootstrap correction before RC candidate freeze: `.codex/quality.json` is PR-local readiness only and dispatches the exact declared `localGates` in order, including R23, substitutes only the validated base placeholder, finishes cleanup/residue, and exits independently of Hosted/review evidence. Standalone final validation remains the merge gate. The earlier drifted local run is not candidate evidence.
+- [x] Freeze release contract `S11-RC1-1.0.2` after these bootstrap corrections; no policy or scope expansion is permitted.
 - [x] Replace open-ended review loops with one cumulative review plus one scope-limited verification.
 
 ## Consolidated RC1
