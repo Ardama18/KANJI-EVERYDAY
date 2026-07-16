@@ -15,6 +15,7 @@ import {
 } from "./quality-database.mjs";
 import {
 	createTerminationHandler,
+	reconcileRunScopedResidue,
 	resolveProcessExitCode,
 	runActiveCleanups,
 	runCommand,
@@ -105,7 +106,7 @@ test("generated disposable names are strict and collision resistant", () => {
 	const names = new Set(Array.from({ length: 2_000 }, () => createDisposableDatabaseName()));
 	assert.equal(names.size, 2_000);
 	for (const name of names) {
-		assert.match(name, /^kanji_everyday_quality_s10_[0-9a-f]{24}$/u);
+		assert.match(name, /^kanji_everyday_quality_s10_[0-9a-f]{16}_[0-9a-f]{16}$/u);
 		assert.ok(name.length <= 63);
 	}
 });
@@ -199,6 +200,35 @@ test("signal cleanup attempts every active database in reverse order before fail
 		(error) => error === failure
 	);
 	assert.deepEqual(events, ["failure", "upgrade", "fresh"]);
+});
+
+test("run-scoped residue cleanup removes stale strict names and ignores a concurrent run", async () => {
+	const staleScope = "1111111111111111";
+	const currentScope = "2222222222222222";
+	const concurrentScope = "3333333333333333";
+	const names = new Set([
+		`${DISPOSABLE_DATABASE_PREFIX}${staleScope}_aaaaaaaaaaaaaaaa`,
+		`${DISPOSABLE_DATABASE_PREFIX}${currentScope}_bbbbbbbbbbbbbbbb`,
+		`${DISPOSABLE_DATABASE_PREFIX}${concurrentScope}_cccccccccccccccc`,
+		`${DISPOSABLE_DATABASE_PREFIX}not-a-safe-name`,
+	]);
+	const dropped = [];
+	await reconcileRunScopedResidue({
+		currentScope,
+		sourceDatabaseName: "postgres",
+		async listDatabaseNames() {
+			return [...names];
+		},
+		async isRunScopeActive(scope) {
+			return scope === currentScope || scope === concurrentScope;
+		},
+		async dropDatabase(name) {
+			dropped.push(name);
+			names.delete(name);
+		},
+	});
+	assert.deepEqual(dropped, [`${DISPOSABLE_DATABASE_PREFIX}${staleScope}_aaaaaaaaaaaaaaaa`]);
+	assert.equal(names.has(`${DISPOSABLE_DATABASE_PREFIX}${concurrentScope}_cccccccccccccccc`), true);
 });
 
 test("setup failure cleans immediately after creation and never touches the source", async () => {

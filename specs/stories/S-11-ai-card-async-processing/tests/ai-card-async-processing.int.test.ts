@@ -29,12 +29,16 @@ import {
 	pngFixture,
 	safeFailure,
 } from "./helpers/s11-edge-testkit";
+import { createS11DbClient } from "./helpers/s11-db-testkit";
 
 const OWNER_ID = "22000000-0000-4000-8000-000000000001";
 const routeBoundary = vi.hoisted(() => ({
 	userId: "22000000-0000-4000-8000-000000000001",
 	rpc: vi.fn(),
+	from: vi.fn(),
 	signedUpload: vi.fn(),
+	upload: vi.fn(),
+	remove: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -43,8 +47,13 @@ vi.mock("@/lib/supabase/server", () => ({
 	}),
 	createServiceRoleClient: () => ({
 		rpc: routeBoundary.rpc,
+		from: routeBoundary.from,
 		storage: {
-			from: () => ({ createSignedUploadUrl: routeBoundary.signedUpload }),
+			from: () => ({
+				createSignedUploadUrl: routeBoundary.signedUpload,
+				upload: routeBoundary.upload,
+				remove: routeBoundary.remove,
+			}),
 		},
 	}),
 }));
@@ -52,7 +61,20 @@ vi.mock("@/lib/supabase/server", () => ({
 beforeEach(() => {
 	routeBoundary.userId = OWNER_ID;
 	routeBoundary.rpc.mockReset();
+	routeBoundary.from.mockReset();
 	routeBoundary.signedUpload.mockReset();
+	routeBoundary.upload.mockReset();
+	routeBoundary.remove.mockReset();
+	const query = {
+		select: vi.fn(),
+		eq: vi.fn(),
+		maybeSingle: vi.fn(async () => ({ data: null, error: null })),
+	};
+	query.select.mockReturnValue(query);
+	query.eq.mockReturnValue(query);
+	routeBoundary.from.mockReturnValue(query);
+	routeBoundary.upload.mockResolvedValue({ error: null });
+	routeBoundary.remove.mockResolvedValue({ error: null });
 });
 
 describe("S-11 commit and queue integration", () => {
@@ -580,7 +602,7 @@ describe("S-11 commit and queue integration", () => {
 			),
 			"utf8"
 		);
-		const start = migration.indexOf("CREATE FUNCTION public.mark_ai_upload_cleanup");
+		const start = migration.indexOf("CREATE OR REPLACE FUNCTION public.mark_ai_upload_cleanup");
 		const body = migration.slice(start, migration.indexOf("$$;", start));
 		expect(body).toContain("status='prepared'");
 		expect(body).toContain("source_write_intent_path=p_source_path");
@@ -615,6 +637,212 @@ describe("S-11 commit and queue integration", () => {
 		expect(source).toContain("presentedSecret !== secret");
 		expect(config).toContain("Resource-only local quality gate");
 		expect(config).toMatch(/\[functions\.ai-card-import-resource-gate\][\s\S]*verify_jwt = true/u);
+	});
+
+	it("R13-F6 complete rejects a non-UUID uploadId before service-role DB or Storage", async () => {
+		const { POST } = await import(
+			"../../../../frontend/app/api/ai/imports/sources/complete/route"
+		);
+		const response = await POST(
+			new Request("http://local/api/ai/imports/sources/complete", {
+				method: "POST",
+				body: JSON.stringify({ uploadId: "not-a-uuid" }),
+			})
+		);
+		expect(response.status).toBe(400);
+		expect(await response.json()).toEqual({ error: { code: "VALIDATION_ERROR" } });
+		expect(routeBoundary.from).not.toHaveBeenCalled();
+		expect(routeBoundary.rpc).not.toHaveBeenCalled();
+		expect(routeBoundary.upload).not.toHaveBeenCalled();
+		expect(routeBoundary.remove).not.toHaveBeenCalled();
+	});
+
+	it("R13-F1 reconciles a committed mark-ready response loss before any Storage delete", async () => {
+		const [route, migration] = await Promise.all([
+			readFile(
+				new URL(
+					"../../../../frontend/app/api/ai/imports/sources/complete/route.ts",
+					import.meta.url
+				),
+				"utf8"
+			),
+			readFile(
+				new URL(
+					"../../../../supabase/migrations/20260715000000_s11_ai_card_async_processing.sql",
+					import.meta.url
+				),
+				"utf8"
+			),
+		]);
+		expect(route).toMatch(/service\.rpc\(\s*"reconcile_ai_source_ready"/u);
+		expect(route).toContain('reconciliation.outcome === "ready"');
+		expect(route).toContain('reconciliation.outcome === "uncommitted"');
+		expect(migration).toContain("CREATE OR REPLACE FUNCTION public.reconcile_ai_source_ready");
+		expect(migration).toContain("source_write_intent_path IS NULL");
+		expect(migration).toContain("sha256=p_digest");
+	});
+
+	it.skipIf(!process.env.S11_FRESH_DATABASE_URL)(
+		"R13-F1 committed response loss keeps the normalized source through the actual route and DB",
+		async () => {
+			const databaseUrl = process.env.S11_FRESH_DATABASE_URL;
+			if (!databaseUrl) return;
+			const db = createS11DbClient(databaseUrl);
+			const uploadId = crypto.randomUUID();
+			const rawPath = `${OWNER_ID}/${uploadId}/raw`;
+			const sourcePath = `${OWNER_ID}/${uploadId}/source`;
+			const png = Uint8Array.from(
+				Buffer.from(
+					"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+					"base64"
+				)
+			);
+			await db.execute(`
+				INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
+				VALUES('${OWNER_ID}','00000000-0000-0000-0000-000000000000','authenticated','authenticated','r13-route@example.local','not-for-login',now(),'{}','{}',now(),now())
+				ON CONFLICT(id) DO NOTHING;
+				INSERT INTO public.ai_uploads(id,owner_user_id,upload_key,purpose,storage_path,mime_type,byte_size,status,raw_storage_path,raw_storage_bucket,delete_due_at)
+				VALUES('${uploadId}','${OWNER_ID}','r13-response-loss','card_illustration','${rawPath}','image/png',${png.byteLength},'prepared','${rawPath}','ai-card-sources',clock_timestamp()+interval '1 hour');
+			`);
+			const query = {
+				select: vi.fn(),
+				eq: vi.fn(),
+				maybeSingle: vi.fn(async () => {
+					const [row] = await db.query<Record<string, unknown>>(`
+						SELECT id::text,owner_user_id::text,status,raw_storage_path,mime_type,byte_size::int
+						FROM public.ai_uploads WHERE id='${uploadId}'
+					`);
+					return { data: row ?? null, error: null };
+				}),
+			};
+			query.select.mockReturnValue(query);
+			query.eq.mockReturnValue(query);
+			routeBoundary.from.mockReturnValue(query);
+			let committedReadyResponseLost = false;
+			routeBoundary.rpc.mockImplementation(
+				async (name: string, args: Readonly<Record<string, unknown>>) => {
+					try {
+						if (name === "mark_ai_source_write_intent") {
+							await db.query(`SELECT public.mark_ai_source_write_intent('${OWNER_ID}','${uploadId}','${sourcePath}')`, { actor: { kind: "service", role: "service_role", userId: null } });
+							return { data: null, error: null };
+						}
+						if (name === "mark_ai_source_ready" || name === "reconcile_ai_source_ready") {
+							const functionName = name;
+							const [row] = await db.query<{ result: unknown }>(`
+								SELECT public.${functionName}('${OWNER_ID}','${uploadId}',
+									'${String(args.p_detected_mime)}',${Number(args.p_actual_byte_size)},
+									${Number(args.p_width)},${Number(args.p_height)},'${String(args.p_digest)}') result
+							`, { actor: { kind: "service", role: "service_role", userId: null } });
+							if (name === "mark_ai_source_ready" && !committedReadyResponseLost) {
+								committedReadyResponseLost = true;
+								return { data: null, error: { message: "response lost" } };
+							}
+							return { data: row?.result ?? null, error: null };
+						}
+						if (name === "mark_ai_source_raw_deleted") {
+							await db.query(`SELECT public.mark_ai_source_raw_deleted('${OWNER_ID}','${uploadId}')`, { actor: { kind: "service", role: "service_role", userId: null } });
+							return { data: null, error: null };
+						}
+						return { data: null, error: { message: "unexpected RPC" } };
+					} catch (error) {
+						return { data: null, error };
+					}
+				}
+			);
+			routeBoundary.upload.mockResolvedValue({ error: null });
+			routeBoundary.remove.mockResolvedValue({ error: null });
+			vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "http://127.0.0.1:54321");
+			vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "r13-test-anon-key");
+			vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "r13-test-service-key");
+			vi.stubGlobal("fetch", async () => new Response(png, { status: 200 }));
+			try {
+				const { POST } = await import(
+					"../../../../frontend/app/api/ai/imports/sources/complete/route"
+				);
+				const response = await POST(
+					new Request("http://local/api/ai/imports/sources/complete", {
+						method: "POST",
+						body: JSON.stringify({ uploadId }),
+					})
+				);
+				const responseBody = await response.json();
+				const persisted = await db.query<Record<string, unknown>>(`
+					SELECT status,storage_path,source_storage_path,source_storage_bucket,
+						source_write_intent_path,detected_mime_type,byte_size,width,height,sha256
+					FROM public.ai_uploads WHERE id='${uploadId}'
+				`);
+				expect(response.status, JSON.stringify({ responseBody, persisted })).toBe(200);
+				expect(responseBody).toEqual({ uploadId, status: "ready", path: sourcePath });
+				expect(routeBoundary.remove).toHaveBeenCalledTimes(1);
+				expect(routeBoundary.remove).toHaveBeenCalledWith([rawPath]);
+				expect(await db.query<{ status: string; path: string }>(`
+					SELECT status,source_storage_path path FROM public.ai_uploads WHERE id='${uploadId}'
+				`)).toEqual([{ status: "ready", path: sourcePath }]);
+			} finally {
+				vi.unstubAllGlobals();
+				vi.unstubAllEnvs();
+				await db.execute(`DELETE FROM public.ai_uploads WHERE id='${uploadId}'; DELETE FROM auth.users WHERE id='${OWNER_ID}'`);
+			}
+		}
+	);
+
+	it("R13-F2/F3 expand is autocommit-resumable and denies PUBLIC function execution first", async () => {
+		const [migration, jobs] = await Promise.all([
+			readFile(
+				new URL(
+					"../../../../supabase/migrations/20260715000000_s11_ai_card_async_processing.sql",
+					import.meta.url
+				),
+				"utf8"
+			),
+			readFile(new URL("./helpers/s11-db-jobs.ts", import.meta.url), "utf8"),
+		]);
+		expect(migration).toMatch(/ALTER DEFAULT PRIVILEGES[\s\S]+REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC/u);
+		expect(migration).toContain("after_expand_tables");
+		expect(migration).toContain("after_runtime_functions");
+		expect(migration).toMatch(/CREATE TABLE IF NOT EXISTS public\.ai_import_concept_jobs/u);
+		expect(migration).toMatch(/CREATE OR REPLACE FUNCTION public\.mark_ai_source_ready/u);
+		expect(jobs).not.toContain("`BEGIN;\\nSET LOCAL app.s11_failpoint");
+		expect(jobs).toContain("supabase_migrations.schema_migrations");
+		expect(jobs).toContain("after_expand_tables");
+		expect(jobs).toContain("after_runtime_functions");
+	});
+
+	it("R13-F3 schedule migration denies PUBLIC before creating SECURITY DEFINER functions", async () => {
+		const schedule = await readFile(
+			new URL(
+				"../../../../supabase/migrations/20260715000001_s11_ai_card_async_schedule_controls.sql",
+				import.meta.url
+			),
+			"utf8"
+		);
+		const deny = schedule.indexOf("ALTER DEFAULT PRIVILEGES");
+		const firstFunction = schedule.indexOf("CREATE OR REPLACE FUNCTION");
+		expect(deny).toBeGreaterThan(-1);
+		expect(deny).toBeLessThan(firstFunction);
+	});
+
+	it("R13-F4 validates canonical HTTPS project origin and nonblank secret in activation and invoke", async () => {
+		const [core, schedule] = await Promise.all([
+			readFile(
+				new URL(
+					"../../../../supabase/migrations/20260715000000_s11_ai_card_async_processing.sql",
+					import.meta.url
+				),
+				"utf8"
+			),
+			readFile(
+				new URL(
+					"../../../../supabase/migrations/20260715000001_s11_ai_card_async_schedule_controls.sql",
+					import.meta.url
+				),
+				"utf8"
+			),
+		]);
+		expect(core).toContain("CREATE OR REPLACE FUNCTION public.ai_s11_validate_schedule_config");
+		expect(core).toContain("^https://");
+		expect(core).toContain("btrim(p_worker_secret)");
+		expect(schedule.match(/ai_s11_validate_schedule_config/gu)).toHaveLength(2);
 	});
 
 	it("R11-F1 preserves the legitimate empty Queue response as idle through the real handler path", async () => {
@@ -2140,10 +2368,10 @@ describe("S-11 reviewer regression boundaries", () => {
 				"utf8"
 			),
 		]);
-		expect(migration).toContain("CREATE TABLE public.ai_worker_log_outbox");
+		expect(migration).toContain("CREATE TABLE IF NOT EXISTS public.ai_worker_log_outbox");
 		expect(migration).toMatch(/UNIQUE \(event_type, queue_message_id\)/u);
-		expect(migration).toContain("CREATE FUNCTION public.claim_ai_worker_log_outbox");
-		expect(migration).toContain("CREATE FUNCTION public.complete_ai_worker_log_outbox");
+		expect(migration).toContain("CREATE OR REPLACE FUNCTION public.claim_ai_worker_log_outbox");
+		expect(migration).toContain("CREATE OR REPLACE FUNCTION public.complete_ai_worker_log_outbox");
 		expect(migration).toMatch(
 			/ai_s11_record_worker_event[\s\S]+IF NOT pgmq\.archive\('ai_card_imports',p_message_id\)/u
 		);
@@ -2213,8 +2441,8 @@ describe("S-11 reviewer regression boundaries", () => {
 				"utf8"
 			),
 		]);
-		expect(migration).toContain("ADD COLUMN cleanup_claim_token uuid");
-		expect(migration).toContain("ADD COLUMN raw_cleanup_claim_token uuid");
+		expect(migration).toContain("ADD COLUMN IF NOT EXISTS cleanup_claim_token uuid");
+		expect(migration).toContain("ADD COLUMN IF NOT EXISTS raw_cleanup_claim_token uuid");
 		expect(migration).toContain("cleanup_claim_token uuid");
 		expect(migration).toMatch(
 			/verify_ai_import_cleanup\(\s*p_tracking_id uuid,p_bucket text,p_path text,p_claim_token uuid\s*\)/u
@@ -2275,7 +2503,7 @@ describe("S-11 reviewer regression boundaries", () => {
 			),
 			readFile(new URL("./s11-real-integration-gate.ts", import.meta.url), "utf8"),
 		]);
-		expect(migration).toContain("CREATE FUNCTION public.ai_s11_assert_active_claim");
+		expect(migration).toContain("CREATE OR REPLACE FUNCTION public.ai_s11_assert_active_claim");
 		expect(migration.match(/PERFORM public\.ai_s11_assert_active_claim\(/gu)?.length ?? 0).toBeGreaterThanOrEqual(5);
 		expect(migration.match(/claim_expires_at>clock_timestamp\(\)/gu)?.length ?? 0).toBeGreaterThanOrEqual(2);
 		expect(realGate).toContain("claim-expiry-side-effect-boundary");
@@ -2300,7 +2528,7 @@ describe("S-11 reviewer regression boundaries", () => {
 			readFile(new URL("./s11-real-integration-gate.ts", import.meta.url), "utf8"),
 		]);
 		expect(migration).toContain("source_write_intent_path text");
-		expect(migration).toContain("CREATE FUNCTION public.mark_ai_source_write_intent");
+		expect(migration).toContain("CREATE OR REPLACE FUNCTION public.mark_ai_source_write_intent");
 		expect(route.indexOf('service.rpc("mark_ai_source_write_intent"')).toBeGreaterThan(-1);
 		expect(route.indexOf('service.rpc("mark_ai_source_write_intent"')).toBeLessThan(
 			route.indexOf("bucket.upload(sourcePath")
@@ -2363,7 +2591,9 @@ describe("S-11 reviewer regression boundaries", () => {
 			readFile(new URL("../../../../supabase/migrations/20260715000000_s11_ai_card_async_processing.sql", import.meta.url), "utf8"),
 			readFile(new URL("./s11-real-integration-gate.ts", import.meta.url), "utf8"),
 		]);
-		expect(migration).toContain("CREATE FUNCTION public.ai_s11_guard_illustration_lifecycle");
+		expect(migration).toContain(
+			"CREATE OR REPLACE FUNCTION public.ai_s11_guard_illustration_lifecycle"
+		);
 		expect(migration).toContain("CREATE TRIGGER ai_s11_guard_illustration_lifecycle");
 		expect(migration).toContain("object_row.state<>'ready'");
 		expect(migration).toMatch(/object_row\.illustration_status<>'ready' OR object_row\.illustration_storage_path IS NULL/u);
@@ -2485,8 +2715,10 @@ describe("S-11 reviewer regression boundaries", () => {
 			readFile(new URL("../../../../supabase/migrations/20260715000000_s11_ai_card_async_processing.sql", import.meta.url), "utf8"),
 			readFile(new URL("./s11-real-integration-gate.ts", import.meta.url), "utf8"),
 		]);
-		expect(migration).toContain("CREATE FUNCTION public.ai_s11_lock_illustration_lifecycle");
-		const helperStart = migration.indexOf("CREATE FUNCTION public.ai_s11_lock_illustration_lifecycle");
+		expect(migration).toContain("CREATE OR REPLACE FUNCTION public.ai_s11_lock_illustration_lifecycle");
+		const helperStart = migration.indexOf(
+			"CREATE OR REPLACE FUNCTION public.ai_s11_lock_illustration_lifecycle"
+		);
 		const helperEnd = migration.indexOf("$$;", helperStart);
 		const helper = migration.slice(helperStart, helperEnd);
 		expect(helper.indexOf("FROM public.illustrations")).toBeGreaterThanOrEqual(0);
@@ -2501,7 +2733,7 @@ describe("S-11 reviewer regression boundaries", () => {
 			"verify_ai_import_cleanup",
 			"complete_ai_import_cleanup",
 		]) {
-			const start = migration.indexOf(`CREATE FUNCTION public.${functionName}`);
+			const start = migration.indexOf(`CREATE OR REPLACE FUNCTION public.${functionName}`);
 			const body = migration.slice(start, migration.indexOf("$$;", start));
 			expect(body, functionName).toContain("ai_s11_lock_illustration_lifecycle");
 		}
@@ -2545,7 +2777,9 @@ describe("S-11 reviewer regression boundaries", () => {
 			readFile(new URL("../../../../supabase/migrations/20260715000000_s11_ai_card_async_processing.sql", import.meta.url), "utf8"),
 			readFile(new URL("./s11-real-integration-gate.ts", import.meta.url), "utf8"),
 		]);
-		const guardStart = migration.indexOf("CREATE FUNCTION public.ai_s11_guard_illustration_lifecycle");
+		const guardStart = migration.indexOf(
+			"CREATE OR REPLACE FUNCTION public.ai_s11_guard_illustration_lifecycle"
+		);
 		const guardBody = migration.slice(guardStart, migration.indexOf("$$;", guardStart));
 		expect(guardBody).not.toContain("current_user");
 		expect(guardBody).toContain(

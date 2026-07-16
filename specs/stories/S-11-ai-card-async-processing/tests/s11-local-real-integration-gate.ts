@@ -7,6 +7,30 @@ const ownerId = "18400000-0000-4000-8000-00000000000a";
 const uploadId = "18400000-0000-4000-8000-000000000010";
 const sourcePath = `${ownerId}/${uploadId}/source`;
 
+const scheduleConfig = await db.query<{ config: { projectUrl: string; workerSecret: string } }>(`
+	SELECT public.ai_s11_validate_schedule_config(
+		'https://project-ref.supabase.co','  local-worker-secret  '
+	) config
+`);
+if (
+	scheduleConfig[0]?.config.projectUrl !== "https://project-ref.supabase.co" ||
+	scheduleConfig[0]?.config.workerSecret !== "local-worker-secret"
+) {
+	throw new Error("schedule config validator did not canonicalize accepted values");
+}
+for (const [projectUrl, secret] of [
+	["http://project-ref.supabase.co", "secret"],
+	["https://project-ref.supabase.co/path", "secret"],
+	["https://project-ref.supabase.co", "   "],
+] as const) {
+	const diagnostic = await db.captureError(
+		`SELECT public.ai_s11_validate_schedule_config('${projectUrl}','${secret}')`
+	);
+	if (diagnostic.sqlState !== "P1008") {
+		throw new Error("schedule config validator accepted an unsafe value");
+	}
+}
+
 await db.execute(`
 	SET LOCAL request.jwt.claim.role='service_role';
 	INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
@@ -43,5 +67,5 @@ const rows = await db.query<{ status: string }>(
 if (rows[0]?.status !== "ready") throw new Error("stale cleanup downgraded the ready winner");
 await db.execute(`DELETE FROM auth.users WHERE id='${ownerId}'`);
 process.stdout.write(
-	`${JSON.stringify({ gate: "s11-local-real-integration", status: "passed", boundaries: ["two-session-source-complete-winner-not-downgraded"] })}\n`
+	`${JSON.stringify({ gate: "s11-local-real-integration", status: "passed", boundaries: ["two-session-source-complete-winner-not-downgraded", "schedule-config-canonical-https-nonblank"] })}\n`
 );

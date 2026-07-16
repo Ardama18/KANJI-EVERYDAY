@@ -950,6 +950,18 @@ export type Database = {
 				};
 				Returns: Json;
 			};
+			reconcile_ai_source_ready: {
+				Args: {
+					p_owner_user_id: string;
+					p_upload_id: string;
+					p_detected_mime: string;
+					p_actual_byte_size: number;
+					p_width: number;
+					p_height: number;
+					p_digest: string;
+				};
+				Returns: Json;
+			};
 			mark_ai_source_write_intent: {
 				Args: {
 					p_owner_user_id: string;

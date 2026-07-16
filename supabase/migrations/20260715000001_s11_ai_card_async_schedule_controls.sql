@@ -1,16 +1,20 @@
 SET lock_timeout = '5s';
 SET statement_timeout = '5min';
 
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+	REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+
 CREATE EXTENSION IF NOT EXISTS pg_cron;
 CREATE EXTENSION IF NOT EXISTS pg_net WITH SCHEMA extensions;
 CREATE EXTENSION IF NOT EXISTS supabase_vault;
 
-CREATE FUNCTION public.invoke_ai_card_async_schedule(p_kind text)
+CREATE OR REPLACE FUNCTION public.invoke_ai_card_async_schedule(p_kind text)
 RETURNS bigint LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE project_url text;
 DECLARE worker_secret text;
 DECLARE endpoint text;
 DECLARE request_id bigint;
+DECLARE validated jsonb;
 BEGIN
   IF p_kind NOT IN ('worker','cleanup') THEN
     PERFORM public.ai_raise_import_error('CONFLICT');
@@ -19,9 +23,9 @@ BEGIN
   FROM vault.decrypted_secrets WHERE name='s11_project_url';
   SELECT decrypted_secret INTO worker_secret
   FROM vault.decrypted_secrets WHERE name='s11_worker_secret';
-  IF project_url IS NULL OR worker_secret IS NULL THEN
-    PERFORM public.ai_raise_import_error('CONFLICT');
-  END IF;
+	validated := public.ai_s11_validate_schedule_config(project_url,worker_secret);
+	project_url := validated->>'projectUrl';
+	worker_secret := validated->>'workerSecret';
   endpoint := CASE p_kind
     WHEN 'worker' THEN '/functions/v1/ai-card-import-worker'
     ELSE '/functions/v1/ai-card-import-cleanup'
@@ -37,18 +41,22 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.activate_ai_card_async_schedules()
+CREATE OR REPLACE FUNCTION public.activate_ai_card_async_schedules()
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE worker_job bigint;
 DECLARE cleanup_job bigint;
+DECLARE project_url text;
+DECLARE worker_secret text;
+DECLARE validated jsonb;
 BEGIN
   IF current_setting('request.jwt.claim.role',true) IS DISTINCT FROM 'service_role' THEN
     PERFORM public.ai_raise_import_error('UNAUTHORIZED');
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM vault.decrypted_secrets WHERE name='s11_project_url') OR
-     NOT EXISTS (SELECT 1 FROM vault.decrypted_secrets WHERE name='s11_worker_secret') THEN
-    PERFORM public.ai_raise_import_error('CONFLICT');
-  END IF;
+	SELECT decrypted_secret INTO project_url
+	FROM vault.decrypted_secrets WHERE name='s11_project_url';
+	SELECT decrypted_secret INTO worker_secret
+	FROM vault.decrypted_secrets WHERE name='s11_worker_secret';
+	validated := public.ai_s11_validate_schedule_config(project_url,worker_secret);
   PERFORM cron.unschedule(jobid) FROM cron.job WHERE jobname IN ('s11-ai-card-worker','s11-ai-card-cleanup');
   SELECT cron.schedule(
     's11-ai-card-worker','5 seconds',
@@ -62,7 +70,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.deactivate_ai_card_async_schedules()
+CREATE OR REPLACE FUNCTION public.deactivate_ai_card_async_schedules()
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE removed integer;
 BEGIN

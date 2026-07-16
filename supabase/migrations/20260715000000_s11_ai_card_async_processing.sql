@@ -4,6 +4,12 @@
 SET lock_timeout = '5s';
 SET statement_timeout = '15min';
 
+-- PostgreSQL grants EXECUTE on new functions to PUBLIC by default. Deny that
+-- before the first CREATE FUNCTION so an autocommit interruption cannot expose
+-- a partially installed SECURITY DEFINER surface.
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+	REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+
 CREATE EXTENSION IF NOT EXISTS pgmq;
 SELECT pgmq.create('ai_card_imports');
 
@@ -13,24 +19,29 @@ ON CONFLICT (id) DO UPDATE SET public = false, file_size_limit = 10485760;
 
 ALTER TABLE public.ai_uploads DROP CONSTRAINT IF EXISTS ai_uploads_status_check;
 ALTER TABLE public.ai_uploads DROP CONSTRAINT IF EXISTS ai_uploads_status_time_check;
+ALTER TABLE public.ai_uploads DROP CONSTRAINT IF EXISTS ai_uploads_s11_status_check;
+ALTER TABLE public.ai_uploads DROP CONSTRAINT IF EXISTS ai_uploads_s11_dimensions_check;
+ALTER TABLE public.ai_uploads DROP CONSTRAINT IF EXISTS ai_uploads_s11_digest_check;
+ALTER TABLE public.ai_uploads DROP CONSTRAINT IF EXISTS ai_uploads_s11_bucket_check;
+ALTER TABLE public.ai_uploads DROP CONSTRAINT IF EXISTS ai_uploads_s11_status_time_check;
 ALTER TABLE public.ai_uploads
-  ADD COLUMN raw_storage_path text,
-	ADD COLUMN raw_storage_bucket text,
-  ADD COLUMN source_storage_path text,
-	ADD COLUMN source_storage_bucket text,
-	ADD COLUMN source_write_intent_path text,
-	ADD COLUMN source_write_intent_bucket text,
-  ADD COLUMN detected_mime_type text,
-  ADD COLUMN width integer,
-  ADD COLUMN height integer,
-  ADD COLUMN sha256 text,
-  ADD COLUMN delete_due_at timestamptz,
-  ADD COLUMN deleted_at timestamptz,
-  ADD COLUMN cleanup_claimed_at timestamptz,
-	ADD COLUMN cleanup_claim_token uuid,
-  ADD COLUMN cleanup_previous_status text,
-  ADD COLUMN raw_cleanup_claimed_at timestamptz,
-	ADD COLUMN raw_cleanup_claim_token uuid;
+  ADD COLUMN IF NOT EXISTS raw_storage_path text,
+	ADD COLUMN IF NOT EXISTS raw_storage_bucket text,
+  ADD COLUMN IF NOT EXISTS source_storage_path text,
+	ADD COLUMN IF NOT EXISTS source_storage_bucket text,
+	ADD COLUMN IF NOT EXISTS source_write_intent_path text,
+	ADD COLUMN IF NOT EXISTS source_write_intent_bucket text,
+  ADD COLUMN IF NOT EXISTS detected_mime_type text,
+  ADD COLUMN IF NOT EXISTS width integer,
+  ADD COLUMN IF NOT EXISTS height integer,
+  ADD COLUMN IF NOT EXISTS sha256 text,
+  ADD COLUMN IF NOT EXISTS delete_due_at timestamptz,
+  ADD COLUMN IF NOT EXISTS deleted_at timestamptz,
+  ADD COLUMN IF NOT EXISTS cleanup_claimed_at timestamptz,
+	ADD COLUMN IF NOT EXISTS cleanup_claim_token uuid,
+  ADD COLUMN IF NOT EXISTS cleanup_previous_status text,
+  ADD COLUMN IF NOT EXISTS raw_cleanup_claimed_at timestamptz,
+	ADD COLUMN IF NOT EXISTS raw_cleanup_claim_token uuid;
 
 ALTER TABLE public.ai_uploads
   ADD CONSTRAINT ai_uploads_s11_status_check
@@ -55,7 +66,7 @@ ALTER TABLE public.ai_uploads
     (status = 'deleted' AND deleted_at IS NOT NULL)
   ) NOT VALID;
 
-CREATE TABLE public.ai_import_concept_jobs (
+CREATE TABLE IF NOT EXISTS public.ai_import_concept_jobs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   owner_user_id uuid NOT NULL,
   batch_id uuid NOT NULL,
@@ -97,12 +108,12 @@ CREATE TABLE public.ai_import_concept_jobs (
   CONSTRAINT ai_import_concept_jobs_id_owner_uq UNIQUE (id, owner_user_id)
 );
 
-CREATE INDEX ai_import_concept_jobs_state_attempt_idx
+CREATE INDEX IF NOT EXISTS ai_import_concept_jobs_state_attempt_idx
   ON public.ai_import_concept_jobs (state, next_attempt_at, created_at);
-CREATE UNIQUE INDEX ai_import_concept_jobs_message_uidx
+CREATE UNIQUE INDEX IF NOT EXISTS ai_import_concept_jobs_message_uidx
 	ON public.ai_import_concept_jobs (queue_message_id) WHERE queue_message_id IS NOT NULL;
 
-CREATE TABLE public.ai_upload_consumers (
+CREATE TABLE IF NOT EXISTS public.ai_upload_consumers (
 	upload_id uuid NOT NULL REFERENCES public.ai_uploads(id) ON DELETE RESTRICT,
 	job_id uuid NOT NULL UNIQUE REFERENCES public.ai_import_concept_jobs(id) ON DELETE CASCADE,
 	owner_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -110,9 +121,9 @@ CREATE TABLE public.ai_upload_consumers (
 	PRIMARY KEY (upload_id,job_id),
 	CONSTRAINT ai_upload_consumers_owner_check CHECK (owner_user_id IS NOT NULL)
 );
-CREATE INDEX ai_upload_consumers_upload_idx ON public.ai_upload_consumers(upload_id,job_id);
+CREATE INDEX IF NOT EXISTS ai_upload_consumers_upload_idx ON public.ai_upload_consumers(upload_id,job_id);
 
-CREATE TABLE public.ai_illustration_objects (
+CREATE TABLE IF NOT EXISTS public.ai_illustration_objects (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   owner_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   job_id uuid NOT NULL UNIQUE REFERENCES public.ai_import_concept_jobs(id) ON DELETE CASCADE,
@@ -149,11 +160,11 @@ CREATE TABLE public.ai_illustration_objects (
   CONSTRAINT ai_illustration_objects_owner_path_uq UNIQUE (owner_user_id, storage_path)
 );
 
-CREATE INDEX ai_illustration_objects_cleanup_idx
+CREATE INDEX IF NOT EXISTS ai_illustration_objects_cleanup_idx
   ON public.ai_illustration_objects (delete_due_at, created_at)
   WHERE state IN ('orphan', 'delete_pending');
 
-CREATE TABLE public.ai_worker_log_outbox (
+CREATE TABLE IF NOT EXISTS public.ai_worker_log_outbox (
 	event_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 	event_type text NOT NULL,
 	queue_message_id bigint NOT NULL,
@@ -180,7 +191,7 @@ CREATE TABLE public.ai_worker_log_outbox (
 	),
 	UNIQUE (event_type, queue_message_id)
 );
-CREATE INDEX ai_worker_log_outbox_pending_idx
+CREATE INDEX IF NOT EXISTS ai_worker_log_outbox_pending_idx
 	ON public.ai_worker_log_outbox (created_at,event_id) WHERE dispatched_at IS NULL;
 
 ALTER TABLE public.ai_import_concept_jobs OWNER TO s10_migration_owner;
@@ -204,10 +215,13 @@ ALTER TABLE public.ai_import_concept_jobs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ai_upload_consumers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ai_illustration_objects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ai_worker_log_outbox ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS ai_import_concept_jobs_select_owner ON public.ai_import_concept_jobs;
 CREATE POLICY ai_import_concept_jobs_select_owner ON public.ai_import_concept_jobs
   FOR SELECT USING ((SELECT auth.uid()) = owner_user_id);
+DROP POLICY IF EXISTS ai_illustration_objects_select_owner ON public.ai_illustration_objects;
 CREATE POLICY ai_illustration_objects_select_owner ON public.ai_illustration_objects
 	FOR SELECT USING ((SELECT auth.uid()) = owner_user_id);
+DROP POLICY IF EXISTS ai_upload_consumers_select_owner ON public.ai_upload_consumers;
 CREATE POLICY ai_upload_consumers_select_owner ON public.ai_upload_consumers
 	FOR SELECT USING ((SELECT auth.uid()) = owner_user_id);
 GRANT SELECT ON public.ai_import_concept_jobs, public.ai_upload_consumers,
@@ -271,7 +285,15 @@ USING (
 	)
 );
 
-CREATE FUNCTION public.ai_s11_require_service_role()
+DO $$
+BEGIN
+	IF current_setting('app.s11_failpoint',true)='after_expand_tables' THEN
+		RAISE EXCEPTION 'S-11 injected autocommit failure after expand tables';
+	END IF;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.ai_s11_require_service_role()
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 BEGIN
   IF current_setting('request.jwt.claim.role', true) IS DISTINCT FROM 'service_role' THEN
@@ -280,10 +302,25 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION public.ai_s11_validate_schedule_config(
+	p_project_url text,p_worker_secret text
+)
+RETURNS jsonb LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
+DECLARE project_url text := btrim(p_project_url);
+DECLARE worker_secret text := btrim(p_worker_secret);
+BEGIN
+	IF project_url IS NULL OR worker_secret IS NULL OR worker_secret='' OR
+		project_url !~ '^https://[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$' THEN
+		PERFORM public.ai_raise_import_error('CONFLICT');
+	END IF;
+	RETURN jsonb_build_object('projectUrl',project_url,'workerSecret',worker_secret);
+END;
+$$;
+
 -- Compatibility period: old S-10 writers remain valid while the application
 -- and workers roll forward. New/updated legacy rows receive S-11 metadata, and
 -- existing rows are handled by the bounded SKIP LOCKED function below.
-CREATE FUNCTION public.ai_s11_sync_upload_compat()
+CREATE OR REPLACE FUNCTION public.ai_s11_sync_upload_compat()
 RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
 BEGIN
 	IF NEW.status IN ('ready','consumed') AND NEW.source_storage_path IS NULL THEN
@@ -301,11 +338,12 @@ BEGIN
 	RETURN NEW;
 END;
 $$;
+DROP TRIGGER IF EXISTS ai_s11_sync_upload_compat ON public.ai_uploads;
 CREATE TRIGGER ai_s11_sync_upload_compat
 BEFORE INSERT OR UPDATE OF status,storage_path,mime_type ON public.ai_uploads
 FOR EACH ROW EXECUTE FUNCTION public.ai_s11_sync_upload_compat();
 
-CREATE FUNCTION public.backfill_ai_uploads_s11(p_limit integer DEFAULT 500)
+CREATE OR REPLACE FUNCTION public.backfill_ai_uploads_s11(p_limit integer DEFAULT 500)
 RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE affected integer;
 BEGIN
@@ -341,7 +379,7 @@ $$;
 --   ai_illustration_objects (UUID order).
 -- Card INSERT has no pre-existing card row and therefore enters at illustrations.
 -- Tracking-only claim/recovery paths must never acquire cards or illustrations later.
-CREATE FUNCTION public.ai_s11_lock_illustration_lifecycle(p_illustration_ids uuid[])
+CREATE OR REPLACE FUNCTION public.ai_s11_lock_illustration_lifecycle(p_illustration_ids uuid[])
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE illustration_ids uuid[];
 DECLARE object_ids uuid[];
@@ -421,7 +459,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.commit_import_async(
+CREATE OR REPLACE FUNCTION public.commit_import_async(
   p_actor_user_id uuid,
   p_source text,
   p_idempotency_key text,
@@ -523,7 +561,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.get_ai_import_status(
+CREATE OR REPLACE FUNCTION public.get_ai_import_status(
   p_actor_user_id uuid,
   p_batch_id uuid DEFAULT NULL,
   p_idempotency_key text DEFAULT NULL
@@ -577,7 +615,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.prepare_ai_source_upload(
+CREATE OR REPLACE FUNCTION public.prepare_ai_source_upload(
   p_owner_user_id uuid,
   p_upload_key text,
   p_declared_mime text,
@@ -606,7 +644,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.mark_ai_source_ready(
+CREATE OR REPLACE FUNCTION public.mark_ai_source_ready(
   p_owner_user_id uuid,
   p_upload_id uuid,
   p_detected_mime text,
@@ -638,7 +676,45 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.mark_ai_source_write_intent(
+CREATE OR REPLACE FUNCTION public.reconcile_ai_source_ready(
+  p_owner_user_id uuid,
+  p_upload_id uuid,
+  p_detected_mime text,
+  p_actual_byte_size bigint,
+  p_width integer,
+  p_height integer,
+  p_digest text
+)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+DECLARE upload_row public.ai_uploads%ROWTYPE;
+DECLARE source_path text := p_owner_user_id::text || '/' || p_upload_id::text || '/source';
+BEGIN
+	PERFORM public.ai_s11_require_service_role();
+	SELECT * INTO upload_row FROM public.ai_uploads
+	WHERE id=p_upload_id AND owner_user_id=p_owner_user_id FOR UPDATE;
+	IF NOT FOUND THEN RETURN jsonb_build_object('outcome','ambiguous'); END IF;
+	IF upload_row.status='ready' AND upload_row.storage_path=source_path AND
+		upload_row.source_storage_path=source_path AND
+		upload_row.source_storage_bucket='ai-card-sources' AND
+		upload_row.source_write_intent_path IS NULL AND
+		upload_row.source_write_intent_bucket IS NULL AND
+		upload_row.detected_mime_type=p_detected_mime AND
+		upload_row.byte_size=p_actual_byte_size AND upload_row.width=p_width AND
+		upload_row.height=p_height AND upload_row.sha256=p_digest THEN
+		RETURN jsonb_build_object('outcome','ready','uploadId',p_upload_id,
+			'status','ready','path',source_path);
+	END IF;
+	IF upload_row.status='prepared' AND upload_row.source_storage_path IS NULL AND
+		upload_row.source_storage_bucket IS NULL AND upload_row.sha256 IS NULL AND
+		upload_row.source_write_intent_path=source_path AND
+		upload_row.source_write_intent_bucket='ai-card-sources' THEN
+		RETURN jsonb_build_object('outcome','uncommitted');
+	END IF;
+	RETURN jsonb_build_object('outcome','ambiguous');
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.mark_ai_source_write_intent(
 	p_owner_user_id uuid,p_upload_id uuid,p_source_path text
 )
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
@@ -657,7 +733,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.release_ai_source_after_terminal(p_job_id uuid)
+CREATE OR REPLACE FUNCTION public.release_ai_source_after_terminal(p_job_id uuid)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE upload_row public.ai_uploads%ROWTYPE;
 BEGIN
@@ -693,7 +769,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.mark_ai_source_cleanup(
+CREATE OR REPLACE FUNCTION public.mark_ai_source_cleanup(
 	p_job_id uuid,p_bucket text,p_path text
 )
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
@@ -708,7 +784,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.mark_ai_source_deleted(
+CREATE OR REPLACE FUNCTION public.mark_ai_source_deleted(
 	p_job_id uuid,p_bucket text,p_path text
 )
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
@@ -727,7 +803,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.mark_ai_upload_cleanup(
+CREATE OR REPLACE FUNCTION public.mark_ai_upload_cleanup(
 	p_owner_user_id uuid,p_upload_id uuid,p_source_path text DEFAULT NULL
 )
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
@@ -756,7 +832,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.mark_ai_source_raw_deleted(p_owner_user_id uuid,p_upload_id uuid)
+CREATE OR REPLACE FUNCTION public.mark_ai_source_raw_deleted(p_owner_user_id uuid,p_upload_id uuid)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 BEGIN
   PERFORM public.ai_s11_require_service_role();
@@ -767,7 +843,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.read_ai_import_queue(p_visibility_seconds integer, p_quantity integer)
+CREATE OR REPLACE FUNCTION public.read_ai_import_queue(p_visibility_seconds integer, p_quantity integer)
 RETURNS TABLE(message_id bigint, read_count integer, enqueued_at timestamptz, message jsonb)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 BEGIN
@@ -780,7 +856,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.claim_ai_import_concept(
+CREATE OR REPLACE FUNCTION public.claim_ai_import_concept(
   p_job_id uuid, p_message_id bigint, p_claim_token uuid
 )
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
@@ -835,7 +911,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.ai_s11_assert_active_claim(
+CREATE OR REPLACE FUNCTION public.ai_s11_assert_active_claim(
 	p_job_id uuid,p_claim_token uuid,p_message_id bigint DEFAULT NULL
 )
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
@@ -850,7 +926,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.schedule_ai_import_retry(
+CREATE OR REPLACE FUNCTION public.schedule_ai_import_retry(
   p_job_id uuid, p_message_id bigint, p_claim_token uuid,
   p_error_code text, p_delay_seconds integer
 )
@@ -879,7 +955,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.mark_ai_illustration_uploading(
+CREATE OR REPLACE FUNCTION public.mark_ai_illustration_uploading(
   p_job_id uuid, p_claim_token uuid, p_digest text, p_width integer, p_height integer
 )
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
@@ -894,7 +970,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.mark_ai_illustration_orphan(
+CREATE OR REPLACE FUNCTION public.mark_ai_illustration_orphan(
   p_job_id uuid, p_claim_token uuid, p_error_code text
 )
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
@@ -909,7 +985,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.ai_s11_record_worker_event(
+CREATE OR REPLACE FUNCTION public.ai_s11_record_worker_event(
 	p_event_type text,p_message_id bigint,p_job_id uuid,p_batch_id uuid,
 	p_error_code text,p_reason text,p_attempt smallint
 )
@@ -936,7 +1012,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.claim_ai_worker_log_outbox(p_claim_token uuid)
+CREATE OR REPLACE FUNCTION public.claim_ai_worker_log_outbox(p_claim_token uuid)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE claimed public.ai_worker_log_outbox%ROWTYPE;
 DECLARE db_now timestamptz := clock_timestamp();
@@ -964,7 +1040,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.complete_ai_worker_log_outbox(p_event_id uuid,p_claim_token uuid)
+CREATE OR REPLACE FUNCTION public.complete_ai_worker_log_outbox(p_event_id uuid,p_claim_token uuid)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 BEGIN
 	PERFORM public.ai_s11_require_service_role();
@@ -976,7 +1052,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.update_ai_worker_log_reason(
+CREATE OR REPLACE FUNCTION public.update_ai_worker_log_reason(
 	p_message_id bigint,p_event_type text,p_reason text
 )
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
@@ -991,7 +1067,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.ai_s11_fail_concept_locked(
+CREATE OR REPLACE FUNCTION public.ai_s11_fail_concept_locked(
   p_job_id uuid,p_message_id bigint,p_claim_token uuid,p_error_code text,
 	p_event_type text DEFAULT NULL
 )
@@ -1068,7 +1144,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.finalize_ai_import_concept(
+CREATE OR REPLACE FUNCTION public.finalize_ai_import_concept(
   p_job_id uuid, p_message_id bigint, p_claim_token uuid,
   p_illustration_id uuid DEFAULT NULL, p_digest text DEFAULT NULL,
   p_width integer DEFAULT NULL, p_height integer DEFAULT NULL
@@ -1222,7 +1298,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.fail_ai_import_concept(
+CREATE OR REPLACE FUNCTION public.fail_ai_import_concept(
   p_job_id uuid,p_message_id bigint,p_claim_token uuid,p_error_code text,
 	p_event_type text DEFAULT NULL
 )
@@ -1235,7 +1311,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.get_ai_import_finalize_state(
+CREATE OR REPLACE FUNCTION public.get_ai_import_finalize_state(
   p_job_id uuid,p_message_id bigint,p_claim_token uuid
 )
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
@@ -1259,7 +1335,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.get_ai_import_failure_state(
+CREATE OR REPLACE FUNCTION public.get_ai_import_failure_state(
   p_job_id uuid,p_message_id bigint,p_claim_token uuid
 )
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
@@ -1281,7 +1357,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.ack_inert_delivery(
+CREATE OR REPLACE FUNCTION public.ack_inert_delivery(
 	p_job_id uuid,p_message_id bigint,p_event_type text DEFAULT NULL,p_reason text DEFAULT NULL
 )
 RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
@@ -1312,7 +1388,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.ai_s11_track_card_reference_removal()
+CREATE OR REPLACE FUNCTION public.ai_s11_track_card_reference_removal()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE object_row public.ai_illustration_objects%ROWTYPE;
 BEGIN
@@ -1352,11 +1428,12 @@ BEGIN
   RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END;
 END;
 $$;
+DROP TRIGGER IF EXISTS ai_s11_track_card_reference_removal ON public.cards;
 CREATE TRIGGER ai_s11_track_card_reference_removal
 AFTER INSERT OR UPDATE OF illustration_key OR DELETE ON public.cards
 FOR EACH ROW EXECUTE FUNCTION public.ai_s11_track_card_reference_removal();
 
-CREATE FUNCTION public.ai_s11_guard_illustration_lifecycle()
+CREATE OR REPLACE FUNCTION public.ai_s11_guard_illustration_lifecycle()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 BEGIN
 	PERFORM public.ai_s11_lock_illustration_lifecycle(ARRAY[OLD.id]);
@@ -1370,11 +1447,12 @@ BEGIN
 	RETURN NEW;
 END;
 $$;
+DROP TRIGGER IF EXISTS ai_s11_guard_illustration_lifecycle ON public.illustrations;
 CREATE TRIGGER ai_s11_guard_illustration_lifecycle
 BEFORE UPDATE ON public.illustrations
 FOR EACH ROW EXECUTE FUNCTION public.ai_s11_guard_illustration_lifecycle();
 
-CREATE FUNCTION public.ai_s11_guard_illustration_reference()
+CREATE OR REPLACE FUNCTION public.ai_s11_guard_illustration_reference()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE object_row record;
 DECLARE illustration_ids uuid[];
@@ -1428,11 +1506,12 @@ BEGIN
   RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END;
 END;
 $$;
+DROP TRIGGER IF EXISTS ai_s11_guard_illustration_reference ON public.cards;
 CREATE TRIGGER ai_s11_guard_illustration_reference
 BEFORE INSERT OR UPDATE OF illustration_key OR DELETE ON public.cards
 FOR EACH ROW EXECUTE FUNCTION public.ai_s11_guard_illustration_reference();
 
-CREATE FUNCTION public.claim_ai_import_cleanup(p_limit integer)
+CREATE OR REPLACE FUNCTION public.claim_ai_import_cleanup(p_limit integer)
 RETURNS TABLE("trackingId" uuid,bucket text,path text,"claimToken" uuid)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE db_now timestamptz := clock_timestamp();
@@ -1576,7 +1655,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.verify_ai_import_cleanup(
+CREATE OR REPLACE FUNCTION public.verify_ai_import_cleanup(
   p_tracking_id uuid,p_bucket text,p_path text,p_claim_token uuid
 )
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
@@ -1639,7 +1718,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.complete_ai_import_cleanup(
+CREATE OR REPLACE FUNCTION public.complete_ai_import_cleanup(
   p_tracking_id uuid,p_bucket text,p_path text,p_claim_token uuid,p_outcome text
 )
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
@@ -1719,7 +1798,16 @@ BEGIN
 END;
 $$;
 
+DO $$
+BEGIN
+	IF current_setting('app.s11_failpoint',true)='after_runtime_functions' THEN
+		RAISE EXCEPTION 'S-11 injected autocommit failure after runtime functions';
+	END IF;
+END;
+$$;
+
 ALTER FUNCTION public.ai_s11_require_service_role() OWNER TO s10_migration_owner;
+ALTER FUNCTION public.ai_s11_validate_schedule_config(text,text) OWNER TO s10_migration_owner;
 ALTER FUNCTION public.ai_s11_sync_upload_compat() OWNER TO s10_migration_owner;
 ALTER FUNCTION public.backfill_ai_uploads_s11(integer) OWNER TO s10_migration_owner;
 ALTER FUNCTION public.ai_s11_lock_illustration_lifecycle(uuid[]) OWNER TO s10_migration_owner;
@@ -1728,6 +1816,7 @@ ALTER FUNCTION public.get_ai_import_status(uuid,uuid,text) OWNER TO s10_migratio
 ALTER FUNCTION public.prepare_ai_source_upload(uuid,text,text,bigint) OWNER TO s10_migration_owner;
 ALTER FUNCTION public.mark_ai_source_write_intent(uuid,uuid,text) OWNER TO s10_migration_owner;
 ALTER FUNCTION public.mark_ai_source_ready(uuid,uuid,text,bigint,integer,integer,text) OWNER TO s10_migration_owner;
+ALTER FUNCTION public.reconcile_ai_source_ready(uuid,uuid,text,bigint,integer,integer,text) OWNER TO s10_migration_owner;
 ALTER FUNCTION public.release_ai_source_after_terminal(uuid) OWNER TO s10_migration_owner;
 ALTER FUNCTION public.mark_ai_source_cleanup(uuid,text,text) OWNER TO s10_migration_owner;
 ALTER FUNCTION public.mark_ai_source_deleted(uuid,text,text) OWNER TO s10_migration_owner;
@@ -1757,6 +1846,7 @@ ALTER FUNCTION public.verify_ai_import_cleanup(uuid,text,text,uuid) OWNER TO s10
 ALTER FUNCTION public.complete_ai_import_cleanup(uuid,text,text,uuid,text) OWNER TO s10_migration_owner;
 
 REVOKE ALL ON FUNCTION public.ai_s11_require_service_role(),
+	public.ai_s11_validate_schedule_config(text,text),
 	public.ai_s11_sync_upload_compat(),
 	public.backfill_ai_uploads_s11(integer),
 	public.ai_s11_lock_illustration_lifecycle(uuid[]),
@@ -1765,6 +1855,7 @@ REVOKE ALL ON FUNCTION public.ai_s11_require_service_role(),
 	public.prepare_ai_source_upload(uuid,text,text,bigint),
 	public.mark_ai_source_write_intent(uuid,uuid,text),
 	public.mark_ai_source_ready(uuid,uuid,text,bigint,integer,integer,text),
+	public.reconcile_ai_source_ready(uuid,uuid,text,bigint,integer,integer,text),
 	public.release_ai_source_after_terminal(uuid),
 	public.mark_ai_source_cleanup(uuid,text,text),
 	public.mark_ai_source_deleted(uuid,text,text),
@@ -1797,6 +1888,7 @@ GRANT EXECUTE ON FUNCTION public.commit_import_async(uuid,text,text,text,jsonb,t
 	public.prepare_ai_source_upload(uuid,text,text,bigint),
 	public.mark_ai_source_write_intent(uuid,uuid,text),
 	public.mark_ai_source_ready(uuid,uuid,text,bigint,integer,integer,text),
+	public.reconcile_ai_source_ready(uuid,uuid,text,bigint,integer,integer,text),
 	public.release_ai_source_after_terminal(uuid),
 	public.mark_ai_source_cleanup(uuid,text,text),
 	public.mark_ai_source_deleted(uuid,text,text),

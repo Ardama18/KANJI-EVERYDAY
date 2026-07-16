@@ -44,27 +44,71 @@ export async function runS11DatabaseJob(
 	await assertS10Base(databaseUrl);
 	if (job === "failure") {
 		const migration = await readFile(CORE_MIGRATION, "utf8");
-		let failed = false;
-		try {
-			await runS10Psql(
-				databaseUrl,
-				`BEGIN;\nSET LOCAL app.s11_failpoint='before_core_commit';\n${migration}`
-			);
-		} catch {
-			failed = true;
-		}
-		if (!failed) throw new Error("S-11 failure injection unexpectedly committed");
-		const result = await runS10Psql(
+		await runS10Psql(
 			databaseUrl,
-			"SELECT (to_regclass('public.ai_import_concept_jobs') IS NULL)::text"
+			`CREATE SCHEMA IF NOT EXISTS supabase_migrations;
+			CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations(
+				version text PRIMARY KEY
+			)`
 		);
-		if (!result.includes("true")) throw new Error("S-11 failure injection did not roll back");
+		for (const failpoint of [
+			"after_expand_tables",
+			"after_runtime_functions",
+			"before_core_commit",
+		] as const) {
+			let failed = false;
+			try {
+				await runS10Psql(databaseUrl, `SET app.s11_failpoint='${failpoint}';\n${migration}`);
+			} catch {
+				failed = true;
+			}
+			if (!failed) throw new Error(`S-11 ${failpoint} injection unexpectedly completed`);
+			await assertAutocommitFailureState(databaseUrl);
+		}
+		await runS10Psql(databaseUrl, migration);
+		await backfillAndValidate(databaseUrl);
+		await runS10Psql(
+			databaseUrl,
+			"INSERT INTO supabase_migrations.schema_migrations(version) VALUES('20260715000000')"
+		);
+		await assertS11Contracts(databaseUrl, "fresh", false);
+		const ledger = await runS10Psql(
+			databaseUrl,
+			"SELECT (count(*)=1)::text FROM supabase_migrations.schema_migrations WHERE version='20260715000000'"
+		);
+		if (!ledger.includes("true")) throw new Error("S-11 recovery ledger is inconsistent");
 		return;
 	}
 	if (job === "upgrade") await runS10PsqlFile(databaseUrl, UPGRADE_FIXTURE);
 	await runS10PsqlFile(databaseUrl, CORE_MIGRATION);
 	const coreOnly = environment.S11_LOCAL_CORE_ONLY === "1";
 	if (!coreOnly) await runS10PsqlFile(databaseUrl, SCHEDULE_MIGRATION);
+	await backfillAndValidate(databaseUrl);
+	await assertS11Contracts(databaseUrl, job, !coreOnly);
+}
+
+async function assertAutocommitFailureState(databaseUrl: string): Promise<void> {
+	const result = await runS10Psql(
+		databaseUrl,
+		`SELECT (
+			NOT EXISTS (
+				SELECT 1 FROM supabase_migrations.schema_migrations
+				WHERE version='20260715000000'
+			) AND NOT EXISTS (
+				SELECT 1 FROM pg_proc procedures
+				JOIN pg_namespace namespaces ON namespaces.oid=procedures.pronamespace
+				WHERE namespaces.nspname='public'
+					AND procedures.prosecdef
+					AND has_function_privilege('public',procedures.oid,'EXECUTE')
+			)
+		)::text`
+	);
+	if (!result.includes("true")) {
+		throw new Error("S-11 autocommit failure exposed a function or advanced the ledger");
+	}
+}
+
+async function backfillAndValidate(databaseUrl: string): Promise<void> {
 	for (;;) {
 		const output = await runS10Psql(
 			databaseUrl,
@@ -77,7 +121,6 @@ export async function runS11DatabaseJob(
 		if (affected === 0) break;
 	}
 	await runS10PsqlFile(databaseUrl, VALIDATE_MIGRATION);
-	await assertS11Contracts(databaseUrl, job, !coreOnly);
 }
 
 async function assertS10Base(databaseUrl: string): Promise<void> {

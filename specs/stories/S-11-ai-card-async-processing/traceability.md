@@ -28,7 +28,7 @@ plan: specs/stories/S-11-ai-card-async-processing/plan.md@2.0.5
 
 Integration includes authenticated routes, service-role RPC, provider HTTP, private Storage, recorded legacy/fresh buckets, shared-source ordering, cleanup lease recovery, pinned ImageMagick decode/re-encode, and finalize/failure reconciliation. `test:s11:real-integration`, `test:s11:real-e2e`, and `test:s11:resource` are fail-closed gates: missing real environment/fixtures produce `not_run` and exit 2, never a mock pass. Configured real E2E obtains owner A/B through Supabase password login, sends package-generated SSR cookies to Next routes, and uses access-token Authorization only for PostgREST RPC/RLS; rejection scenarios require the exact Next 404/`NOT_FOUND`, PostgREST 404/`PGRST202`, or Storage 400/`404`/`not_found` contract. The resource gate directly serves the exact self-contained local bundle plus pinned WASM, independently hashes/sizes both, measures spawned PID CPU/external RSS and codec peak RSS, enforces request abort/process kill at CPU/RSS/120-second limits, and exercises direct 16MP/decode-bomb/independent decode-failure plus OpenAI-adapter maximum response/110-second timeout cases.
 
-Fresh/upgrade/failure database jobs are also fail-closed when invoked directly: absent or non-distinct database URLs emit structured `not_run` and exit 2. The repository quality runner now provisions three distinct disposable databases and executes local core fresh/upgrade/failure plus the real two-session completion/cleanup race. Current inventory is Unit 23/23, Integration 189/189, E2E 10/10. Hosted `pg_cron`, real integration/E2E, resource artifact, and Deno gates remain explicit `not_run`/exit 2 until their target prerequisites exist; no local result promotes them to pass.
+Fresh/upgrade/failure database jobs are also fail-closed when invoked directly: absent or non-distinct database URLs emit structured `not_run` and exit 2. The repository quality runner now provisions three distinct disposable databases and executes local core fresh/upgrade/failure plus the real two-session completion/cleanup race. Current inventory is Unit 23/23, Integration 195/195, E2E 10/10. Hosted `pg_cron`, real integration/E2E, resource artifact, and Deno gates remain explicit `not_run`/exit 2 until their target prerequisites exist; no local result promotes them to pass.
 
 Fresh bounded remediation cycle 7 corrects only the three stale plan SSOT labels to current v2.0.5 and resets the independent review counter to attempt 1/3. Its repeatable documentation-consistency and unchanged-code regression evidence is recorded in `tasks/remediation-cycle-7.md`; the subsequent independent review outcome is recorded below.
 
@@ -123,6 +123,11 @@ Fresh remediation cycle 3 adds P3-01/P3-02 focused evidence: `worker_failure` is
 | R12-F3 | bounded online migration | expand with lock/statement limits, compatibility trigger, SKIP LOCKED backfill, and separate constraint validation |
 | R12-F4 | resource gate secret boundary | missing, blank, and mismatched configured/header secrets are rejected before resource work |
 | R12-F5 | isolated quality databases | fresh/upgrade/failure use three distinct disposable targets with signal-safe teardown; local core results do not claim hosted schedule acceptance |
+| R13-F1 | committed source-ready response loss | actual completion route + fresh PostgreSQL commit/reconcile returns 200, removes raw only, and retains the normalized ready source; malformed UUID is rejected before service access |
+| R13-F2 | autocommit partial migration recovery | three injected boundaries leave the ledger empty and recover idempotently through backfill, validation, and one final ledger row |
+| R13-F3 | partial-install function privilege safety | default PUBLIC execute is denied before the first core/schedule function and every interrupted SECURITY DEFINER surface remains non-public |
+| R13-F4 | schedule Vault value validation | activation and invocation share canonical HTTPS project URL and nonblank secret validation in static and real local PostgreSQL gates |
+| R13-F5 | run-scoped quality DB residue | strict names plus advisory leases remove inactive residue, retain active concurrent and malformed names, and fail closed on current-run residue |
 
 ## Change history
 
@@ -147,3 +152,4 @@ Fresh remediation cycle 3 adds P3-01/P3-02 focused evidence: `worker_failure` is
 | 2026-07-16 | 2.0.4 | quality_review | Mapped cycle 6 review-attempt-1 R10-R1-F1 and current 23/163/10 inventory; S-10 OLD+NEW attach override and cross-swap gates added |
 | 2026-07-16 | 2.0.5 | quality_review | Mapped cycle 6 review-attempt-2 R10-R2-F1/F2 and current 23/168/10 inventory; JWT lifecycle authority and terminal outbox/source-release isolation added |
 | 2026-07-16 | 2.0.6 | remediation | Mapped R12-F1–F5 and current 23/189/10 inventory; local DB/race evidence is separated from still-unrun hosted gates |
+| 2026-07-16 | 2.0.7 | remediation | Mapped R13-F1–F5 and current 23/195/10 inventory; response-loss, autocommit, privilege, schedule, and residue evidence added while hosted gates remain not_run |

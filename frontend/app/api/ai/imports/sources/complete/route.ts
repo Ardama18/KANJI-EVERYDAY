@@ -17,6 +17,7 @@ interface UploadRow {
 }
 
 const MAX_SOURCE_BYTES = 10 * 1024 * 1024;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 export async function POST(request: Request): Promise<Response> {
 	const authClient = createServerClient();
@@ -28,7 +29,8 @@ export async function POST(request: Request): Promise<Response> {
 	} catch {
 		return error("VALIDATION_ERROR", 400);
 	}
-	if (!isRecord(body) || typeof body.uploadId !== "string") return error("VALIDATION_ERROR", 400);
+	if (!isRecord(body) || typeof body.uploadId !== "string" || !UUID_PATTERN.test(body.uploadId))
+		return error("VALIDATION_ERROR", 400);
 	const service = createServiceRoleClient();
 	const { data: rowData, error: lookupError } = await service
 		.from("ai_uploads")
@@ -99,19 +101,43 @@ export async function POST(request: Request): Promise<Response> {
 		// finalizing the row. Never downgrade that winner from this loser.
 		return error("SOURCE_WRITE_FAILED", 503);
 	}
-	const { data: ready, error: readyError } = await service.rpc("mark_ai_source_ready", {
+	const digest = await sha256Hex(sanitized.bytes);
+	const readyArguments = {
 		p_owner_user_id: authData.user.id,
 		p_upload_id: body.uploadId,
 		p_detected_mime: sanitized.mime,
 		p_actual_byte_size: sanitized.bytes.byteLength,
 		p_width: sanitized.width,
 		p_height: sanitized.height,
-		p_digest: await sha256Hex(sanitized.bytes),
-	});
+		p_digest: digest,
+	};
+	const { data: ready, error: readyError } = await service.rpc(
+		"mark_ai_source_ready",
+		readyArguments
+	);
+	let readyResponse = ready;
 	if (readyError !== null) {
-		await bucket.remove([row.raw_storage_path, sourcePath]);
-		await markCleanup(service, authData.user.id, body.uploadId, sourcePath);
-		return error("SOURCE_FINALIZE_FAILED", 503);
+		const { data: reconciliationData, error: reconciliationError } = await service.rpc(
+			"reconcile_ai_source_ready",
+			readyArguments
+		);
+		const reconciliation = parseReadyReconciliation(reconciliationData, body.uploadId, sourcePath);
+		if (reconciliationError !== null || reconciliation === undefined) {
+			return error("SOURCE_FINALIZE_FAILED", 503);
+		}
+		if (reconciliation.outcome === "ready") {
+			readyResponse = {
+				uploadId: body.uploadId,
+				status: "ready",
+				path: sourcePath,
+			};
+		} else if (reconciliation.outcome === "uncommitted") {
+			await bucket.remove([row.raw_storage_path, sourcePath]);
+			await markCleanup(service, authData.user.id, body.uploadId, sourcePath);
+			return error("SOURCE_FINALIZE_FAILED", 503);
+		} else {
+			return error("SOURCE_FINALIZE_FAILED", 503);
+		}
 	}
 	const { error: rawDeleteError } = await bucket.remove([row.raw_storage_path]);
 	if (rawDeleteError === null) {
@@ -120,7 +146,7 @@ export async function POST(request: Request): Promise<Response> {
 			p_upload_id: body.uploadId,
 		});
 	}
-	return NextResponse.json(ready);
+	return NextResponse.json(readyResponse);
 }
 
 export async function readSourceResponseWithLimit(
@@ -243,6 +269,22 @@ function safeImageCode(failure: unknown): string {
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseReadyReconciliation(
+	value: unknown,
+	uploadId: string,
+	sourcePath: string
+): { outcome: "ready" | "uncommitted" | "ambiguous" } | undefined {
+	if (!isRecord(value) || !["ready", "uncommitted", "ambiguous"].includes(String(value.outcome)))
+		return undefined;
+	if (value.outcome === "ready") {
+		if (value.uploadId !== uploadId || value.status !== "ready" || value.path !== sourcePath)
+			return undefined;
+		return { outcome: "ready" };
+	}
+	if (value.outcome === "uncommitted") return { outcome: "uncommitted" };
+	return { outcome: "ambiguous" };
 }
 
 function error(code: string, status: number): Response {

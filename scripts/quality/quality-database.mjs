@@ -5,7 +5,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const DISPOSABLE_DATABASE_PREFIX = "kanji_everyday_quality_s10_";
-const DISPOSABLE_DATABASE_PATTERN = /^kanji_everyday_quality_s10_[0-9a-f]{24}$/u;
+const DISPOSABLE_DATABASE_PATTERN = /^kanji_everyday_quality_s10_([0-9a-f]{16})_([0-9a-f]{16})$/u;
+const RUN_SCOPE_PATTERN = /^[0-9a-f]{16}$/u;
 const PROTECTED_DATABASE_NAMES = new Set([
 	"postgres",
 	"template0",
@@ -122,8 +123,21 @@ export class QualityCheckExitError extends Error {
 	}
 }
 
-export function createDisposableDatabaseName(randomBytesImplementation = randomBytes) {
-	return `${DISPOSABLE_DATABASE_PREFIX}${randomBytesImplementation(12).toString("hex")}`;
+export function createQualityRunScope(randomBytesImplementation = randomBytes) {
+	return randomBytesImplementation(8).toString("hex");
+}
+
+export function createDisposableDatabaseName(
+	randomBytesImplementation = randomBytes,
+	runScope = createQualityRunScope(randomBytesImplementation)
+) {
+	if (!RUN_SCOPE_PATTERN.test(runScope)) throw new Error("Invalid disposable database run scope");
+	return `${DISPOSABLE_DATABASE_PREFIX}${runScope}_${randomBytesImplementation(8).toString("hex")}`;
+}
+
+export function parseDisposableDatabaseName(databaseName) {
+	const match = DISPOSABLE_DATABASE_PATTERN.exec(databaseName);
+	return match === null ? undefined : { runScope: match[1], slot: match[2] };
 }
 
 export function assertSafeDisposableDatabaseName(databaseName, sourceDatabaseName) {
@@ -196,7 +210,10 @@ export function removeClusterRoleMutations(migrationSql) {
 export async function withDisposableS10Database(input) {
 	const { sourceUrl, sourceDatabaseName } = parseSourceDatabaseUrl(input.sourceUrl);
 	const adapter = input.adapter ?? createPostgresAdapter();
-	const databaseName = createDisposableDatabaseName(input.randomBytesImplementation);
+	const databaseName = createDisposableDatabaseName(
+		input.randomBytesImplementation,
+		input.runScope
+	);
 	assertSafeDisposableDatabaseName(databaseName, sourceDatabaseName);
 	const targetUrl = databaseUrlForName(sourceUrl, databaseName);
 	if (!(await adapter.databaseExists(sourceUrl, sourceDatabaseName))) {
@@ -295,6 +312,80 @@ export async function withDisposableS10Database(input) {
 
 export function createPostgresAdapter() {
 	return {
+		async acquireRunLease(connectionUrl, runScope) {
+			const [firstKey, secondKey] = advisoryLockKeys(runScope);
+			return await new Promise((resolve, reject) => {
+				const child = spawn(
+					"psql",
+					[
+						connectionUrl,
+						"-v",
+						"ON_ERROR_STOP=1",
+						"-X",
+						"-A",
+						"-t",
+						"-q",
+					],
+					{
+						stdio: ["pipe", "pipe", "ignore"],
+						env: { ...process.env, PGAPPNAME: "kanji-everyday-quality-lease" },
+					}
+				);
+				let settled = false;
+				child.stdout.resume();
+				child.once("error", () => {
+					if (!settled) {
+						settled = true;
+						reject(new Error("Disposable database run lease failed"));
+					}
+				});
+				child.once("close", () => {
+					if (!settled) {
+						settled = true;
+						reject(new Error("Disposable database run lease failed"));
+					}
+				});
+				child.stdin.write(`SELECT pg_advisory_lock(${firstKey},${secondKey});\n`);
+				void waitForRunLease(connectionUrl, runScope)
+					.then(() => {
+						if (settled) return;
+						settled = true;
+						resolve(async () => {
+							if (child.exitCode !== null) return;
+							const closed = new Promise((release) => child.once("close", release));
+							child.stdin.end("\\q\n");
+							await closed;
+						});
+					})
+					.catch(() => {
+						if (settled) return;
+						settled = true;
+						child.stdin.end("\\q\n");
+						reject(new Error("Disposable database run lease failed"));
+					});
+			});
+		},
+		async listDatabaseNames(connectionUrl) {
+			const output = await runCaptured(
+				"psql",
+				[
+					connectionUrl,
+					"-v",
+					"ON_ERROR_STOP=1",
+					"-X",
+					"-A",
+					"-t",
+					"-q",
+					"-c",
+					`SELECT datname FROM pg_database WHERE datname LIKE ${sqlLiteral(`${DISPOSABLE_DATABASE_PREFIX}%`)} ORDER BY datname`,
+				],
+				"disposable database residue listing"
+			);
+			return output.split(/\r?\n/u).map((name) => name.trim()).filter(Boolean);
+		},
+		async isRunScopeActive(connectionUrl, runScope) {
+			return await inspectRunScopeActive(connectionUrl, runScope);
+		},
 		async inspectClusterRoleState(connectionUrl) {
 			const output = await runCaptured(
 				"psql",
@@ -426,6 +517,43 @@ export function createPostgresAdapter() {
 			return Number(output.trim());
 		},
 	};
+}
+
+function advisoryLockKeys(runScope) {
+	if (!RUN_SCOPE_PATTERN.test(runScope)) throw new Error("Invalid disposable database run scope");
+	return [signedInt32(runScope.slice(0, 8)), signedInt32(runScope.slice(8))];
+}
+
+function signedInt32(hex) {
+	return Number.parseInt(hex, 16) | 0;
+}
+
+async function inspectRunScopeActive(connectionUrl, runScope) {
+	const [firstKey, secondKey] = advisoryLockKeys(runScope);
+	const output = await runCaptured(
+		"psql",
+		[
+			connectionUrl,
+			"-v",
+			"ON_ERROR_STOP=1",
+			"-X",
+			"-A",
+			"-t",
+			"-q",
+			"-c",
+			`WITH attempt AS (SELECT pg_try_advisory_lock(${firstKey},${secondKey}) acquired) SELECT acquired::text, CASE WHEN acquired THEN pg_advisory_unlock(${firstKey},${secondKey}) ELSE false END::text FROM attempt`,
+		],
+		"disposable database run lease inspection"
+	);
+	return output.trim().startsWith("false|");
+}
+
+async function waitForRunLease(connectionUrl, runScope) {
+	for (let attempt = 0; attempt < 200; attempt += 1) {
+		if (await inspectRunScopeActive(connectionUrl, runScope)) return;
+		await new Promise((resolve) => setTimeout(resolve, 25));
+	}
+	throw new Error("Disposable database run lease timed out");
 }
 
 function databaseUrlForName(sourceUrl, databaseName) {

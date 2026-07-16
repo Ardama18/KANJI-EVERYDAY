@@ -5,6 +5,10 @@ import { fileURLToPath } from "node:url";
 import {
 	QualityCheckExitError,
 	buildCheckEnvironment,
+	createPostgresAdapter,
+	createQualityRunScope,
+	parseDisposableDatabaseName,
+	parseSourceDatabaseUrl,
 	withDisposableS10Database,
 } from "./quality-database.mjs";
 
@@ -49,37 +53,107 @@ export async function runActiveCleanups(activeCleanups) {
 	if (firstError !== undefined) throw firstError;
 }
 
+export async function reconcileRunScopedResidue({
+	currentScope,
+	sourceDatabaseName,
+	listDatabaseNames,
+	isRunScopeActive,
+	dropDatabase,
+}) {
+	const namesByScope = new Map();
+	for (const databaseName of await listDatabaseNames()) {
+		const parsed = parseDisposableDatabaseName(databaseName);
+		if (parsed === undefined) continue;
+		const names = namesByScope.get(parsed.runScope) ?? [];
+		names.push(databaseName);
+		namesByScope.set(parsed.runScope, names);
+	}
+	for (const [runScope, databaseNames] of namesByScope) {
+		if (runScope === currentScope || (await isRunScopeActive(runScope))) continue;
+		for (const databaseName of databaseNames) {
+			await dropDatabase(databaseName, sourceDatabaseName);
+		}
+	}
+}
+
+export async function assertNoCurrentRunResidue(currentScope, listDatabaseNames) {
+	const remains = (await listDatabaseNames()).some(
+		(name) => parseDisposableDatabaseName(name)?.runScope === currentScope
+	);
+	if (remains) throw new Error("Disposable database cleanup verification failed");
+}
+
 export async function runRepositoryQuality() {
 	const activeCleanups = new Set();
+	const sourceUrl = process.env.S10_ADMIN_DATABASE_URL;
+	let sourceDatabaseName;
+	try {
+		({ sourceDatabaseName } = parseSourceDatabaseUrl(sourceUrl));
+	} catch {
+		process.stderr.write("quality_database: failed\n");
+		return 1;
+	}
+	const adapter = createPostgresAdapter();
+	const runScope = createQualityRunScope();
 	const terminate = createTerminationHandler({
 		getCleanup: () => async () => await runActiveCleanups(activeCleanups),
 		exit: (exitCode) => process.exit(exitCode),
 	});
 	process.on("SIGINT", terminate);
 	process.on("SIGTERM", terminate);
+	const residueInput = {
+		currentScope: runScope,
+		sourceDatabaseName,
+		listDatabaseNames: async () => await adapter.listDatabaseNames(sourceUrl),
+		isRunScopeActive: async (scope) => await adapter.isRunScopeActive(sourceUrl, scope),
+		dropDatabase: async (name) => await adapter.dropDatabase(sourceUrl, name, sourceDatabaseName),
+	};
+	let releaseLease;
+	let auditCleanup;
 	try {
+		await reconcileRunScopedResidue(residueInput);
+		await assertNoCurrentRunResidue(runScope, residueInput.listDatabaseNames);
+		releaseLease = await adapter.acquireRunLease(sourceUrl, runScope);
+		activeCleanups.add(releaseLease);
+		auditCleanup = async () => {
+			await reconcileRunScopedResidue(residueInput);
+			await assertNoCurrentRunResidue(runScope, residueInput.listDatabaseNames);
+		};
+		activeCleanups.add(auditCleanup);
 		await withDisposableS10Database({
-			sourceUrl: process.env.S10_ADMIN_DATABASE_URL,
+			sourceUrl,
+			adapter,
+			runScope,
 			onCleanupReady: cleanupRegistration(activeCleanups),
 			check: async (freshUrl) =>
 				await withDisposableS10Database({
-					sourceUrl: process.env.S10_ADMIN_DATABASE_URL,
+					sourceUrl,
+					adapter,
+					runScope,
 					onCleanupReady: cleanupRegistration(activeCleanups),
 					check: async (upgradeUrl) =>
 						await withDisposableS10Database({
-							sourceUrl: process.env.S10_ADMIN_DATABASE_URL,
+							sourceUrl,
+							adapter,
+							runScope,
 							onCleanupReady: cleanupRegistration(activeCleanups),
 							check: async (failureUrl) =>
 								await runQualityPhases({ freshUrl, upgradeUrl, failureUrl }),
 						}),
 				}),
 		});
+		await auditCleanup();
 		return 0;
 	} catch (error) {
 		if (error instanceof QualityCheckExitError) return error.exitCode;
 		process.stderr.write("quality_database: failed\n");
 		return 1;
 	} finally {
+		if (auditCleanup !== undefined) activeCleanups.delete(auditCleanup);
+		if (releaseLease !== undefined) {
+			activeCleanups.delete(releaseLease);
+			await releaseLease().catch(() => undefined);
+		}
 		process.off("SIGINT", terminate);
 		process.off("SIGTERM", terminate);
 	}
@@ -144,7 +218,7 @@ async function runQualityPhases({ freshUrl, upgradeUrl, failureUrl }) {
 			checkEnvironment,
 		],
 		[
-			"S-11 focused 42 regressions",
+			"S-11 focused 48 regressions",
 			"npm",
 			[
 				"--prefix",
@@ -153,7 +227,7 @@ async function runQualityPhases({ freshUrl, upgradeUrl, failureUrl }) {
 				"test:s11:integration",
 				"--",
 				"-t",
-				"R[789]-F|R10-(R[12]-)?F|R11-(R2-)?F[12]|R12-F",
+				"R[789]-F|R10-(R[12]-)?F|R11-(R2-)?F[12]|R12-F|R13-F",
 			],
 			checkEnvironment,
 		],

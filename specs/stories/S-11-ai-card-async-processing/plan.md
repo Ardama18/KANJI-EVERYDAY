@@ -389,7 +389,7 @@ git status --short
 | AC-08 concept失敗分離 | T1-04, T4-02 | - | F-08 fail-closed PostgreSQL pair-failure/sibling-success | E2E-04 (local) |
 | AC-09 ログ秘匿 | T2-03, T5-01 | #15 | IT-25 | E2E-10 |
 
-数量gateは現行Unit 23件、Integration 189件、E2E 10件である。93/102/110/127/139/142/147/153/154/155/162/163/168/179/181 Integrationは各変更履歴時点のhistorical inventoryでありcurrent evidenceではない。R12-F1〜F5はcompletion/cleanup競合、入力境界、段階migration、resource secret、3 DB分離品質gateへ接続する。cycle 7 R11-F1/F2はQueue RPCのempty/malformed分離とoutbox safe-code runtime allowlistへ接続し、R11-R2-F2はactual prepare routeの5件受理/6件副作用前拒否へ接続する。cycle 6 R10-F1/F2は全production lock pathのcards→illustrations→tracking順、bounded complete/attach concurrency、provider cancellation-safe oversize classificationへ接続する。review-attempt-1 R10-R1-F1はS-10 different-key attachのOLD+NEW一括canonical lockとA↔B二順序gateへ接続する。review-attempt-2 R10-R2-F1/F2はcaller JWT lifecycle authorityとterminal outbox fault後のsource releaseへ接続する。
+数量gateは現行Unit 23件、Integration 195件、E2E 10件である。93/102/110/127/139/142/147/153/154/155/162/163/168/179/181/189 Integrationは各変更履歴時点のhistorical inventoryでありcurrent evidenceではない。R13-F1〜F5はresponse-loss reconciliation、autocommit recovery、default privilege、schedule value validation、run-scoped residueへ接続する。R12-F1〜F5はcompletion/cleanup競合、入力境界、段階migration、resource secret、3 DB分離品質gateへ接続する。cycle 7 R11-F1/F2はQueue RPCのempty/malformed分離とoutbox safe-code runtime allowlistへ接続し、R11-R2-F2はactual prepare routeの5件受理/6件副作用前拒否へ接続する。cycle 6 R10-F1/F2は全production lock pathのcards→illustrations→tracking順、bounded complete/attach concurrency、provider cancellation-safe oversize classificationへ接続する。review-attempt-1 R10-R1-F1はS-10 different-key attachのOLD+NEW一括canonical lockとA↔B二順序gateへ接続する。review-attempt-2 R10-R2-F1/F2はcaller JWT lifecycle authorityとterminal outbox fault後のsource releaseへ接続する。
 
 ## Rollback・compensation
 
@@ -625,6 +625,14 @@ current R12 remediation or any hosted gate is approved.
 - [x] quality-fixer後もsource continuity、exact target absence、role/membership fingerprint不変をverified teardownで確認し、CHECKPOINT 2を完了する。
 - [x] 7 external gateを`not_run`/exit 2のまま保持し、push/PR/merge/issue close/ship/deploy/remote mutation/cron activationを行わない。
 
+## Ship review remediation cycle 9
+
+- [x] R13-F1: ready commit後のresponse lossをexact DB row/digest/write-intentでreconcileし、confirmed uncommitted以外ではsourceを削除しないactual route + DB gateを追加する。
+- [x] R13-F2/F3: core migrationをautocommit・再実行可能にし、3境界のpartial failure、ledger未記録、PUBLIC execute非公開、forward recoveryを実DBで確認する。
+- [x] R13-F4: core/scheduleの先頭でdefault PUBLIC function executeをdenyし、schedule URL/secretをactivation/invoke両方で検証する。
+- [x] R13-F5: strict run scope/advisory leaseでstale residueだけを除去し、active concurrent/malformed prefixを保護し、current-scope residueを終了時にfail closed検証する。
+- [x] malformed upload UUIDをservice DB/Storage前400にし、DB safety 23/23、full quality、external 7件`not_run`/exit 2を再確認する。
+
 ## 変更履歴
 
 | 日付 | 版 | status | 変更内容 |
@@ -647,3 +655,4 @@ current R12 remediation or any hosted gate is approved.
 | 2026-07-16 | 2.0.3 | quality_review | bounded remediation cycle 6、current Integration 162、full canonical lock/complete-attach gate/provider safe cancelを反映 |
 | 2026-07-16 | 2.0.4 | quality_review | cycle 6 review 1 remediation、current Integration 163、S-10 OLD+NEW canonical attach/cross-swap gateを反映 |
 | 2026-07-16 | 2.0.5 | quality_review | cycle 6 review 2 remediation、current Integration 168、JWT lifecycle fence/post-terminal outbox source releaseを反映 |
+| 2026-07-16 | 2.0.7 | remediation | ship review R13-F1〜F5、current Integration 195、autocommit recovery、privilege/schedule/residue hardeningを反映 |
