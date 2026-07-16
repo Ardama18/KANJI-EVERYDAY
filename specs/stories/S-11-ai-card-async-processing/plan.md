@@ -2,7 +2,7 @@
 id: S-11
 feature: ai-card-async-processing
 type: plan
-version: 2.0.14
+version: 2.0.15
 created: 2026-07-15
 updated: 2026-07-16
 based_on: specs/stories/S-11-ai-card-async-processing/design.md
@@ -25,7 +25,7 @@ status: implementation_review
 - ADR: `specs/adr/ADR-008-ai-card-async-queue-image-processing.md` v2.0.5 Accepted
 - Design Doc: `specs/stories/S-11-ai-card-async-processing/design.md` v2.0.5 Approved
 - Unit suite: `specs/stories/S-11-ai-card-async-processing/tests/ai-card-async-processing.test.ts`（現行27件）
-- Integration suite: `specs/stories/S-11-ai-card-async-processing/tests/ai-card-async-processing.int.test.ts`（現行217件。127/139/142/147/153/154/155/162/163/168/179/181/189/195/198/200/216件は履歴値）
+- Integration suite: `specs/stories/S-11-ai-card-async-processing/tests/ai-card-async-processing.int.test.ts`（現行218件。127/139/142/147/153/154/155/162/163/168/179/181/189/195/198/200/216/217件は履歴値）
 - E2E suite: `specs/stories/S-11-ai-card-async-processing/tests/ai-card-async-processing.e2e.test.ts`（10件）
 - 先行実装: `supabase/migrations/20260714000000_s10_ai_card_import_foundation.sql`
 - 先行testkit: `specs/stories/S-10-ai-card-import-foundation/tests/helpers/s10-db-testkit.ts`, `s10-db-jobs.ts`
@@ -392,9 +392,9 @@ git status --short
 | AC-08 concept失敗分離 | T1-04, T4-02 | - | F-08 fail-closed PostgreSQL pair-failure/sibling-success | E2E-04 (local) |
 | AC-09 ログ秘匿 | T2-03, T5-01 | #15 | IT-25 | E2E-10 |
 
-数量gateは現行Unit 27件、Integration 217件、E2E 10件である。93/102/110/127/139/142/147/153/154/155/162/163/168/179/181/189/195/198/200 Integrationは各変更履歴時点のhistorical inventoryでありcurrent evidenceではない。R20-F1/F2はowner-safe column ACLとStorage owner mutationを両立するone-bit helper、OLD/NEW policy、実DBactor matrixへ接続する。R19-F1〜F3はowner-safe SELECT、正規化後PNG再検証、status矛盾fail-closedへ接続する。R15-F1/F2はatomic constraint swapとhosted merge-blocked SSOTへ接続する。R14-F1〜F3はtrue autocommit、global default privilege、canonical UUID、typed preview secretへ接続する。R13-F1〜F5はresponse-loss reconciliation、autocommit recovery、default privilege、schedule value validation、run-scoped residueへ接続する。R12-F1〜F5はcompletion/cleanup競合、入力境界、段階migration、resource secret、3 DB分離品質gateへ接続する。cycle 7 R11-F1/F2はQueue RPCのempty/malformed分離とoutbox safe-code runtime allowlistへ接続し、R11-R2-F2はactual prepare routeの5件受理/6件副作用前拒否へ接続する。cycle 6 R10-F1/F2は全production lock pathのcards→illustrations→tracking順、bounded complete/attach concurrency、provider cancellation-safe oversize classificationへ接続する。review-attempt-1 R10-R1-F1はS-10 different-key attachのOLD+NEW一括canonical lockとA↔B二順序gateへ接続する。review-attempt-2 R10-R2-F1/F2はcaller JWT lifecycle authorityとterminal outbox fault後のsource releaseへ接続する。
+数量gateは現行Unit 27件、Integration 218件、E2E 10件である。93/102/110/127/139/142/147/153/154/155/162/163/168/179/181/189/195/198/200/216/217 Integrationは各変更履歴時点のhistorical inventoryでありcurrent evidenceではない。R21-F1はservice-only snapshot credentialのcase-insensitive同値pair、spoof/missing/mismatch拒否、明示apikey保持へ接続する。R20-F1/F2はowner-safe column ACLとStorage owner mutationを両立するone-bit helper、OLD/NEW policy、実DBactor matrixへ接続する。R19-F1〜F3はowner-safe SELECT、正規化後PNG再検証、status矛盾fail-closedへ接続する。R15-F1/F2はatomic constraint swapとhosted merge-blocked SSOTへ接続する。R14-F1〜F3はtrue autocommit、global default privilege、canonical UUID、typed preview secretへ接続する。R13-F1〜F5はresponse-loss reconciliation、autocommit recovery、default privilege、schedule value validation、run-scoped residueへ接続する。R12-F1〜F5はcompletion/cleanup競合、入力境界、段階migration、resource secret、3 DB分離品質gateへ接続する。cycle 7 R11-F1/F2はQueue RPCのempty/malformed分離とoutbox safe-code runtime allowlistへ接続し、R11-R2-F2はactual prepare routeの5件受理/6件副作用前拒否へ接続する。cycle 6 R10-F1/F2は全production lock pathのcards→illustrations→tracking順、bounded complete/attach concurrency、provider cancellation-safe oversize classificationへ接続する。review-attempt-1 R10-R1-F1はS-10 different-key attachのOLD+NEW一括canonical lockとA↔B二順序gateへ接続する。review-attempt-2 R10-R2-F1/F2はcaller JWT lifecycle authorityとterminal outbox fault後のsource releaseへ接続する。
 
-cycle 16のR20-F3はhosted内部snapshot/pathのservice-role限定、adapter強制owner filter、owner JWT safe projection成功、other-owner 0件、sensitive projection 403/42501へ接続する。Integration 216はcycle 15時点のhistorical inventoryであり、現行217件には含まれない。現行合計は254/254、DB前提を満たすroot quality focusedは71/71、ordinary Vitestは693 passed/8 conditional skips of 701 definitionsである。
+cycle 16のR20-F3はhosted内部snapshot/pathのservice-role限定、adapter強制owner filter、owner JWT safe projection成功、other-owner 0件、sensitive projection 403/42501へ接続する。cycle 17のR21-F1は同adapterをcase-insensitive `Headers` 境界で強化し、explicit service apikeyをanon defaultで上書きしない。Integration 216/217はhistorical inventoryであり、現行218件には含まれない。現行合計は255/255、DB前提を満たすroot quality focusedは72/72、ordinary Vitestは694 passed/8 conditional skips of 702 definitionsである。
 
 ## Rollback・compensation
 
@@ -692,6 +692,13 @@ any post-cycle-8 remediation or any hosted gate.
 - [x] DB safety 31/31、isolated fresh/upgrade/true-autocommit recovery、actual Storage RLS matrix、full root quality、real lifecycle harness、external 7 structured not_run/exit 2、residue 0を確認する。
 - [ ] hosted full-system acceptance 7件が明示的前提環境でpassする。完了まではmerge blockedを維持する。
 
+## Final ship review remediation cycle 17
+
+- [x] R21-F1 Red/Green: case-variant `APIKEY`がanon defaultと結合されることを再現し、explicit headersを`Headers`へ先に正規化してcase-insensitiveに保持する。
+- [x] R21-F1: canonical/uppercase pair、Authorization/apikey欠落、owner+anon spoof、service mismatchの6ケースを1件の表駆動回帰テストで検査し、拒否時fetch 0を固定する。
+- [x] meta/plan/traceability/operations/tasksをv2.0.15 / cycle 17 / `hosted 7 not_run; merge blocked`へ同期する。
+- [ ] hosted full-system acceptance 7件が明示的前提環境でpassする。完了まではmerge blockedを維持する。
+
 ## 変更履歴
 
 | 日付 | 版 | status | 変更内容 |
@@ -722,3 +729,4 @@ any post-cycle-8 remediation or any hosted gate.
 | 2026-07-16 | 2.0.12 | implementation_review | cycle 14、ambiguous short-ref拒否とcommitted/staged/unstaged 3面diff gate、hosted merge-blocked SSOTを反映 |
 | 2026-07-16 | 2.0.13 | implementation_review | cycle 15、owner-safe column ACL、正規化後PNG再検証、strict status matrix、hosted merge-blocked SSOTを反映 |
 | 2026-07-16 | 2.0.14 | implementation_review | cycle 16、owner-bound Storage tracking helper、OLD/NEW mutation policy、実DBactor matrix、hosted merge-blocked SSOTを反映 |
+| 2026-07-16 | 2.0.15 | implementation_review | cycle 17、case-insensitive service credential pair、explicit apikey保持、spoof/missing/mismatch拒否、hosted merge-blocked SSOTを反映 |

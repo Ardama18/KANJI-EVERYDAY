@@ -2,14 +2,14 @@
 id: S-11
 feature: ai-card-async-processing
 type: traceability
-version: 2.0.14
+version: 2.0.15
 created: 2026-07-15
 updated: 2026-07-16
 status: implementation_review
 requirements: specs/stories/S-11-ai-card-async-processing/requirements.md@2.0.5
 adr: specs/adr/ADR-008-ai-card-async-queue-image-processing.md@2.0.5
 design: specs/stories/S-11-ai-card-async-processing/design.md@2.0.5
-plan: specs/stories/S-11-ai-card-async-processing/plan.md@2.0.14
+plan: specs/stories/S-11-ai-card-async-processing/plan.md@2.0.15
 ---
 
 # S-11 implementation traceability
@@ -28,7 +28,7 @@ plan: specs/stories/S-11-ai-card-async-processing/plan.md@2.0.14
 
 Integration includes authenticated routes, service-role RPC, provider HTTP, private Storage, recorded legacy/fresh buckets, shared-source ordering, cleanup lease recovery, pinned ImageMagick decode/re-encode, and finalize/failure reconciliation. `test:s11:real-integration`, `test:s11:real-e2e`, and `test:s11:resource` are fail-closed gates: missing real environment/fixtures produce `not_run` and exit 2, never a mock pass. Configured real E2E obtains owner A/B through Supabase password login, sends package-generated SSR cookies to Next routes, and uses access-token Authorization only for PostgREST RPC/RLS; rejection scenarios require the exact Next 404/`NOT_FOUND`, PostgREST 404/`PGRST202`, or Storage 400/`404`/`not_found` contract. The resource gate directly serves the exact self-contained local bundle plus pinned WASM, independently hashes/sizes both, measures spawned PID CPU/external RSS and codec peak RSS, enforces request abort/process kill at CPU/RSS/120-second limits, and exercises direct 16MP/decode-bomb/independent decode-failure plus OpenAI-adapter maximum response/110-second timeout cases.
 
-Fresh/upgrade/failure database jobs are also fail-closed when invoked directly: absent or non-distinct database URLs emit structured `not_run` and exit 2. The repository quality runner now provisions three distinct disposable databases and executes local core fresh/upgrade/failure plus the real two-session completion/cleanup race. Current inventory is Unit 27/27, Integration 217/217, E2E 10/10. Hosted `pg_cron`, real integration/E2E, resource artifact, and Deno gates remain explicit `not_run`/exit 2 until their target prerequisites exist; no local result promotes them to pass.
+Fresh/upgrade/failure database jobs are also fail-closed when invoked directly: absent or non-distinct database URLs emit structured `not_run` and exit 2. The repository quality runner now provisions three distinct disposable databases and executes local core fresh/upgrade/failure plus the real two-session completion/cleanup race. Current inventory is Unit 27/27, Integration 218/218, E2E 10/10. Hosted `pg_cron`, real integration/E2E, resource artifact, and Deno gates remain explicit `not_run`/exit 2 until their target prerequisites exist; no local result promotes them to pass.
 
 Fresh bounded remediation cycle 7 corrects only the three stale plan SSOT labels to current v2.0.5 and resets the independent review counter to attempt 1/3. Its repeatable documentation-consistency and unchanged-code regression evidence is recorded in `tasks/remediation-cycle-7.md`; the subsequent independent review outcome is recorded below.
 
@@ -36,7 +36,7 @@ Repository-owned quality cycle 8 adds no production or AC contract. `.codex/qual
 
 Historical cycle 8 independent review attempt 3/3 returned zero findings and `approved` for that cycle's diff. The installed root quality-fixer then returned exit 0 through the then-current isolated S-10 lifecycle. This historical record does not approve any post-cycle-8 remediation and does not establish hosted AC acceptance.
 
-Historical R12 remediation introduced five boundaries: ready rows cannot be downgraded by stale cleanup, malformed JSON and status identifiers fail before side effects, expand/backfill/validate are bounded stages, resource-only authorization rejects blank secrets, and the repository runner owns three isolated disposable databases. This is historical implementation evidence, not current hosted acceptance. The current cycle-16 verification state remains hosted schedule controls, full real integration/E2E, resource artifact, and Deno `not_run`/exit 2 with merge blocked.
+Historical R12 remediation introduced five boundaries: ready rows cannot be downgraded by stale cleanup, malformed JSON and status identifiers fail before side effects, expand/backfill/validate are bounded stages, resource-only authorization rejects blank secrets, and the repository runner owns three isolated disposable databases. This is historical implementation evidence, not current hosted acceptance. The current cycle-17 verification state remains hosted schedule controls, full real integration/E2E, resource artifact, and Deno `not_run`/exit 2 with merge blocked.
 
 Cycle 7 independent review attempt 1 returned `changes_requested`. Its four authorized corrections now distinguish an empty Queue result from malformed RPC output at the real handler boundary, validate outbox error codes against `SAFE_IMPORT_ERROR_CODES`, directly check the corrected confirmed-poison `worker_poison` task evidence, and map provider selection/concept isolation to IT-16, local E2E-04, and the fail-closed F-08 PostgreSQL pair-failure/sibling-success gate. Independent review attempt 2/3 remains the next gate.
 
@@ -148,7 +148,9 @@ Fresh remediation cycle 3 adds P3-01/P3-02 focused evidence: `worker_failure` is
 | R20-F1 | owner-safe Storage tracking lookup | fixed-search-path SECURITY DEFINER returns one managed bit only for the authenticated JWT owner's illustrations path; PUBLIC/anon/service direct execute is denied and raw path/token SELECT remains 42501 |
 | R20-F2 | Storage mutation actor matrix | actual owner JWT INSERT/UPDATE OLD+NEW/DELETE preserves untracked legacy/source paths, denies tracked/cross-owner paths, checks row state and SQLSTATE, and retains service-role mutation |
 | R20-F3 | hosted Data API least privilege | internal side-effect snapshots and Storage paths use service role with an explicit owner filter; owner JWT proves safe projection success, other-owner zero rows, and sensitive projection 403/42501 through the shared adapter and fake boundary |
-| R20-F4 | cycle-16 readiness SSOT | v2.0.14/cycle 16 retains hosted 7 not_run/exit 2 and merge blocked; current evidence is ordinary 693 passed/8 skipped of 701, inventory 254/254 (Unit 27/Integration 217/E2E 10), DB-backed focused 71/71, and all earlier review approvals remain historical |
+| R20-F4 | cycle-16 readiness SSOT | v2.0.14/cycle 16 retains hosted 7 not_run/exit 2 and merge blocked; evidence was ordinary 693 passed/8 skipped of 701, inventory 254/254 (Unit 27/Integration 217/E2E 10), and DB-backed focused 71/71; it is historical |
+| R21-F1 | service snapshot credential normalization | explicit headers are normalized before anon fallback; canonical and case-variant matching bearer/apikey pairs preserve the service key, while missing/spoofed/mismatched pairs reject before fetch |
+| R21-F2 | cycle-17 readiness SSOT | v2.0.15/cycle 17 retains hosted 7 not_run/exit 2 and merge blocked; current evidence is ordinary 694 passed/8 skipped of 702, inventory 255/255 (Unit 27/Integration 218/E2E 10), DB-backed focused 72/72, and all earlier review approvals remain historical |
 
 ## Change history
 
@@ -181,3 +183,4 @@ Fresh remediation cycle 3 adds P3-01/P3-02 focused evidence: `worker_failure` is
 | 2026-07-16 | 2.0.12 | implementation_review | Cycle 14 rejects ambiguous shorthand refs and validates committed, staged, and unstaged diff surfaces; hosted 7 remain not_run/exit 2 and merge blocked |
 | 2026-07-16 | 2.0.13 | implementation_review | Cycle 15 adds owner-safe column ACLs, post-encode PNG validation, strict status matrices, and current 27/216/10 inventory; hosted 7 remain not_run/exit 2 and merge blocked |
 | 2026-07-16 | 2.0.14 | implementation_review | Cycle 16 restores legacy owner Storage mutation through an owner-bound one-bit tracking helper and actual actor matrix with current 27/217/10 inventory; hosted 7 remain not_run/exit 2 and merge blocked |
+| 2026-07-16 | 2.0.15 | implementation_review | Cycle 17 normalizes service snapshot headers case-insensitively, preserves explicit service apikey, and rejects missing/spoofed/mismatched pairs before fetch with current 27/218/10 inventory; hosted 7 remain not_run/exit 2 and merge blocked |

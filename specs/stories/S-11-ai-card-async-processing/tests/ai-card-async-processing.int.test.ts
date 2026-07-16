@@ -1083,7 +1083,7 @@ describe("S-11 commit and queue integration", () => {
 		expect(jobs).toContain("assertOwnerSafeSelectMatrix");
 	});
 
-	it("R20-F4 readiness SSOT separates local boundaries from hosted merge acceptance", async () => {
+	it("R21-F2 readiness SSOT separates local boundaries from hosted merge acceptance", async () => {
 		const [meta, plan, traceability, operations] = await Promise.all([
 			readFile(new URL("../meta.json", import.meta.url), "utf8"),
 			readFile(new URL("../plan.md", import.meta.url), "utf8"),
@@ -1091,15 +1091,15 @@ describe("S-11 commit and queue integration", () => {
 			readFile(new URL("../operations.md", import.meta.url), "utf8"),
 		]);
 		const parsedMeta = JSON.parse(meta) as Record<string, unknown>;
-		expect(parsedMeta.remediation_cycle).toBe(16);
-		expect(parsedMeta.ssot_version).toBe("2.0.14");
+		expect(parsedMeta.remediation_cycle).toBe(17);
+		expect(parsedMeta.ssot_version).toBe("2.0.15");
 		expect(parsedMeta.verification_state).toBe("hosted_7_not_run_merge_blocked");
 		expect(meta).not.toMatch(/ready_for_commit|zero_findings|approved/u);
-		expect(plan).toContain("version: 2.0.14");
-		expect(traceability).toContain("version: 2.0.14");
+		expect(plan).toContain("version: 2.0.15");
+		expect(traceability).toContain("version: 2.0.15");
 		expect(plan).toContain("[x] **T6-01L: local boundary E2E");
 		expect(plan).toContain("[ ] **T6-01H: hosted full-system E2E");
-		expect(operations).toContain("Current cycle-16 verification state: `hosted 7 not_run; merge blocked`");
+		expect(operations).toContain("Current cycle-17 verification state: `hosted 7 not_run; merge blocked`");
 		expect(traceability).not.toMatch(/\bcurrent\s+R12\b/iu);
 	});
 
@@ -2285,6 +2285,68 @@ describe("S-11 reviewer regression boundaries", () => {
 		expect(hostedGate).not.toContain(
 			"ai_illustration_objects?select=storage_path,state"
 		);
+	});
+
+	it("R21-F1 normalizes service credentials without combining an explicit APIKEY with anon", async () => {
+		const serviceKey = "service-role-fixture";
+		const cases = [
+			{
+				label: "canonical pair",
+				headers: { Authorization: `Bearer ${serviceKey}`, apikey: serviceKey },
+				valid: true,
+			},
+			{
+				label: "case-variant pair",
+				headers: { AUTHORIZATION: `Bearer ${serviceKey}`, APIKEY: serviceKey },
+				valid: true,
+			},
+			{ label: "missing authorization", headers: { apikey: serviceKey }, valid: false },
+			{
+				label: "missing api key",
+				headers: { Authorization: `Bearer ${serviceKey}` },
+				valid: false,
+			},
+			{
+				label: "owner bearer with anon key",
+				headers: { Authorization: "Bearer owner", apikey: "anon-fixture" },
+				valid: false,
+			},
+			{
+				label: "mismatched service pair",
+				headers: { Authorization: `Bearer ${serviceKey}`, apikey: "different-service" },
+				valid: false,
+			},
+		] as const;
+
+		for (const fixture of cases) {
+			const outgoing: Headers[] = [];
+			const fetchImplementation = vi.fn(
+				async (_input: string | URL | Request, init?: RequestInit) => {
+					outgoing.push(new Headers(init?.headers));
+					return Response.json([{ id: fixture.label }]);
+				}
+			) as typeof fetch;
+			const request = fetchServiceOwnerRows(
+				{
+					fetch: fetchImplementation,
+					supabaseBase: "https://project.supabase.co",
+					anonKey: "anon-fixture",
+				},
+				fixture.headers,
+				OWNER_ID,
+				"ai_illustration_objects?select=id,storage_path"
+			);
+			if (!fixture.valid) {
+				await expect(request, fixture.label).rejects.toThrow(
+					"service owner snapshot requires the service-role bearer/apikey pair"
+				);
+				expect(fetchImplementation, fixture.label).not.toHaveBeenCalled();
+				continue;
+			}
+			await expect(request, fixture.label).resolves.toHaveLength(1);
+			expect(outgoing[0]?.get("Authorization"), fixture.label).toBe(`Bearer ${serviceKey}`);
+			expect(outgoing[0]?.get("apikey"), fixture.label).toBe(serviceKey);
+		}
 	});
 
 	it("NR-16 maps only existence-hidden status errors to 404 and backend errors to 5xx", async () => {
