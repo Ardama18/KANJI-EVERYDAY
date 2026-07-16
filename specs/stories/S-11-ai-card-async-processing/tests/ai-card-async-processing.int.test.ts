@@ -659,22 +659,126 @@ describe("S-11 commit and queue integration", () => {
 
 	it("R14-F1 complete canonicalizes an uppercase UUID before every downstream boundary", async () => {
 		const uploadId = "A0B1C2D3-E4F5-4678-9ABC-DEF012345678";
-		const { POST } = await import("../../../../frontend/app/api/ai/imports/sources/complete/route");
-		const response = await POST(
-			new Request("http://local/api/ai/imports/sources/complete", {
-				method: "POST",
-				body: JSON.stringify({ uploadId }),
-			})
+		const canonicalId = uploadId.toLowerCase();
+		const rawPath = `${OWNER_ID}/${canonicalId}/raw`;
+		const sourcePath = `${OWNER_ID}/${canonicalId}/source`;
+		const png = Uint8Array.from(
+			Buffer.from(
+				"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+				"base64"
+			)
 		);
-		expect(response.status).toBe(404);
-		expect(routeBoundary.from).toHaveBeenCalledTimes(1);
-		expect(routeBoundary.from.mock.results[0]?.value.eq).toHaveBeenCalledWith(
-			"id",
-			uploadId.toLowerCase()
-		);
-		expect(routeBoundary.rpc).not.toHaveBeenCalled();
-		expect(routeBoundary.upload).not.toHaveBeenCalled();
-		expect(routeBoundary.remove).not.toHaveBeenCalled();
+		const query = {
+			select: vi.fn(),
+			eq: vi.fn(),
+			maybeSingle: vi.fn(),
+		};
+		query.select.mockReturnValue(query);
+		query.eq.mockReturnValue(query);
+		query.maybeSingle.mockResolvedValue({
+			data: {
+				id: canonicalId,
+				owner_user_id: OWNER_ID,
+				status: "prepared",
+				raw_storage_path: rawPath,
+				mime_type: "image/png",
+				byte_size: png.byteLength,
+			},
+			error: null,
+		});
+		routeBoundary.from.mockReturnValue(query);
+		routeBoundary.rpc.mockImplementation(async (name: string) => {
+			if (name === "mark_ai_source_ready")
+				return { data: null, error: { message: "response lost" } };
+			if (name === "reconcile_ai_source_ready")
+				return {
+					data: { outcome: "ready", uploadId: canonicalId, status: "ready", path: sourcePath },
+					error: null,
+				};
+			return { data: null, error: null };
+		});
+		vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "http://127.0.0.1:54321");
+		vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "uppercase-test-anon");
+		vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "uppercase-test-service");
+		const fetchMock = vi.fn(async () => new Response(png, { status: 200 }));
+		vi.stubGlobal("fetch", fetchMock);
+		try {
+			const { POST } = await import("../../../../frontend/app/api/ai/imports/sources/complete/route");
+			const response = await POST(
+				new Request("http://local/api/ai/imports/sources/complete", {
+					method: "POST",
+					body: JSON.stringify({ uploadId }),
+				})
+			);
+			expect(response.status).toBe(200);
+			expect(await response.json()).toEqual({ uploadId: canonicalId, status: "ready", path: sourcePath });
+			expect(query.eq).toHaveBeenCalledWith("id", canonicalId);
+			expect(routeBoundary.upload).toHaveBeenCalledWith(
+				sourcePath,
+				expect.any(Uint8Array),
+				expect.objectContaining({ upsert: false })
+			);
+			expect(routeBoundary.remove).toHaveBeenCalledWith([rawPath]);
+			expect(fetchMock).toHaveBeenCalledWith(
+				`http://127.0.0.1:54321/storage/v1/object/ai-card-sources/${rawPath}`,
+				expect.any(Object)
+			);
+			const successCalls = routeBoundary.rpc.mock.calls;
+			expect(successCalls.map(([name]) => name)).toEqual([
+				"mark_ai_source_write_intent",
+				"mark_ai_source_ready",
+				"reconcile_ai_source_ready",
+				"mark_ai_source_raw_deleted",
+			]);
+			expect(successCalls[0]?.[1]).toEqual({
+				p_owner_user_id: OWNER_ID,
+				p_upload_id: canonicalId,
+				p_source_path: sourcePath,
+			});
+			expect(successCalls[1]?.[1]).toEqual({
+				p_owner_user_id: OWNER_ID,
+				p_upload_id: canonicalId,
+				p_detected_mime: "image/png",
+				p_actual_byte_size: expect.any(Number),
+				p_width: 1,
+				p_height: 1,
+				p_digest: expect.stringMatching(/^[0-9a-f]{64}$/u),
+			});
+			expect(successCalls[2]?.[1]).toEqual(successCalls[1]?.[1]);
+			expect(successCalls[3]?.[1]).toEqual({
+				p_owner_user_id: OWNER_ID,
+				p_upload_id: canonicalId,
+			});
+			expect(JSON.stringify(successCalls)).not.toContain(uploadId);
+
+			routeBoundary.rpc.mockClear();
+			routeBoundary.rpc.mockImplementation(async (name: string) =>
+				name === "mark_ai_source_write_intent"
+					? { data: null, error: { message: "intent failed" } }
+					: { data: null, error: null }
+			);
+			const cleanupResponse = await POST(
+				new Request("http://local/api/ai/imports/sources/complete", {
+					method: "POST",
+					body: JSON.stringify({ uploadId }),
+				})
+			);
+			expect(cleanupResponse.status).toBe(503);
+			expect(routeBoundary.rpc.mock.calls).toEqual([
+				[
+					"mark_ai_source_write_intent",
+					{ p_owner_user_id: OWNER_ID, p_upload_id: canonicalId, p_source_path: sourcePath },
+				],
+				[
+					"mark_ai_upload_cleanup",
+					{ p_owner_user_id: OWNER_ID, p_upload_id: canonicalId, p_source_path: sourcePath },
+				],
+			]);
+			expect(JSON.stringify(routeBoundary.rpc.mock.calls)).not.toContain(uploadId);
+		} finally {
+			vi.unstubAllGlobals();
+			vi.unstubAllEnvs();
+		}
 	});
 
 	it("R13-F1 reconciles a committed mark-ready response loss before any Storage delete", async () => {
@@ -904,15 +1008,16 @@ describe("S-11 commit and queue integration", () => {
 			readFile(new URL("../operations.md", import.meta.url), "utf8"),
 		]);
 		const parsedMeta = JSON.parse(meta) as Record<string, unknown>;
-		expect(parsedMeta.remediation_cycle).toBe(11);
-		expect(parsedMeta.ssot_version).toBe("2.0.9");
+		expect(parsedMeta.remediation_cycle).toBe(12);
+		expect(parsedMeta.ssot_version).toBe("2.0.10");
 		expect(parsedMeta.verification_state).toBe("hosted_7_not_run_merge_blocked");
 		expect(meta).not.toMatch(/ready_for_commit|zero_findings|approved/u);
-		expect(plan).toContain("version: 2.0.9");
-		expect(traceability).toContain("version: 2.0.9");
+		expect(plan).toContain("version: 2.0.10");
+		expect(traceability).toContain("version: 2.0.10");
 		expect(plan).toContain("[x] **T6-01L: local boundary E2E");
 		expect(plan).toContain("[ ] **T6-01H: hosted full-system E2E");
-		expect(operations).toContain("verification state: `hosted 7 not_run; merge blocked`");
+		expect(operations).toContain("Current cycle-12 verification state: `hosted 7 not_run; merge blocked`");
+		expect(traceability).not.toMatch(/\bcurrent\s+R12\b/iu);
 	});
 
 	it("R13-F3 schedule migration denies PUBLIC before creating SECURITY DEFINER functions", async () => {

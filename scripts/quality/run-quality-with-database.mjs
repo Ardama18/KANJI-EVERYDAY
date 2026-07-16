@@ -53,6 +53,30 @@ export async function runActiveCleanups(activeCleanups) {
 	if (firstError !== undefined) throw firstError;
 }
 
+const QUALITY_BASE_REF_PATTERN = /^(?!.*(?:\.\.|@\{|\/\/))[A-Za-z0-9][A-Za-z0-9._\/-]{0,255}$/u;
+const COMMIT_SHA_PATTERN = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/u;
+
+export async function resolveQualityDiffBase(
+	environment = process.env,
+	resolveCommit = resolveGitCommit
+) {
+	const configuredInput = environment.QUALITY_DIFF_BASE;
+	if (configuredInput !== undefined) {
+		const configured = configuredInput.trim();
+		if (configured.length === 0 || !QUALITY_BASE_REF_PATTERN.test(configured)) {
+			throw new Error("Invalid quality diff base");
+		}
+		const resolved = await resolveCommit(configured);
+		if (resolved === undefined) throw new Error("Unable to resolve quality diff base");
+		return resolved;
+	}
+	for (const candidate of ["origin/main", "main"]) {
+		const resolved = await resolveCommit(candidate);
+		if (resolved !== undefined) return resolved;
+	}
+	throw new Error("Unable to resolve quality diff base");
+}
+
 export async function reconcileRunScopedResidue({
 	currentScope,
 	sourceDatabaseName,
@@ -169,6 +193,7 @@ function cleanupRegistration(activeCleanups) {
 }
 
 async function runQualityPhases({ freshUrl, upgradeUrl, failureUrl }) {
+	const diffBase = await resolveQualityDiffBase(process.env);
 	const checkEnvironment = {
 		// Keep legacy S-10 integration on the rollback-verified S-10 target;
 		// S-11 DB gates use their explicit fresh/upgrade URLs below.
@@ -231,7 +256,13 @@ async function runQualityPhases({ freshUrl, upgradeUrl, failureUrl }) {
 			],
 			checkEnvironment,
 		],
-		["diff whitespace validation", "git", ["diff", "--check"], checkEnvironment],
+		[
+			"committed diff whitespace validation",
+			"git",
+			["diff", "--check", `${diffBase}...HEAD`],
+			checkEnvironment,
+		],
+		["worktree diff whitespace validation", "git", ["diff", "--check"], checkEnvironment],
 	];
 	for (const [label, program, arguments_, environment] of phases) {
 		process.stdout.write(`=== ${label} ===\n`);
@@ -240,6 +271,24 @@ async function runQualityPhases({ freshUrl, upgradeUrl, failureUrl }) {
 	}
 	process.stdout.write("Repository quality checks passed.\n");
 	return 0;
+}
+
+async function resolveGitCommit(ref) {
+	return await new Promise((resolve) => {
+		const child = spawn("git", ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`], {
+			stdio: ["ignore", "pipe", "ignore"],
+		});
+		let output = "";
+		child.stdout.setEncoding("utf8");
+		child.stdout.on("data", (chunk) => {
+			output += chunk;
+		});
+		child.once("error", () => resolve(undefined));
+		child.once("close", (code, signal) => {
+			const sha = output.trim().toLowerCase();
+			resolve(code === 0 && signal === null && COMMIT_SHA_PATTERN.test(sha) ? sha : undefined);
+		});
+	});
 }
 
 export async function runCommand(program, arguments_, environment) {

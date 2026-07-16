@@ -2,14 +2,14 @@
 id: S-11
 feature: ai-card-async-processing
 type: traceability
-version: 2.0.9
+version: 2.0.10
 created: 2026-07-15
 updated: 2026-07-16
 status: implementation_review
 requirements: specs/stories/S-11-ai-card-async-processing/requirements.md@2.0.5
 adr: specs/adr/ADR-008-ai-card-async-queue-image-processing.md@2.0.5
 design: specs/stories/S-11-ai-card-async-processing/design.md@2.0.5
-plan: specs/stories/S-11-ai-card-async-processing/plan.md@2.0.9
+plan: specs/stories/S-11-ai-card-async-processing/plan.md@2.0.10
 ---
 
 # S-11 implementation traceability
@@ -34,9 +34,9 @@ Fresh bounded remediation cycle 7 corrects only the three stale plan SSOT labels
 
 Repository-owned quality cycle 8 adds no production or AC contract. `.codex/quality.json` delegates to a repository runner that creates a strict-prefix disposable database from the existing S-10 bootstrap, repository migrations, and Seed without dumping/restoring Supabase platform schemas, roles, default privileges, or extensions. Review-1 remediation requires the existing S-10 role/membership prerequisites, removes cluster-wide role/membership statements from the disposable migration stream, and proves a non-revealing `pg_roles`/`pg_auth_members` fingerprint unchanged. Review-2 remediation makes the signal-installed callback the same complete verified teardown used by the normal path and fingerprints all mutable local membership attributes (`admin_option`, `inherit_option`, `set_option`). Executable evidence is safety 20/20 plus the real success/check-failure/setup-failure harness, S-10 Unit 32/32, safe-error/outbox 12/12, ordinary Vitest 652 pass/8 conditional skip, current S-11 inventory 214/214, focused remediation 34/34, lint/typecheck/configured build/diff pass, final source/role/residue pass, and seven unchanged external `not_run`/exit 2 outcomes. Cleanup/drop or any teardown verification failure overrides a simultaneous primary quality failure or signal status with generic exit 1 and sanitized output; exact quality or signal exit propagation is evidence only after verified cleanup.
 
-Historical cycle 8 independent review attempt 3/3 returned zero findings and `approved` for that cycle's diff. The installed root quality-fixer then returned exit 0 through the then-current isolated S-10 lifecycle. This historical record does not approve the current R12 remediation and does not establish hosted AC acceptance.
+Historical cycle 8 independent review attempt 3/3 returned zero findings and `approved` for that cycle's diff. The installed root quality-fixer then returned exit 0 through the then-current isolated S-10 lifecycle. This historical record does not approve any post-cycle-8 remediation and does not establish hosted AC acceptance.
 
-Current R12 remediation hardens five boundaries: ready rows cannot be downgraded by stale cleanup, malformed JSON and status identifiers fail before side effects, expand/backfill/validate are bounded stages, resource-only authorization rejects blank secrets, and the repository runner owns three isolated disposable databases. Local evidence is intentionally narrower than hosted acceptance. Hosted schedule controls, full real integration/E2E, resource artifact, and Deno executions must remain `not_run` until their explicit prerequisites are supplied.
+Historical R12 remediation introduced five boundaries: ready rows cannot be downgraded by stale cleanup, malformed JSON and status identifiers fail before side effects, expand/backfill/validate are bounded stages, resource-only authorization rejects blank secrets, and the repository runner owns three isolated disposable databases. This is historical implementation evidence, not current hosted acceptance. The current cycle-12 verification state remains hosted schedule controls, full real integration/E2E, resource artifact, and Deno `not_run`/exit 2 with merge blocked.
 
 Cycle 7 independent review attempt 1 returned `changes_requested`. Its four authorized corrections now distinguish an empty Queue result from malformed RPC output at the real handler boundary, validate outbox error codes against `SAFE_IMPORT_ERROR_CODES`, directly check the corrected confirmed-poison `worker_poison` task evidence, and map provider selection/concept isolation to IT-16, local E2E-04, and the fail-closed F-08 PostgreSQL pair-failure/sibling-success gate. Independent review attempt 2/3 remains the next gate.
 
@@ -133,6 +133,9 @@ Fresh remediation cycle 3 adds P3-01/P3-02 focused evidence: `worker_failure` is
 | R14-F3 | typed preview HMAC environment access | commit route has no direct environment read; typed helper trims values and missing/blank route calls fail safely before RPC |
 | R15-F1 | atomic upload constraint replacement | one ALTER drops legacy/current names and adds S-11 NOT VALID checks; pre-swap interruption preserves both legacy checks in a new session before true-autocommit recovery |
 | R15-F2 | readiness SSOT | v2.0.9/cycle 11 states hosted 7 not_run and merge blocked; local boundary E2E is complete while hosted full-system E2E remains incomplete |
+| R16-F1 | committed diff whitespace gate | validated explicit ref/SHA or deterministic `origin/main` then `main` resolution produces a commit SHA; unresolved or unsafe input fails closed before `git diff --check <base>...HEAD`, with a separate worktree check |
+| R16-F2 | uppercase UUID success boundary | actual prepared completion route canonicalizes once and uses lowercase UUID/path for query, write intent, Storage, ready reconciliation, raw cleanup, cleanup reconciliation, and response |
+| R16-F3 | cycle-12 readiness SSOT | v2.0.10/cycle 12 retains hosted 7 not_run/exit 2 and merge blocked; prior R12 and cycle-8 approvals are explicitly historical |
 
 ## Change history
 
@@ -160,3 +163,4 @@ Fresh remediation cycle 3 adds P3-01/P3-02 focused evidence: `worker_failure` is
 | 2026-07-16 | 2.0.7 | remediation | Mapped R13-F1–F5 and current 23/195/10 inventory; response-loss, autocommit, privilege, schedule, and residue evidence added while hosted gates remain not_run |
 | 2026-07-16 | 2.0.8 | remediation | Mapped R14-F1–F3 and current 23/198/10 inventory; true autocommit, global default privilege, canonical UUID, and typed preview-secret evidence added |
 | 2026-07-16 | 2.0.9 | remediation | Mapped R15-F1/F2 and current 23/200/10 inventory; atomic constraint swap and hosted merge-blocked readiness SSOT added |
+| 2026-07-16 | 2.0.10 | implementation_review | Cycle 12 adds committed base...HEAD whitespace validation and uppercase prepared success-path boundary proof; hosted 7 remain not_run/exit 2 and merge blocked |

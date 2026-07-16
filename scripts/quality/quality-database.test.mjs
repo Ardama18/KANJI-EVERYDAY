@@ -16,6 +16,7 @@ import {
 import {
 	createTerminationHandler,
 	reconcileRunScopedResidue,
+	resolveQualityDiffBase,
 	resolveProcessExitCode,
 	runActiveCleanups,
 	runCommand,
@@ -183,6 +184,54 @@ test("repository quality provisions three distinct S-11 migration databases", as
 	assert.match(runner, /test:s11:upgrade/u);
 	assert.match(runner, /test:s11:failure/u);
 	assert.match(runner, /test:s11:local-real-integration/u);
+	assert.match(runner, /committed diff whitespace validation/u);
+	assert.match(runner, /diffBase.*\.\.\.HEAD/u);
+	assert.match(runner, /worktree diff whitespace validation/u);
+});
+
+test("quality diff base resolves explicit refs to a commit without shell interpretation", async () => {
+	const calls = [];
+	const sha = "a".repeat(40);
+	assert.equal(
+		await resolveQualityDiffBase({ QUALITY_DIFF_BASE: "refs/remotes/origin/main" }, async (ref) => {
+			calls.push(ref);
+			return sha;
+		}),
+		sha
+	);
+	assert.deepEqual(calls, ["refs/remotes/origin/main"]);
+	assert.equal(
+		await resolveQualityDiffBase({ QUALITY_DIFF_BASE: sha }, async (ref) =>
+			ref === sha ? sha : undefined
+		),
+		sha
+	);
+	await assert.rejects(
+		resolveQualityDiffBase({ QUALITY_DIFF_BASE: "missing-safe-ref" }, async () => undefined),
+		/quality diff base/u
+	);
+	await assert.rejects(
+		resolveQualityDiffBase({ QUALITY_DIFF_BASE: "main;touch /tmp/injected" }, async () => sha),
+		/quality diff base/u
+	);
+	await assert.rejects(
+		resolveQualityDiffBase({ QUALITY_DIFF_BASE: "   " }, async () => sha),
+		/quality diff base/u
+	);
+});
+
+test("quality diff base deterministically falls back to origin/main then main and fails closed", async () => {
+	const sha = "b".repeat(40);
+	const calls = [];
+	assert.equal(
+		await resolveQualityDiffBase({}, async (ref) => {
+			calls.push(ref);
+			return ref === "main" ? sha : undefined;
+		}),
+		sha
+	);
+	assert.deepEqual(calls, ["origin/main", "main"]);
+	await assert.rejects(resolveQualityDiffBase({}, async () => undefined), /quality diff base/u);
 });
 
 test("signal cleanup attempts every active database in reverse order before failing", async () => {

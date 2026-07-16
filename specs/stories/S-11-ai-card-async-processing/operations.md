@@ -1,6 +1,6 @@
 # S-11 operations and rollback runbook
 
-Current verification state: `hosted 7 not_run; merge blocked`. Local boundary
+Current cycle-12 verification state: `hosted 7 not_run; merge blocked`. Local boundary
 E2E, isolated PostgreSQL, and code-readiness results do not complete hosted
 full-system E2E or authorize merge.
 
@@ -284,3 +284,10 @@ Age cleanup is exact: source/orphan rows are protected through 23:59:59 and beco
 - A deliberate duplicate-name error inside a test ALTER first drops the legacy status constraint and then attempts two identical S-11 adds; the whole statement aborts. A new connection again proves both legacy constraints remain and the S-11 constraint is absent.
 - Readiness SSOT is v2.0.9 / remediation cycle 11 / `hosted 7 not_run; merge blocked`. Local boundary E2E 10/10 is complete; hosted full-system E2E is explicitly incomplete. Cycle-8 zero-findings/approved text is historical evidence only and does not describe current acceptance.
 - Final local root quality passed DB safety and isolated lifecycle prerequisites, fresh/upgrade/true-autocommit failure/local-real, lint 97 files, typecheck, configured build with existing warnings, ordinary Vitest 672 passed/8 conditional skips of 680 definitions, S-11 inventory 233/233 (Unit 23, Integration 200, E2E 10), focused 53/53, and `git diff --check`.
+
+## Final ship review remediation cycle 12 (2026-07-16)
+
+- The quality runner resolves an explicit validated ref/SHA to a full commit SHA without a shell. When no input is configured it tries `origin/main` and then `main`; unsafe, blank, or unresolved input fails closed. It runs `git diff --check <resolved-sha>...HEAD` for committed changes and a separate worktree check.
+- The actual prepared completion route accepts an uppercase valid UUID and proves its lowercase canonical UUID/path at both lookup predicates, source fetch/upload/removal, every ready/reconciliation/raw-delete RPC, cleanup RPC, and the 200 ready response. A write-intent failure also targets only the canonical cleanup identity/path.
+- DB safety passed 25/25 and the concurrent real database lifecycle harness passed. The explicit-`main` root runner passed fresh, upgrade, true-autocommit failure, local real PostgreSQL, lint 97 files, typecheck, configured build with existing warnings, ordinary Vitest 672 passed/8 conditional skips of 680 definitions, S-11 inventory 233/233 (Unit 23, Integration 200, E2E 10), focused 53/53, committed `base...HEAD`, and worktree diff checks.
+- Fresh, upgrade, failure, hosted real integration, hosted real E2E, resource, and Deno were separately rerun without prerequisites. All seven emitted structured `not_run` and exit 2; none is a pass. Verification remains `hosted 7 not_run; merge blocked`.

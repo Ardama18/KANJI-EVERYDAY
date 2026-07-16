@@ -2,7 +2,7 @@
 id: S-11
 feature: ai-card-async-processing
 type: plan
-version: 2.0.9
+version: 2.0.10
 created: 2026-07-15
 updated: 2026-07-16
 based_on: specs/stories/S-11-ai-card-async-processing/design.md
@@ -620,8 +620,8 @@ git status --short
 
 ## Cycle 8 final quality gate
 
-The following checklist is historical cycle-8 evidence. It does not claim the
-current R12 remediation or any hosted gate is approved.
+The following checklist is historical cycle-8 evidence. It does not approve
+any post-cycle-8 remediation or any hosted gate.
 
 - [x] 独立read-only review attempt 3/3で全差分・AC 9/9・quality/database safety contractを再検証し、zero findings / 100% / `approved`を得る。
 - [x] repository rootからinstalled `$ar-core:quality-fixer`を実行し、`.codex/quality.json`経由のrepo-owned commandがexit 0 / `approved`となる。
@@ -642,6 +642,15 @@ current R12 remediation or any hosted gate is approved.
 - [x] schema-localでは無効だったdefault function privilege revokeをglobal revokeへ修正し、中断時PUBLIC executeを実DBで拒否する。
 - [x] uppercase UUIDを入力直後lowercase canonical化し、typed env layerへpreview HMAC secretを集約する。
 - [x] full isolated qualityをexit 0にし、hosted gateをPR本文の明示留保かつmerge blockerとして維持する。
+
+## Final ship review remediation cycle 12
+
+- [x] R16-F1: 明示された安全なref/SHA、または`origin/main`→`main`の順でbase commitを解決し、未解決・不正入力をfail closedにする。
+- [x] R16-F1: `git diff --check <base>...HEAD`でcommitted diffを、別の`git diff --check`でworktreeを検証する。
+- [x] R16-F2: uppercase UUIDをactual prepared completion routeへ通し、query、全RPC、Storage、reconciliation、cleanup、ready responseがlowercase canonical ID/pathだけを使うことを確認する。
+- [x] R16-F3: meta/plan/traceability/operations/tasksをv2.0.10 / cycle 12 / `hosted 7 not_run; merge blocked`へ同期し、過去のapprovalを現行承認として扱わない。
+- [x] DB safety 25/25、real lifecycle harness、full isolated root quality、external 7件のstructured `not_run`/exit 2を再確認する。
+- [ ] hosted full-system acceptance 7件が明示的前提環境でpassする。完了まではmerge blockedを維持する。
 
 ## 変更履歴
 
@@ -668,3 +677,4 @@ current R12 remediation or any hosted gate is approved.
 | 2026-07-16 | 2.0.7 | remediation | ship review R13-F1〜F5、current Integration 195、autocommit recovery、privilege/schedule/residue hardeningを反映 |
 | 2026-07-16 | 2.0.8 | remediation | R14-F1〜F3、current Integration 198、true autocommit/global default privilege/UUID/env hardeningを反映 |
 | 2026-07-16 | 2.0.9 | implementation_review | R15-F1/F2、current Integration 200、atomic constraint swapとhosted merge-blocked SSOTを反映 |
+| 2026-07-16 | 2.0.10 | implementation_review | cycle 12、base...HEAD diff gate、uppercase success境界、latest hosted merge-blocked SSOTを反映 |
