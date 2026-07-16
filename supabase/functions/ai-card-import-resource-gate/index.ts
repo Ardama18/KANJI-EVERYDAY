@@ -13,7 +13,14 @@ Deno.serve({ hostname: "127.0.0.1", port: configuredPort }, async (request) => {
 	}
 	if (request.method !== "POST") return new Response(null, { status: 405 });
 	const secret = Deno.env.get("AI_CARD_WORKER_SECRET");
-	if (secret === undefined || request.headers.get("x-ai-worker-secret") !== secret) {
+	const presentedSecret = request.headers.get("x-ai-worker-secret");
+	if (
+		secret === undefined ||
+		secret.trim().length === 0 ||
+		presentedSecret === undefined ||
+		presentedSecret.trim().length === 0 ||
+		presentedSecret !== secret
+	) {
 		return new Response(null, { status: 401 });
 	}
 	const started = performance.now();

@@ -25,7 +25,7 @@ status: quality_review
 - ADR: `specs/adr/ADR-008-ai-card-async-queue-image-processing.md` v2.0.5 Accepted
 - Design Doc: `specs/stories/S-11-ai-card-async-processing/design.md` v2.0.5 Approved
 - Unit suite: `specs/stories/S-11-ai-card-async-processing/tests/ai-card-async-processing.test.ts`（現行23件）
-- Integration suite: `specs/stories/S-11-ai-card-async-processing/tests/ai-card-async-processing.int.test.ts`（現行181件。127/139/142/147/153/154/155/162/163/168/179件は履歴値）
+- Integration suite: `specs/stories/S-11-ai-card-async-processing/tests/ai-card-async-processing.int.test.ts`（現行189件。127/139/142/147/153/154/155/162/163/168/179/181件は履歴値）
 - E2E suite: `specs/stories/S-11-ai-card-async-processing/tests/ai-card-async-processing.e2e.test.ts`（10件）
 - 先行実装: `supabase/migrations/20260714000000_s10_ai_card_import_foundation.sql`
 - 先行testkit: `specs/stories/S-10-ai-card-import-foundation/tests/helpers/s10-db-testkit.ts`, `s10-db-jobs.ts`
@@ -389,7 +389,7 @@ git status --short
 | AC-08 concept失敗分離 | T1-04, T4-02 | - | F-08 fail-closed PostgreSQL pair-failure/sibling-success | E2E-04 (local) |
 | AC-09 ログ秘匿 | T2-03, T5-01 | #15 | IT-25 | E2E-10 |
 
-数量gateは現行Unit 23件、Integration 181件、E2E 10件である。93/102/110/127/139/142/147/153/154/155/162/163/168/179 Integrationは各変更履歴時点のhistorical inventoryでありcurrent evidenceではない。cycle 7 R11-F1/F2はQueue RPCのempty/malformed分離とoutbox safe-code runtime allowlistへ接続し、R11-R2-F2はactual prepare routeの5件受理/6件副作用前拒否へ接続する。cycle 6 R10-F1/F2は全production lock pathのcards→illustrations→tracking順、bounded complete/attach concurrency、provider cancellation-safe oversize classificationへ接続する。review-attempt-1 R10-R1-F1はS-10 different-key attachのOLD+NEW一括canonical lockとA↔B二順序gateへ接続する。review-attempt-2 R10-R2-F1/F2はcaller JWT lifecycle authorityとterminal outbox fault後のsource releaseへ接続する。
+数量gateは現行Unit 23件、Integration 189件、E2E 10件である。93/102/110/127/139/142/147/153/154/155/162/163/168/179/181 Integrationは各変更履歴時点のhistorical inventoryでありcurrent evidenceではない。R12-F1〜F5はcompletion/cleanup競合、入力境界、段階migration、resource secret、3 DB分離品質gateへ接続する。cycle 7 R11-F1/F2はQueue RPCのempty/malformed分離とoutbox safe-code runtime allowlistへ接続し、R11-R2-F2はactual prepare routeの5件受理/6件副作用前拒否へ接続する。cycle 6 R10-F1/F2は全production lock pathのcards→illustrations→tracking順、bounded complete/attach concurrency、provider cancellation-safe oversize classificationへ接続する。review-attempt-1 R10-R1-F1はS-10 different-key attachのOLD+NEW一括canonical lockとA↔B二順序gateへ接続する。review-attempt-2 R10-R2-F1/F2はcaller JWT lifecycle authorityとterminal outbox fault後のsource releaseへ接続する。
 
 ## Rollback・compensation
 
@@ -616,6 +616,9 @@ git status --short
 - [x] 7 external gateは既存の`not_run`/exit 2を維持し、最終独立review attempt 3/3へ進む。
 
 ## Cycle 8 final quality gate
+
+The following checklist is historical cycle-8 evidence. It does not claim the
+current R12 remediation or any hosted gate is approved.
 
 - [x] 独立read-only review attempt 3/3で全差分・AC 9/9・quality/database safety contractを再検証し、zero findings / 100% / `approved`を得る。
 - [x] repository rootからinstalled `$ar-core:quality-fixer`を実行し、`.codex/quality.json`経由のrepo-owned commandがexit 0 / `approved`となる。

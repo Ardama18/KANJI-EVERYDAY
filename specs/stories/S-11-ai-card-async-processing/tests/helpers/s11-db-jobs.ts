@@ -19,6 +19,10 @@ const SCHEDULE_MIGRATION = path.join(
 	ROOT,
 	"supabase/migrations/20260715000001_s11_ai_card_async_schedule_controls.sql"
 );
+const VALIDATE_MIGRATION = path.join(
+	ROOT,
+	"supabase/migrations/20260715000002_s11_ai_card_async_validate.sql"
+);
 const UPGRADE_FIXTURE = path.join(
 	ROOT,
 	"specs/stories/S-11-ai-card-async-processing/tests/fixtures/pre-s11-seed.sql"
@@ -42,7 +46,10 @@ export async function runS11DatabaseJob(
 		const migration = await readFile(CORE_MIGRATION, "utf8");
 		let failed = false;
 		try {
-			await runS10Psql(databaseUrl, `SET app.s11_failpoint='before_core_commit';\n${migration}`);
+			await runS10Psql(
+				databaseUrl,
+				`BEGIN;\nSET LOCAL app.s11_failpoint='before_core_commit';\n${migration}`
+			);
 		} catch {
 			failed = true;
 		}
@@ -56,8 +63,21 @@ export async function runS11DatabaseJob(
 	}
 	if (job === "upgrade") await runS10PsqlFile(databaseUrl, UPGRADE_FIXTURE);
 	await runS10PsqlFile(databaseUrl, CORE_MIGRATION);
-	await runS10PsqlFile(databaseUrl, SCHEDULE_MIGRATION);
-	await assertS11Contracts(databaseUrl, job);
+	const coreOnly = environment.S11_LOCAL_CORE_ONLY === "1";
+	if (!coreOnly) await runS10PsqlFile(databaseUrl, SCHEDULE_MIGRATION);
+	for (;;) {
+		const output = await runS10Psql(
+			databaseUrl,
+			"SELECT public.backfill_ai_uploads_s11(500)::text"
+		);
+		const affected = Number(output.trim().split(/\s+/u).at(-1));
+		if (!Number.isSafeInteger(affected) || affected < 0) {
+			throw new Error("S-11 backfill returned an invalid count");
+		}
+		if (affected === 0) break;
+	}
+	await runS10PsqlFile(databaseUrl, VALIDATE_MIGRATION);
+	await assertS11Contracts(databaseUrl, job, !coreOnly);
 }
 
 async function assertS10Base(databaseUrl: string): Promise<void> {
@@ -70,7 +90,8 @@ async function assertS10Base(databaseUrl: string): Promise<void> {
 
 async function assertS11Contracts(
 	databaseUrl: string,
-	job: Exclude<S11DatabaseJob, "failure">
+	job: Exclude<S11DatabaseJob, "failure">,
+	scheduleApplied: boolean
 ): Promise<void> {
 	const result = await runS10Psql(
 		databaseUrl,
@@ -107,7 +128,9 @@ async function assertS11Contracts(
 					AND (COALESCE(qual,'') || COALESCE(with_check,'')) LIKE '%ai_illustration_objects%') AND
 			has_function_privilege('service_role','public.get_ai_import_status(uuid,uuid,text)','EXECUTE') AND
 			NOT has_function_privilege('authenticated','public.get_ai_import_status(uuid,uuid,text)','EXECUTE') AND
-			NOT EXISTS (SELECT 1 FROM cron.job WHERE jobname IN ('s11-ai-card-worker','s11-ai-card-cleanup'))
+			${scheduleApplied
+				? "NOT EXISTS (SELECT 1 FROM cron.job WHERE jobname IN ('s11-ai-card-worker','s11-ai-card-cleanup'))"
+				: "to_regprocedure('public.activate_ai_card_async_schedules()') IS NULL"}
 		)::text`
 	);
 	if (!result.includes("true")) throw new Error("S-11 database contract smoke failed");

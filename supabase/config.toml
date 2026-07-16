@@ -7,4 +7,6 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.ai-card-import-resource-gate]
-verify_jwt = false
+# Resource-only local quality gate. Hosted deployment is not part of the release,
+# and JWT verification remains enabled as defense if it is deployed accidentally.
+verify_jwt = true

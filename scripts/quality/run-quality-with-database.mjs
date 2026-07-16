@@ -37,10 +37,22 @@ export function resolveProcessExitCode(code, signal) {
 	return code ?? 1;
 }
 
+export async function runActiveCleanups(activeCleanups) {
+	let firstError;
+	for (const cleanup of [...activeCleanups].reverse()) {
+		try {
+			await cleanup();
+		} catch (error) {
+			firstError ??= error;
+		}
+	}
+	if (firstError !== undefined) throw firstError;
+}
+
 export async function runRepositoryQuality() {
-	let activeCleanup;
+	const activeCleanups = new Set();
 	const terminate = createTerminationHandler({
-		getCleanup: () => activeCleanup,
+		getCleanup: () => async () => await runActiveCleanups(activeCleanups),
 		exit: (exitCode) => process.exit(exitCode),
 	});
 	process.on("SIGINT", terminate);
@@ -48,10 +60,19 @@ export async function runRepositoryQuality() {
 	try {
 		await withDisposableS10Database({
 			sourceUrl: process.env.S10_ADMIN_DATABASE_URL,
-			onCleanupReady(cleanup) {
-				activeCleanup = cleanup;
-			},
-			check: async (targetUrl) => await runQualityPhases(targetUrl),
+			onCleanupReady: cleanupRegistration(activeCleanups),
+			check: async (freshUrl) =>
+				await withDisposableS10Database({
+					sourceUrl: process.env.S10_ADMIN_DATABASE_URL,
+					onCleanupReady: cleanupRegistration(activeCleanups),
+					check: async (upgradeUrl) =>
+						await withDisposableS10Database({
+							sourceUrl: process.env.S10_ADMIN_DATABASE_URL,
+							onCleanupReady: cleanupRegistration(activeCleanups),
+							check: async (failureUrl) =>
+								await runQualityPhases({ freshUrl, upgradeUrl, failureUrl }),
+						}),
+				}),
 		});
 		return 0;
 	} catch (error) {
@@ -64,9 +85,31 @@ export async function runRepositoryQuality() {
 	}
 }
 
-async function runQualityPhases(targetUrl) {
-	const checkEnvironment = buildCheckEnvironment(process.env, targetUrl);
+function cleanupRegistration(activeCleanups) {
+	let current;
+	return (cleanup) => {
+		if (current !== undefined) activeCleanups.delete(current);
+		current = cleanup;
+		if (cleanup !== undefined) activeCleanups.add(cleanup);
+	};
+}
+
+async function runQualityPhases({ freshUrl, upgradeUrl, failureUrl }) {
+	const checkEnvironment = {
+		// Keep legacy S-10 integration on the rollback-verified S-10 target;
+		// S-11 DB gates use their explicit fresh/upgrade URLs below.
+		...buildCheckEnvironment(process.env, failureUrl),
+		S11_FRESH_DATABASE_URL: freshUrl,
+		S11_UPGRADE_DATABASE_URL: upgradeUrl,
+		S11_FAILURE_DATABASE_URL: failureUrl,
+		S11_LOCAL_DATABASE_URL: freshUrl,
+		S11_LOCAL_CORE_ONLY: "1",
+	};
 	const phases = [
+		["S-11 local core fresh migration", "npm", ["--prefix", "frontend", "run", "test:s11:fresh"], checkEnvironment],
+		["S-11 local core upgrade migration", "npm", ["--prefix", "frontend", "run", "test:s11:upgrade"], checkEnvironment],
+		["S-11 local core failure rollback", "npm", ["--prefix", "frontend", "run", "test:s11:failure"], checkEnvironment],
+		["S-11 local real PostgreSQL integration", "npm", ["--prefix", "frontend", "run", "test:s11:local-real-integration"], checkEnvironment],
 		["frontend lint", "npm", ["--prefix", "frontend", "run", "lint"], checkEnvironment],
 		[
 			"frontend typecheck",
@@ -101,7 +144,7 @@ async function runQualityPhases(targetUrl) {
 			checkEnvironment,
 		],
 		[
-			"S-11 focused 34 regressions",
+			"S-11 focused 42 regressions",
 			"npm",
 			[
 				"--prefix",
@@ -110,7 +153,7 @@ async function runQualityPhases(targetUrl) {
 				"test:s11:integration",
 				"--",
 				"-t",
-				"R[789]-F|R10-(R[12]-)?F|R11-(R2-)?F[12]",
+				"R[789]-F|R10-(R[12]-)?F|R11-(R2-)?F[12]|R12-F",
 			],
 			checkEnvironment,
 		],

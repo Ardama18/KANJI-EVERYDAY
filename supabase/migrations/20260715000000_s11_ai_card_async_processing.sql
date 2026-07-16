@@ -1,7 +1,8 @@
--- S-11 AI card asynchronous queue and image lifecycle.
--- This migration is forward-only and keeps every S-10 function available.
-
-BEGIN;
+-- S-11 expand stage. This migration is intentionally not wrapped in one long
+-- transaction: lock-taking DDL fails fast and the data backfill is a separate,
+-- bounded compatibility stage before constraint validation.
+SET lock_timeout = '5s';
+SET statement_timeout = '15min';
 
 CREATE EXTENSION IF NOT EXISTS pgmq;
 SELECT pgmq.create('ai_card_imports');
@@ -10,8 +11,8 @@ INSERT INTO storage.buckets (id, name, public, file_size_limit)
 VALUES ('ai-card-sources', 'ai-card-sources', false, 10485760)
 ON CONFLICT (id) DO UPDATE SET public = false, file_size_limit = 10485760;
 
-ALTER TABLE public.ai_uploads DROP CONSTRAINT ai_uploads_status_check;
-ALTER TABLE public.ai_uploads DROP CONSTRAINT ai_uploads_status_time_check;
+ALTER TABLE public.ai_uploads DROP CONSTRAINT IF EXISTS ai_uploads_status_check;
+ALTER TABLE public.ai_uploads DROP CONSTRAINT IF EXISTS ai_uploads_status_time_check;
 ALTER TABLE public.ai_uploads
   ADD COLUMN raw_storage_path text,
 	ADD COLUMN raw_storage_bucket text,
@@ -31,33 +32,20 @@ ALTER TABLE public.ai_uploads
   ADD COLUMN raw_cleanup_claimed_at timestamptz,
 	ADD COLUMN raw_cleanup_claim_token uuid;
 
--- Upgrade-safe lifecycle backfill must happen before the new state constraint.
-UPDATE public.ai_uploads
-SET source_storage_path = CASE WHEN status <> 'deleted' THEN storage_path ELSE NULL END,
-		source_storage_bucket = CASE WHEN status <> 'deleted' THEN 'illustrations' ELSE NULL END,
-    detected_mime_type = CASE WHEN status <> 'deleted' THEN mime_type ELSE NULL END,
-    delete_due_at = CASE
-      WHEN status = 'deleted' THEN COALESCE(consumed_at, created_at)
-      ELSE created_at + interval '23 hours 45 minutes'
-    END,
-    deleted_at = CASE
-      WHEN status = 'deleted' THEN COALESCE(consumed_at, created_at)
-      ELSE NULL
-    END;
 ALTER TABLE public.ai_uploads
   ADD CONSTRAINT ai_uploads_s11_status_check
-    CHECK (status IN ('prepared', 'ready', 'consumed', 'cleanup_pending', 'cleaning', 'deleted')),
+    CHECK (status IN ('prepared', 'ready', 'consumed', 'cleanup_pending', 'cleaning', 'deleted')) NOT VALID,
   ADD CONSTRAINT ai_uploads_s11_dimensions_check CHECK (
     (width IS NULL AND height IS NULL) OR
     (width > 0 AND height > 0 AND width::bigint * height::bigint <= 16000000)
-  ),
+  ) NOT VALID,
 	ADD CONSTRAINT ai_uploads_s11_digest_check
-		CHECK (sha256 IS NULL OR sha256 ~ '^[0-9a-f]{64}$'),
+		CHECK (sha256 IS NULL OR sha256 ~ '^[0-9a-f]{64}$') NOT VALID,
 	ADD CONSTRAINT ai_uploads_s11_bucket_check CHECK (
 		(raw_storage_path IS NULL OR raw_storage_bucket = 'ai-card-sources') AND
 		(source_storage_path IS NULL OR source_storage_bucket IN ('ai-card-sources','illustrations')) AND
 		(source_write_intent_path IS NULL OR source_write_intent_bucket = 'ai-card-sources')
-	),
+	) NOT VALID,
   ADD CONSTRAINT ai_uploads_s11_status_time_check CHECK (
     (status = 'prepared' AND consumed_at IS NULL AND deleted_at IS NULL) OR
     (status = 'ready' AND consumed_at IS NULL AND deleted_at IS NULL) OR
@@ -65,7 +53,7 @@ ALTER TABLE public.ai_uploads
     (status = 'cleanup_pending' AND deleted_at IS NULL) OR
     (status = 'cleaning' AND deleted_at IS NULL) OR
     (status = 'deleted' AND deleted_at IS NOT NULL)
-  );
+  ) NOT VALID;
 
 CREATE TABLE public.ai_import_concept_jobs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -289,6 +277,62 @@ BEGIN
   IF current_setting('request.jwt.claim.role', true) IS DISTINCT FROM 'service_role' THEN
     PERFORM public.ai_raise_import_error('UNAUTHORIZED');
   END IF;
+END;
+$$;
+
+-- Compatibility period: old S-10 writers remain valid while the application
+-- and workers roll forward. New/updated legacy rows receive S-11 metadata, and
+-- existing rows are handled by the bounded SKIP LOCKED function below.
+CREATE FUNCTION public.ai_s11_sync_upload_compat()
+RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
+BEGIN
+	IF NEW.status IN ('ready','consumed') AND NEW.source_storage_path IS NULL THEN
+		NEW.source_storage_path := NEW.storage_path;
+		NEW.source_storage_bucket := 'illustrations';
+		NEW.detected_mime_type := NEW.mime_type;
+		NEW.delete_due_at := COALESCE(NEW.delete_due_at,NEW.created_at+interval '23 hours 45 minutes');
+	ELSIF NEW.status='deleted' THEN
+		NEW.source_storage_path := NULL;
+		NEW.source_storage_bucket := NULL;
+		NEW.detected_mime_type := COALESCE(NEW.detected_mime_type,NEW.mime_type);
+		NEW.deleted_at := COALESCE(NEW.deleted_at,NEW.consumed_at,NEW.created_at,statement_timestamp());
+		NEW.delete_due_at := COALESCE(NEW.delete_due_at,NEW.deleted_at);
+	END IF;
+	RETURN NEW;
+END;
+$$;
+CREATE TRIGGER ai_s11_sync_upload_compat
+BEFORE INSERT OR UPDATE OF status,storage_path,mime_type ON public.ai_uploads
+FOR EACH ROW EXECUTE FUNCTION public.ai_s11_sync_upload_compat();
+
+CREATE FUNCTION public.backfill_ai_uploads_s11(p_limit integer DEFAULT 500)
+RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+DECLARE affected integer;
+BEGIN
+	IF p_limit NOT BETWEEN 1 AND 5000 THEN
+		RAISE EXCEPTION USING ERRCODE='22023',MESSAGE='S11_BACKFILL_LIMIT_INVALID';
+	END IF;
+	WITH batch AS MATERIALIZED (
+		SELECT id FROM public.ai_uploads
+		WHERE
+			(status IN ('ready','consumed') AND
+				(source_storage_path IS NULL OR source_storage_bucket IS NULL OR
+				 detected_mime_type IS NULL OR delete_due_at IS NULL)) OR
+			(status='deleted' AND (deleted_at IS NULL OR delete_due_at IS NULL))
+		ORDER BY id LIMIT p_limit FOR UPDATE SKIP LOCKED
+	)
+	UPDATE public.ai_uploads uploads SET
+		source_storage_path=CASE WHEN uploads.status<>'deleted' THEN uploads.storage_path ELSE NULL END,
+		source_storage_bucket=CASE WHEN uploads.status<>'deleted' THEN 'illustrations' ELSE NULL END,
+		detected_mime_type=COALESCE(uploads.detected_mime_type,uploads.mime_type),
+		delete_due_at=COALESCE(uploads.delete_due_at,CASE WHEN uploads.status='deleted'
+			THEN COALESCE(uploads.consumed_at,uploads.created_at)
+			ELSE uploads.created_at+interval '23 hours 45 minutes' END),
+		deleted_at=CASE WHEN uploads.status='deleted'
+			THEN COALESCE(uploads.deleted_at,uploads.consumed_at,uploads.created_at) ELSE NULL END
+	FROM batch WHERE uploads.id=batch.id;
+	GET DIAGNOSTICS affected=ROW_COUNT;
+	RETURN affected;
 END;
 $$;
 
@@ -695,19 +739,19 @@ BEGIN
 	END IF;
   UPDATE public.ai_uploads SET
 		status='cleanup_pending',
-		source_write_intent_path=CASE
-			WHEN p_source_path IS NULL THEN source_write_intent_path ELSE p_source_path
-		END,
-		source_write_intent_bucket=CASE
-			WHEN p_source_path IS NULL THEN source_write_intent_bucket ELSE 'ai-card-sources'
-		END,
     delete_due_at=LEAST(
       COALESCE(delete_due_at,statement_timestamp()),
       statement_timestamp()
     ),
     cleanup_claimed_at=NULL,cleanup_claim_token=NULL
   WHERE id=p_upload_id AND owner_user_id=p_owner_user_id
-    AND status IN ('prepared','ready','consumed','cleanup_pending','cleaning');
+		AND status='prepared'
+		AND (
+			(p_source_path IS NULL AND source_write_intent_path IS NULL
+				AND source_write_intent_bucket IS NULL) OR
+			(p_source_path IS NOT NULL AND source_write_intent_path=p_source_path
+				AND source_write_intent_bucket='ai-card-sources')
+		);
   IF NOT FOUND THEN PERFORM public.ai_raise_import_error('CONFLICT'); END IF;
 END;
 $$;
@@ -1388,19 +1432,6 @@ CREATE TRIGGER ai_s11_guard_illustration_reference
 BEFORE INSERT OR UPDATE OF illustration_key OR DELETE ON public.cards
 FOR EACH ROW EXECUTE FUNCTION public.ai_s11_guard_illustration_reference();
 
--- Fresh installs are empty here; this also makes a partially populated upgrade
--- deterministic before runtime triggers become observable.
-UPDATE public.ai_illustration_objects objects SET reference_count=(
-	SELECT count(*) FROM public.cards cards
-	JOIN public.illustrations illustrations
-		ON illustrations.owner_user_id=cards.owner_user_id
-		AND illustrations.illustration_key=cards.illustration_key
-	WHERE illustrations.id=objects.illustration_id
-);
-UPDATE public.ai_illustration_objects SET state='ready',delete_due_at=NULL
-WHERE reference_count>0 AND state='delete_pending' AND cleanup_claim_token IS NULL
-	AND cleanup_claimed_at IS NULL AND cleanup_previous_state IS NULL;
-
 CREATE FUNCTION public.claim_ai_import_cleanup(p_limit integer)
 RETURNS TABLE("trackingId" uuid,bucket text,path text,"claimToken" uuid)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
@@ -1689,6 +1720,8 @@ END;
 $$;
 
 ALTER FUNCTION public.ai_s11_require_service_role() OWNER TO s10_migration_owner;
+ALTER FUNCTION public.ai_s11_sync_upload_compat() OWNER TO s10_migration_owner;
+ALTER FUNCTION public.backfill_ai_uploads_s11(integer) OWNER TO s10_migration_owner;
 ALTER FUNCTION public.ai_s11_lock_illustration_lifecycle(uuid[]) OWNER TO s10_migration_owner;
 ALTER FUNCTION public.commit_import_async(uuid,text,text,text,jsonb,text) OWNER TO s10_migration_owner;
 ALTER FUNCTION public.get_ai_import_status(uuid,uuid,text) OWNER TO s10_migration_owner;
@@ -1724,6 +1757,8 @@ ALTER FUNCTION public.verify_ai_import_cleanup(uuid,text,text,uuid) OWNER TO s10
 ALTER FUNCTION public.complete_ai_import_cleanup(uuid,text,text,uuid,text) OWNER TO s10_migration_owner;
 
 REVOKE ALL ON FUNCTION public.ai_s11_require_service_role(),
+	public.ai_s11_sync_upload_compat(),
+	public.backfill_ai_uploads_s11(integer),
 	public.ai_s11_lock_illustration_lifecycle(uuid[]),
   public.commit_import_async(uuid,text,text,text,jsonb,text),
   public.get_ai_import_status(uuid,uuid,text),
@@ -1795,5 +1830,3 @@ BEGIN
   END IF;
 END;
 $$;
-
-COMMIT;

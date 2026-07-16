@@ -2,7 +2,7 @@
 id: S-11
 feature: ai-card-async-processing
 type: traceability
-version: 2.0.5
+version: 2.0.6
 created: 2026-07-15
 updated: 2026-07-16
 status: quality_review
@@ -28,13 +28,15 @@ plan: specs/stories/S-11-ai-card-async-processing/plan.md@2.0.5
 
 Integration includes authenticated routes, service-role RPC, provider HTTP, private Storage, recorded legacy/fresh buckets, shared-source ordering, cleanup lease recovery, pinned ImageMagick decode/re-encode, and finalize/failure reconciliation. `test:s11:real-integration`, `test:s11:real-e2e`, and `test:s11:resource` are fail-closed gates: missing real environment/fixtures produce `not_run` and exit 2, never a mock pass. Configured real E2E obtains owner A/B through Supabase password login, sends package-generated SSR cookies to Next routes, and uses access-token Authorization only for PostgREST RPC/RLS; rejection scenarios require the exact Next 404/`NOT_FOUND`, PostgREST 404/`PGRST202`, or Storage 400/`404`/`not_found` contract. The resource gate directly serves the exact self-contained local bundle plus pinned WASM, independently hashes/sizes both, measures spawned PID CPU/external RSS and codec peak RSS, enforces request abort/process kill at CPU/RSS/120-second limits, and exercises direct 16MP/decode-bomb/independent decode-failure plus OpenAI-adapter maximum response/110-second timeout cases.
 
-Fresh/upgrade/failure database jobs are also fail-closed: absent or non-distinct database URLs emit structured `not_run` and exit 2. Unit 23/Integration 127/E2E 10 is explicitly historical evidence from document v1.6.0. Current cycle-7 inventory is Unit 23/23, Integration 181/181, E2E 10/10; configured real/resource/database/Deno gates remain explicit `not_run`/exit 2 until prerequisites exist.
+Fresh/upgrade/failure database jobs are also fail-closed when invoked directly: absent or non-distinct database URLs emit structured `not_run` and exit 2. The repository quality runner now provisions three distinct disposable databases and executes local core fresh/upgrade/failure plus the real two-session completion/cleanup race. Current inventory is Unit 23/23, Integration 189/189, E2E 10/10. Hosted `pg_cron`, real integration/E2E, resource artifact, and Deno gates remain explicit `not_run`/exit 2 until their target prerequisites exist; no local result promotes them to pass.
 
 Fresh bounded remediation cycle 7 corrects only the three stale plan SSOT labels to current v2.0.5 and resets the independent review counter to attempt 1/3. Its repeatable documentation-consistency and unchanged-code regression evidence is recorded in `tasks/remediation-cycle-7.md`; the subsequent independent review outcome is recorded below.
 
 Repository-owned quality cycle 8 adds no production or AC contract. `.codex/quality.json` delegates to a repository runner that creates a strict-prefix disposable database from the existing S-10 bootstrap, repository migrations, and Seed without dumping/restoring Supabase platform schemas, roles, default privileges, or extensions. Review-1 remediation requires the existing S-10 role/membership prerequisites, removes cluster-wide role/membership statements from the disposable migration stream, and proves a non-revealing `pg_roles`/`pg_auth_members` fingerprint unchanged. Review-2 remediation makes the signal-installed callback the same complete verified teardown used by the normal path and fingerprints all mutable local membership attributes (`admin_option`, `inherit_option`, `set_option`). Executable evidence is safety 20/20 plus the real success/check-failure/setup-failure harness, S-10 Unit 32/32, safe-error/outbox 12/12, ordinary Vitest 652 pass/8 conditional skip, current S-11 inventory 214/214, focused remediation 34/34, lint/typecheck/configured build/diff pass, final source/role/residue pass, and seven unchanged external `not_run`/exit 2 outcomes. Cleanup/drop or any teardown verification failure overrides a simultaneous primary quality failure or signal status with generic exit 1 and sanitized output; exact quality or signal exit propagation is evidence only after verified cleanup.
 
-Cycle 8 independent review attempt 3/3 returned zero findings and `approved` with AC 9/9 and 100% quality/database-contract compliance. The installed root quality-fixer then discovered the repository contract and returned `approved`/exit 0 through the same isolated S-10 lifecycle. CHECKPOINT 2 is complete; the implementation is ready for its single focused commit and subsequent issue-sprint PR gate.
+Historical cycle 8 independent review attempt 3/3 returned zero findings and `approved` for that cycle's diff. The installed root quality-fixer then returned exit 0 through the then-current isolated S-10 lifecycle. This historical record does not approve the current R12 remediation and does not establish hosted AC acceptance.
+
+Current R12 remediation hardens five boundaries: ready rows cannot be downgraded by stale cleanup, malformed JSON and status identifiers fail before side effects, expand/backfill/validate are bounded stages, resource-only authorization rejects blank secrets, and the repository runner owns three isolated disposable databases. Local evidence is intentionally narrower than hosted acceptance. Hosted schedule controls, full real integration/E2E, resource artifact, and Deno executions must remain `not_run` until their explicit prerequisites are supplied.
 
 Cycle 7 independent review attempt 1 returned `changes_requested`. Its four authorized corrections now distinguish an empty Queue result from malformed RPC output at the real handler boundary, validate outbox error codes against `SAFE_IMPORT_ERROR_CODES`, directly check the corrected confirmed-poison `worker_poison` task evidence, and map provider selection/concept isolation to IT-16, local E2E-04, and the fail-closed F-08 PostgreSQL pair-failure/sibling-success gate. Independent review attempt 2/3 remains the next gate.
 
@@ -116,6 +118,11 @@ Fresh remediation cycle 3 adds P3-01/P3-02 focused evidence: `worker_failure` is
 | R8-R1-F2 | authoritative sanitized teardown failure | focused drop-failure and residue-verification Red/Green; cleanup failure overrides simultaneous primary failure without URL/name disclosure, exact quality exit survives only verified cleanup |
 | R8-R2-F1 | signal-safe authoritative teardown | focused signal rejection and residue-verification Red/Green; signal callback performs drop plus source/target/cluster verification, generic exit 1 wins on failure, verified cleanup preserves 130/143 |
 | R8-R2-F2 | complete membership fingerprint | executable SQL contract and real local harness include `pg_auth_members.admin_option`, `inherit_option`, and `set_option` before/after all lifecycle paths |
+| R12-F1 | source completion/cleanup serialization | exact-intent cleanup predicate plus two concurrent real PostgreSQL sessions preserve `ready` and return stale cleanup `P1008` |
+| R12-F2 | malformed request/status boundary | actual prepare/complete/status handlers return 400 before RPC or Storage side effects |
+| R12-F3 | bounded online migration | expand with lock/statement limits, compatibility trigger, SKIP LOCKED backfill, and separate constraint validation |
+| R12-F4 | resource gate secret boundary | missing, blank, and mismatched configured/header secrets are rejected before resource work |
+| R12-F5 | isolated quality databases | fresh/upgrade/failure use three distinct disposable targets with signal-safe teardown; local core results do not claim hosted schedule acceptance |
 
 ## Change history
 
@@ -139,3 +146,4 @@ Fresh remediation cycle 3 adds P3-01/P3-02 focused evidence: `worker_failure` is
 | 2026-07-16 | 2.0.3 | quality_review | Mapped bounded cycle 6 R10-F1/F2 and current 23/162/10 inventory; complete/attach concurrency and provider cancellation classification added |
 | 2026-07-16 | 2.0.4 | quality_review | Mapped cycle 6 review-attempt-1 R10-R1-F1 and current 23/163/10 inventory; S-10 OLD+NEW attach override and cross-swap gates added |
 | 2026-07-16 | 2.0.5 | quality_review | Mapped cycle 6 review-attempt-2 R10-R2-F1/F2 and current 23/168/10 inventory; JWT lifecycle authority and terminal outbox/source-release isolation added |
+| 2026-07-16 | 2.0.6 | remediation | Mapped R12-F1–F5 and current 23/189/10 inventory; local DB/race evidence is separated from still-unrun hosted gates |

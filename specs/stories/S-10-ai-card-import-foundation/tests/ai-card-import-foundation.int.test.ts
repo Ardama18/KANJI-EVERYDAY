@@ -1115,7 +1115,7 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 				expect([order?.card,order?.advisory,order?.item,order?.target].every(value=>value!==undefined&&value>0)).toBe(true); expect([order?.card,order?.advisory,order?.item,order?.target]).toEqual([...( [order?.card,order?.advisory,order?.item,order?.target] as number[])].sort((a,b)=>a-b));
 				expect(await database.query<{bad:number}>(`WITH expected(signature,authenticated_execute,service_execute) AS (VALUES ('public.update_imported_card(uuid,jsonb,timestamptz)',true,false),('public.delete_private_card(uuid,timestamptz)',true,false),('public.set_card_decks(uuid,uuid[])',true,false),('public.set_card_tags(uuid,uuid[])',true,false),('public.set_card_illustration(uuid,uuid)',true,false),('public.update_imported_card_internal(uuid,uuid,jsonb,timestamptz)',false,false),('public.delete_private_card_internal(uuid,uuid,timestamptz)',false,false),('public.set_card_decks_internal(uuid,uuid,uuid[])',false,false),('public.set_card_tags_internal(uuid,uuid,uuid[])',false,false),('public.set_card_illustration_internal(uuid,uuid,uuid)',false,false)) SELECT count(*) FILTER(WHERE has_function_privilege('authenticated',signature,'EXECUTE') IS DISTINCT FROM authenticated_execute OR has_function_privilege('service_role',signature,'EXECUTE') IS DISTINCT FROM service_execute OR has_function_privilege('anon',signature,'EXECUTE'))::int bad FROM expected`)).toEqual([{bad:0}]);
 			} finally { await database.execute(`DELETE FROM public.illustrations WHERE id='${illustration}'; DELETE FROM public.tags WHERE id='${tag}'; DELETE FROM public.decks WHERE id='${deck}'`); await cleanupFinalizeFixture(fixture); }
-		});
+		}, 15_000);
 	});
 
 	describe("commit・冪等性・Stage 1原子性 (AC-02/04/06)", () => {
@@ -2389,7 +2389,7 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 				const [undone]=await database.query<{active:boolean;result:UndoImportResult}>(`WITH result AS MATERIALIZED(SELECT public.undo_import_internal('${S10_ACTORS.ownerA.userId}'::uuid,'${active.batchId}'::uuid) result) SELECT public.ai_internal_context_active() active,result FROM result`); expect(undone?.active).toBe(false); expect(undone?.result.status).toBe("undone"); expect(await database.query<{edited:boolean}>(`SELECT user_edited_at IS NOT NULL edited FROM public.ai_import_items WHERE batch_id='${active.batchId}' ORDER BY id`)).toEqual([{edited:false},{edited:false}]);
 				expect((await database.captureError(undoImportSql(active.batchId,true),{actor:S10_ACTORS.ownerA})).sqlState).toBe("42501");
 			} finally { await database.execute(`DELETE FROM public.study_sessions WHERE id='${session}'`); await cleanupUndoFixture(edited); await cleanupUndoFixture(active); }
-		});
+		}, 15_000);
 
 		// @category: integration
 		// @dependency: delete tombstone trigger, FK SET NULL

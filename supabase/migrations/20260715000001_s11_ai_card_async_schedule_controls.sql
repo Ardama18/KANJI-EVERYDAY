@@ -1,4 +1,5 @@
-BEGIN;
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
 
 CREATE EXTENSION IF NOT EXISTS pg_cron;
 CREATE EXTENSION IF NOT EXISTS pg_net WITH SCHEMA extensions;
@@ -90,4 +91,3 @@ GRANT EXECUTE ON FUNCTION cron.schedule(text,text,text),cron.unschedule(bigint),
   TO s10_migration_owner;
 
 -- Deliberately no call to activate_ai_card_async_schedules(): deploy and smoke gates precede activation.
-COMMIT;

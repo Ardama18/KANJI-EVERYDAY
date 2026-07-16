@@ -17,7 +17,12 @@ export async function POST(request: Request): Promise<Response> {
 	const authClient = createServerClient();
 	const { data: authData } = await authClient.auth.getUser();
 	if (authData.user === null) return error("UNAUTHORIZED", 401);
-	const body: unknown = await request.json();
+	let body: unknown;
+	try {
+		body = await request.json();
+	} catch {
+		return error("VALIDATION_ERROR", 400);
+	}
 	const sources = parseSources(body);
 	if (sources === undefined) return error("VALIDATION_ERROR", 400);
 	const service = createServiceRoleClient();

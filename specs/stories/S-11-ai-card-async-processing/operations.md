@@ -1,14 +1,36 @@
 # S-11 operations and rollback runbook
 
+## Online migration compatibility period and forward recovery
+
+S-11 is a forward-only, three-stage release. First apply `00000` expand and
+`00001` schedule controls while the S-10 application remains available. Both
+fail fast with a five-second lock timeout. The compatibility trigger keeps old
+S-10 writers valid and fills S-11 lifecycle metadata during binary rollout.
+
+Run `SELECT public.backfill_ai_uploads_s11(500);` in separate autocommit
+transactions until it returns `0`. Each call locks at most 500 rows with
+`SKIP LOCKED`; it is safe to retry or run concurrently. Then apply `00002`,
+which rejects incomplete data before validating the already enforced NOT VALID
+constraints.
+
+Forward recovery is additive: never drop expanded columns or S-10 functions,
+and never blindly replay a partly applied expand file. After a lock timeout,
+inspect the migration ledger and schema, then resume at the first unapplied
+statement through an additive repair migration during a quieter window. After
+backfill interruption, resume bounded batches. If validation reports
+`S11_BACKFILL_INCOMPLETE`, finish the batches and reapply validation. Keep the
+compatibility trigger for at least one full application rollback window so an
+application rollback can continue using S-10 contracts against the expanded DB.
+
 ## Deployment gates
 
 Remote deployment, secret mutation, migration application, and schedule activation are intentionally not performed by the implementation workflow. Run these gates in the target Supabase project in order:
 
-1. Run current Unit 23, Integration 181, E2E 10, fresh/upgrade/failure DB jobs, lint, typecheck, build, `test:s11:deno`, and `test:s11:resource`. Older 93/102/110/127/139/142/147/153/154/155/162/163/168/179 Integration counts below are historical records only.
+1. Run current Unit 23, Integration 189, E2E 10, local core fresh/upgrade/failure DB jobs, the two-session local PostgreSQL completion/cleanup race gate, lint, typecheck, build, `test:s11:deno`, and `test:s11:resource`. Older 93/102/110/127/139/142/147/153/154/155/162/163/168/179/181 Integration counts below are historical records only. The local core jobs intentionally exclude `pg_cron` schedule installation because Supabase local config installs it only in the primary `postgres` database; hosted schedule controls remain a separate target-project gate and are never inferred from a local pass.
 2. Run `test:s11:real-integration` with `S11_REAL_DATABASE_URL`. Then run `test:s11:real-e2e` with `S11_REAL_APP_BASE_URL`, `S11_REAL_EDGE_BASE_URL`, `S11_REAL_SUPABASE_URL`, distinct owner credentials `S11_REAL_USER_EMAIL`/`S11_REAL_USER_PASSWORD` and `S11_REAL_USER_B_EMAIL`/`S11_REAL_USER_B_PASSWORD`, `S11_REAL_PREVIEW_HMAC_SECRET`, `S11_REAL_WORKER_SECRET`, `S11_REAL_ANON_KEY`, `S11_REAL_SERVICE_ROLE_KEY`, `S11_REAL_SOURCE_FIXTURE_PATH`, `S11_REAL_FAKE_PROVIDER_STATS_URL`, `S11_REAL_FAKE_PROVIDER_CONTROL_URL`, `S11_REAL_FAKE_PROVIDER_ENDPOINT`, `S11_REAL_PROVIDER_ENDPOINT_BINDING`, `S11_REAL_RUNTIME_LOGS_URL`, `S11_REAL_RECOVERABLE_WORKER_URL`, and `S11_REAL_PROVIDER_SECRET_MARKER`. `S11_REAL_RECOVERABLE_WORKER_URL` must be a separate same-origin Edge function deployment of the exact worker artifact with the same worker-auth secret but an intentionally missing required service configuration; it must return safe HTTP 500 and emit `worker_recoverable`. Served worker secrets must pair the same HTTPS endpoint as `ILLUSTRATION_PROVIDER_ENDPOINT` and binding as `ILLUSTRATION_PROVIDER_ENDPOINT_BINDING`; production leaves both unset and uses the official selected-provider endpoint. Stats returns `{ "calls": integer, "lastBinding": string }`; provider control requires the same `x-s11-provider-binding` header and accepts `{mode:"success"|"transient_once"|"permanent",responseMarker,providerEndpoint,binding}` with 204. Runtime logs returns `{complete:true,logs:string[]}` for the supplied `runId`. The gate performs real SSR-cookie login, pre-worker anon/owner-B source denial, owner-B cross-upload commit 409, strict commit/status retry+batch+key snapshot equality, pgmq/served worker, owner-A/owner-B/anonymous managed-object INSERT/UPDATE/DELETE denial, service-role delete/restore, untracked legacy same-prefix owner mutations, R1/W1 first/last reference deletion, served cleanup, and the served recoverable worker. It captures success/retry/permanent/recoverable/cleanup logs, requires the permanent batch's `worker_failure` exactly once, every other `worker_failure` zero, and `worker_recoverable` at least once, then rejects secrets, Authorization, image/base64, prompt/card text, provider bodies, and whole Queue payload. Exact denial/binding/count/correlation contracts remain mandatory; arbitrary non-2xx, incomplete logs, misbinding, or `not_run` is not a pass.
    The real E2E environment also requires `S11_REAL_WORKER_ARTIFACT_SHA256`, `S11_REAL_MAIN_WORKER_ARTIFACT_ATTESTATION_URL`, and `S11_REAL_RECOVERABLE_WORKER_ARTIFACT_ATTESTATION_URL`. The two distinct pre-signed control-plane URLs must be independent of worker runtime origins and return strict immutable `{deploymentUrl,artifactSha256,immutable:true}` records whose digests equal the independently built expected SHA-256. The recoverable probe supplies `x-ai-worker-invocation-id`; its safe response and collector log must contain that UUID with correlated recoverable exactly one and failure zero. Self-reported runtime digests and stale/unrelated events are not evidence; this exact rule supersedes the earlier “recoverable at least once” wording.
 3. Build `supabase/functions/ai-card-import-resource-gate/index.ts` as one self-contained Deno bundle with no external module imports. Set `S11_RESOURCE_BUNDLE_PATH`, the manifest-pinned `S11_RESOURCE_WASM_PATH`, and `S11_RESOURCE_FIXTURE_DIR`; optionally set `S11_RESOURCE_DENO_BIN`. The gate validates `artifact-manifest.json` against `frontend/package-lock.json`, requires the configured WASM realpath/bytes/SHA-256 to match, and reports bundle and WASM sizes/hashes independently (combined revision is supplemental). It directly serves the exact artifact, enforces PID CPU/RSS/wall limits, and covers decode failures plus actual OpenAI adapter maximum, 10MiB+1 base64, missing Content-Length, declared response oversize, and 110-second timeout. Missing inputs/Deno is `not_run`/exit 2; any identity/status/code/resource mismatch is nonzero, never pass.
-4. Apply the two forward migrations. Confirm `ai_card_imports` is a logged pgmq queue, Data API roles cannot use `pgmq`, and `cron.job` contains no `s11-ai-card-*` row.
+4. Apply the three staged forward migrations using the compatibility/backfill sequence above. Confirm `ai_card_imports` is a logged pgmq queue, Data API roles cannot use `pgmq`, and `cron.job` contains no `s11-ai-card-*` row.
 5. Configure Edge secrets without printing them: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `AI_CARD_WORKER_SECRET`, `ILLUSTRATION_PROVIDER`, the selected provider key, and selected model.
 6. Deploy `ai-card-import-worker`, then call it with internal authentication against one fixture message. Verify status, one card result per item, one illustration object per concept, and terminal ACK.
 7. Deploy `ai-card-import-cleanup`, run an authenticated dry-run/fixture cleanup, and verify referenced/young/other-owner objects remain.

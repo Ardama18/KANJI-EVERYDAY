@@ -22,7 +22,12 @@ export async function POST(request: Request): Promise<Response> {
 	const authClient = createServerClient();
 	const { data: authData } = await authClient.auth.getUser();
 	if (authData.user === null) return error("UNAUTHORIZED", 401);
-	const body: unknown = await request.json();
+	let body: unknown;
+	try {
+		body = await request.json();
+	} catch {
+		return error("VALIDATION_ERROR", 400);
+	}
 	if (!isRecord(body) || typeof body.uploadId !== "string") return error("VALIDATION_ERROR", 400);
 	const service = createServiceRoleClient();
 	const { data: rowData, error: lookupError } = await service
@@ -82,7 +87,7 @@ export async function POST(request: Request): Promise<Response> {
 		p_source_path: sourcePath,
 	});
 	if (intentError !== null) {
-		await markCleanup(service, authData.user.id, body.uploadId);
+		await markCleanup(service, authData.user.id, body.uploadId, sourcePath);
 		return error("SOURCE_FINALIZE_FAILED", 503);
 	}
 	const { error: uploadError } = await bucket.upload(sourcePath, sanitized.bytes, {
@@ -90,7 +95,8 @@ export async function POST(request: Request): Promise<Response> {
 		upsert: false,
 	});
 	if (uploadError !== null) {
-		await markCleanup(service, authData.user.id, body.uploadId);
+		// Another completion may own the deterministic object and still be
+		// finalizing the row. Never downgrade that winner from this loser.
 		return error("SOURCE_WRITE_FAILED", 503);
 	}
 	const { data: ready, error: readyError } = await service.rpc("mark_ai_source_ready", {
@@ -104,7 +110,7 @@ export async function POST(request: Request): Promise<Response> {
 	});
 	if (readyError !== null) {
 		await bucket.remove([row.raw_storage_path, sourcePath]);
-		await markCleanup(service, authData.user.id, body.uploadId);
+		await markCleanup(service, authData.user.id, body.uploadId, sourcePath);
 		return error("SOURCE_FINALIZE_FAILED", 503);
 	}
 	const { error: rawDeleteError } = await bucket.remove([row.raw_storage_path]);
@@ -210,11 +216,13 @@ export class SourceReadContractError extends Error {
 async function markCleanup(
 	service: ReturnType<typeof createServiceRoleClient>,
 	ownerUserId: string,
-	uploadId: string
+	uploadId: string,
+	sourcePath?: string
 ): Promise<void> {
 	await service.rpc("mark_ai_upload_cleanup", {
 		p_owner_user_id: ownerUserId,
 		p_upload_id: uploadId,
+		p_source_path: sourcePath ?? null,
 	});
 }
 

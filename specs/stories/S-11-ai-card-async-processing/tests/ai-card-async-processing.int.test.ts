@@ -538,6 +538,85 @@ describe("S-11 commit and queue integration", () => {
 		expect(routeBoundary.signedUpload).not.toHaveBeenCalled();
 	});
 
+	it.each(["prepare", "complete"] as const)(
+		"R12-F2 %s route maps malformed JSON to a 400 validation contract",
+		async (endpoint) => {
+			const prepareRoute = await import(
+				"../../../../frontend/app/api/ai/imports/sources/prepare/route"
+			);
+			const completeRoute = await import(
+				"../../../../frontend/app/api/ai/imports/sources/complete/route"
+			);
+			const { POST } = endpoint === "prepare" ? prepareRoute : completeRoute;
+			const response = await POST(
+				new Request(`http://local/api/ai/imports/sources/${endpoint}`, {
+					method: "POST",
+					body: "{",
+				})
+			);
+			expect(response.status).toBe(400);
+			expect(await response.json()).toEqual({ error: { code: "VALIDATION_ERROR" } });
+			expect(routeBoundary.rpc).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each([
+		["batchId=not-a-uuid", "invalid batch UUID"],
+		[`idempotencyKey=${"a".repeat(129)}`, "oversized idempotency key"],
+		["idempotencyKey=", "empty idempotency key"],
+	] as const)("R12-F2 status rejects %s (%s) before RPC", async (query, _case) => {
+		const { GET } = await import("../../../../frontend/app/api/ai/imports/status/route");
+		const response = await GET(new Request(`http://local/api/ai/imports/status?${query}`));
+		expect(response.status).toBe(400);
+		expect(await response.json()).toEqual({ error: { code: "VALIDATION_ERROR" } });
+		expect(routeBoundary.rpc).not.toHaveBeenCalled();
+	});
+
+	it("R12-F1 cleanup only accepts prepared rows bound to the exact source write intent", async () => {
+		const migration = await readFile(
+			new URL(
+				"../../../../supabase/migrations/20260715000000_s11_ai_card_async_processing.sql",
+				import.meta.url
+			),
+			"utf8"
+		);
+		const start = migration.indexOf("CREATE FUNCTION public.mark_ai_upload_cleanup");
+		const body = migration.slice(start, migration.indexOf("$$;", start));
+		expect(body).toContain("status='prepared'");
+		expect(body).toContain("source_write_intent_path=p_source_path");
+		expect(body).not.toMatch(/status IN \('prepared','ready','consumed'/u);
+		const gate = await readFile(new URL("./s11-local-real-integration-gate.ts", import.meta.url), "utf8");
+		expect(gate).toContain("source-complete-winner-not-downgraded");
+	});
+
+	it("R12-F3 release migrations use bounded expand/backfill/validate stages", async () => {
+		const [expand, validate, operations] = await Promise.all([
+			readFile(new URL("../../../../supabase/migrations/20260715000000_s11_ai_card_async_processing.sql", import.meta.url), "utf8"),
+			readFile(new URL("../../../../supabase/migrations/20260715000002_s11_ai_card_async_validate.sql", import.meta.url), "utf8"),
+			readFile(new URL("../operations.md", import.meta.url), "utf8"),
+		]);
+		expect(expand).toContain("SET lock_timeout = '5s'");
+		expect(expand).toContain("NOT VALID");
+		expect(expand).toContain("backfill_ai_uploads_s11");
+		expect(expand).not.toMatch(/UPDATE public\.ai_uploads\s+SET source_storage_path/u);
+		expect(validate).toContain("VALIDATE CONSTRAINT ai_uploads_s11_status_check");
+		expect(operations).toContain("forward recovery");
+		expect(operations).toContain("compatibility period");
+	});
+
+	it("R12-F4 resource-only gate rejects blank configured and presented secrets", async () => {
+		const [source, config] = await Promise.all([
+			readFile(new URL("../../../../supabase/functions/ai-card-import-resource-gate/index.ts", import.meta.url), "utf8"),
+			readFile(new URL("../../../../supabase/config.toml", import.meta.url), "utf8"),
+		]);
+		expect(source).toContain('Deno.env.get("AI_CARD_WORKER_SECRET")');
+		expect(source).toContain('request.headers.get("x-ai-worker-secret")');
+		expect(source).toMatch(/secret\.trim\(\)\.length === 0/u);
+		expect(source).toContain("presentedSecret !== secret");
+		expect(config).toContain("Resource-only local quality gate");
+		expect(config).toMatch(/\[functions\.ai-card-import-resource-gate\][\s\S]*verify_jwt = true/u);
+	});
+
 	it("R11-F1 preserves the legitimate empty Queue response as idle through the real handler path", async () => {
 		const result = await runQueueRpcThroughWorkerHandler([]);
 		expect(result.response.status).toBe(200);
@@ -2181,7 +2260,7 @@ describe("S-11 reviewer regression boundaries", () => {
 			/AND NOT \(\s*uploads\.source_storage_path IS NOT NULL[\s\S]+uploads\.status IN \('prepared','ready','consumed','cleanup_pending','cleaning'\)\s*\)/u
 		);
 		expect(route).toContain('service.rpc("mark_ai_source_write_intent"');
-		expect(route).not.toContain("await markCleanup(service, authData.user.id, body.uploadId, sourcePath)");
+		expect(route).toContain("await markCleanup(service, authData.user.id, body.uploadId, sourcePath)");
 		expect(realGate).toContain("source-and-raw-first-run");
 	});
 

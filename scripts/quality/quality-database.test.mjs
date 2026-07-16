@@ -16,6 +16,7 @@ import {
 import {
 	createTerminationHandler,
 	resolveProcessExitCode,
+	runActiveCleanups,
 	runCommand,
 } from "./run-quality-with-database.mjs";
 
@@ -170,6 +171,34 @@ test("success keeps the source available and the target exists only inside the c
 		["prepare", "postgres", targetName],
 	]);
 	assert.deepEqual(adapter.events.filter(([event]) => event === "drop"), [["drop", targetName]]);
+});
+
+test("repository quality provisions three distinct S-11 migration databases", async () => {
+	const runner = await readFile(new URL("./run-quality-with-database.mjs", import.meta.url), "utf8");
+	assert.match(runner, /S11_FRESH_DATABASE_URL/u);
+	assert.match(runner, /S11_UPGRADE_DATABASE_URL/u);
+	assert.match(runner, /S11_FAILURE_DATABASE_URL/u);
+	assert.match(runner, /test:s11:fresh/u);
+	assert.match(runner, /test:s11:upgrade/u);
+	assert.match(runner, /test:s11:failure/u);
+	assert.match(runner, /test:s11:local-real-integration/u);
+});
+
+test("signal cleanup attempts every active database in reverse order before failing", async () => {
+	const events = [];
+	const failure = new Error("first cleanup failed");
+	await assert.rejects(
+		runActiveCleanups(new Set([
+			async () => events.push("fresh"),
+			async () => {
+				events.push("upgrade");
+				throw failure;
+			},
+			async () => events.push("failure"),
+		])),
+		(error) => error === failure
+	);
+	assert.deepEqual(events, ["failure", "upgrade", "fresh"]);
 });
 
 test("setup failure cleans immediately after creation and never touches the source", async () => {
