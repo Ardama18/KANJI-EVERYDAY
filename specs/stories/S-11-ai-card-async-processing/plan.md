@@ -2,7 +2,7 @@
 id: S-11
 feature: ai-card-async-processing
 type: plan
-version: 2.0.13
+version: 2.0.14
 created: 2026-07-15
 updated: 2026-07-16
 based_on: specs/stories/S-11-ai-card-async-processing/design.md
@@ -392,7 +392,9 @@ git status --short
 | AC-08 concept失敗分離 | T1-04, T4-02 | - | F-08 fail-closed PostgreSQL pair-failure/sibling-success | E2E-04 (local) |
 | AC-09 ログ秘匿 | T2-03, T5-01 | #15 | IT-25 | E2E-10 |
 
-数量gateは現行Unit 27件、Integration 216件、E2E 10件である。93/102/110/127/139/142/147/153/154/155/162/163/168/179/181/189/195/198/200 Integrationは各変更履歴時点のhistorical inventoryでありcurrent evidenceではない。R19-F1〜F3はowner-safe SELECT、正規化後PNG再検証、status矛盾fail-closedへ接続する。R15-F1/F2はatomic constraint swapとhosted merge-blocked SSOTへ接続する。R14-F1〜F3はtrue autocommit、global default privilege、canonical UUID、typed preview secretへ接続する。R13-F1〜F5はresponse-loss reconciliation、autocommit recovery、default privilege、schedule value validation、run-scoped residueへ接続する。R12-F1〜F5はcompletion/cleanup競合、入力境界、段階migration、resource secret、3 DB分離品質gateへ接続する。cycle 7 R11-F1/F2はQueue RPCのempty/malformed分離とoutbox safe-code runtime allowlistへ接続し、R11-R2-F2はactual prepare routeの5件受理/6件副作用前拒否へ接続する。cycle 6 R10-F1/F2は全production lock pathのcards→illustrations→tracking順、bounded complete/attach concurrency、provider cancellation-safe oversize classificationへ接続する。review-attempt-1 R10-R1-F1はS-10 different-key attachのOLD+NEW一括canonical lockとA↔B二順序gateへ接続する。review-attempt-2 R10-R2-F1/F2はcaller JWT lifecycle authorityとterminal outbox fault後のsource releaseへ接続する。
+数量gateは現行Unit 27件、Integration 217件、E2E 10件である。93/102/110/127/139/142/147/153/154/155/162/163/168/179/181/189/195/198/200 Integrationは各変更履歴時点のhistorical inventoryでありcurrent evidenceではない。R20-F1/F2はowner-safe column ACLとStorage owner mutationを両立するone-bit helper、OLD/NEW policy、実DBactor matrixへ接続する。R19-F1〜F3はowner-safe SELECT、正規化後PNG再検証、status矛盾fail-closedへ接続する。R15-F1/F2はatomic constraint swapとhosted merge-blocked SSOTへ接続する。R14-F1〜F3はtrue autocommit、global default privilege、canonical UUID、typed preview secretへ接続する。R13-F1〜F5はresponse-loss reconciliation、autocommit recovery、default privilege、schedule value validation、run-scoped residueへ接続する。R12-F1〜F5はcompletion/cleanup競合、入力境界、段階migration、resource secret、3 DB分離品質gateへ接続する。cycle 7 R11-F1/F2はQueue RPCのempty/malformed分離とoutbox safe-code runtime allowlistへ接続し、R11-R2-F2はactual prepare routeの5件受理/6件副作用前拒否へ接続する。cycle 6 R10-F1/F2は全production lock pathのcards→illustrations→tracking順、bounded complete/attach concurrency、provider cancellation-safe oversize classificationへ接続する。review-attempt-1 R10-R1-F1はS-10 different-key attachのOLD+NEW一括canonical lockとA↔B二順序gateへ接続する。review-attempt-2 R10-R2-F1/F2はcaller JWT lifecycle authorityとterminal outbox fault後のsource releaseへ接続する。
+
+cycle 16のR20-F3はhosted内部snapshot/pathのservice-role限定、adapter強制owner filter、owner JWT safe projection成功、other-owner 0件、sensitive projection 403/42501へ接続する。Integration 216はcycle 15時点のhistorical inventoryであり、現行217件には含まれない。現行合計は254/254、focusedは70/70、ordinary Vitestは693 passed/8 conditional skips of 701 definitionsである。
 
 ## Rollback・compensation
 
@@ -679,6 +681,17 @@ any post-cycle-8 remediation or any hosted gate.
 - [x] DB safety 31/31、real lifecycle harness、full isolated root quality、external 7件structured `not_run`/exit 2、index clean、strict-prefix residue 0を確認する。
 - [ ] hosted full-system acceptance 7件が明示的前提環境でpassする。完了まではmerge blockedを維持する。
 
+## Final ship review remediation cycle 16
+
+- [x] R20-F1 Red/Green: authenticated ownerのStorage mutation policyからhidden tracking列の直接参照を除き、JWT owner-bound one-bit SECURITY DEFINER helperへ置換する。
+- [x] R20-F1: helperのowner、fixed search_path、PUBLIC/anon/service-role revoke、authenticated-only EXECUTEをcore/forward migration双方で固定する。
+- [x] R20-F2: INSERT、UPDATE OLD/NEW、DELETEでuntracked legacy/source owner pathを許可し、tracked S-11 pathとcross-ownerを拒否し、service-role bypassを維持する実DBactor matrixを追加する。
+- [x] R20-F2: owner-safe列SELECTとtoken/path 42501の既存matrixを維持し、helper direct-callのown false/true、owner spoof、source bucket、role ACLを検査する。
+- [x] R20-F3: hosted内部snapshot/path queryをservice-role+owner filterへ限定し、owner JWT safe projection成功、other owner 0件、sensitive projection 403/42501をstatic+fake adapterで検査する。
+- [x] meta/plan/traceability/operations/tasksをv2.0.14 / cycle 16 / `hosted 7 not_run; merge blocked`へ同期する。
+- [x] DB safety 31/31、isolated fresh/upgrade/true-autocommit recovery、actual Storage RLS matrix、full root quality、real lifecycle harness、external 7 structured not_run/exit 2、residue 0を確認する。
+- [ ] hosted full-system acceptance 7件が明示的前提環境でpassする。完了まではmerge blockedを維持する。
+
 ## 変更履歴
 
 | 日付 | 版 | status | 変更内容 |
@@ -708,3 +721,4 @@ any post-cycle-8 remediation or any hosted gate.
 | 2026-07-16 | 2.0.11 | implementation_review | cycle 13、full SHA-1/existing-ref境界とshort OID/revision-expression拒否、hosted merge-blocked SSOTを反映 |
 | 2026-07-16 | 2.0.12 | implementation_review | cycle 14、ambiguous short-ref拒否とcommitted/staged/unstaged 3面diff gate、hosted merge-blocked SSOTを反映 |
 | 2026-07-16 | 2.0.13 | implementation_review | cycle 15、owner-safe column ACL、正規化後PNG再検証、strict status matrix、hosted merge-blocked SSOTを反映 |
+| 2026-07-16 | 2.0.14 | implementation_review | cycle 16、owner-bound Storage tracking helper、OLD/NEW mutation policy、実DBactor matrix、hosted merge-blocked SSOTを反映 |

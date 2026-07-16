@@ -256,7 +256,7 @@ async function runQualityPhases({ freshUrl, upgradeUrl, failureUrl }) {
 			checkEnvironment,
 		],
 		[
-			"S-11 focused 69 regressions",
+			"S-11 focused 70 regressions",
 			"npm",
 			[
 				"--prefix",
@@ -265,7 +265,7 @@ async function runQualityPhases({ freshUrl, upgradeUrl, failureUrl }) {
 				"test:s11:integration",
 				"--",
 				"-t",
-				"R[789]-F|R10-(R[12]-)?F|R11-(R2-)?F[12]|R12-F|R13-F|R14-F|R15-F|R19-F",
+				"R[789]-F|R10-(R[12]-)?F|R11-(R2-)?F[12]|R12-F|R13-F|R14-F|R15-F|R19-F|R20-F|F-(18|19)",
 			],
 			checkEnvironment,
 		],

@@ -2,14 +2,14 @@
 id: S-11
 feature: ai-card-async-processing
 type: traceability
-version: 2.0.13
+version: 2.0.14
 created: 2026-07-15
 updated: 2026-07-16
 status: implementation_review
 requirements: specs/stories/S-11-ai-card-async-processing/requirements.md@2.0.5
 adr: specs/adr/ADR-008-ai-card-async-queue-image-processing.md@2.0.5
 design: specs/stories/S-11-ai-card-async-processing/design.md@2.0.5
-plan: specs/stories/S-11-ai-card-async-processing/plan.md@2.0.13
+plan: specs/stories/S-11-ai-card-async-processing/plan.md@2.0.14
 ---
 
 # S-11 implementation traceability
@@ -145,6 +145,10 @@ Fresh remediation cycle 3 adds P3-01/P3-02 focused evidence: `worker_failure` is
 | R19-F2 | normalized PNG output boundary | uploaded-source and provider encode outputs are re-inspected for PNG identity, exact dimensions, 16MP, and 10MiB before destination write; oversize is permanent `IMAGE_TOO_LARGE` with retry/write/finalize zero |
 | R19-F3 | strict status matrix | all-undone is only `undone`; undone mixed with active or terminal states and every declared/computed contradiction fail closed as 502 while six reachable status families remain valid |
 | R19-F4 | cycle-15 readiness SSOT | v2.0.13/cycle 15 retains hosted 7 not_run/exit 2 and merge blocked; all earlier review approvals remain historical |
+| R20-F1 | owner-safe Storage tracking lookup | fixed-search-path SECURITY DEFINER returns one managed bit only for the authenticated JWT owner's illustrations path; PUBLIC/anon/service direct execute is denied and raw path/token SELECT remains 42501 |
+| R20-F2 | Storage mutation actor matrix | actual owner JWT INSERT/UPDATE OLD+NEW/DELETE preserves untracked legacy/source paths, denies tracked/cross-owner paths, checks row state and SQLSTATE, and retains service-role mutation |
+| R20-F3 | hosted Data API least privilege | internal side-effect snapshots and Storage paths use service role with an explicit owner filter; owner JWT proves safe projection success, other-owner zero rows, and sensitive projection 403/42501 through the shared adapter and fake boundary |
+| R20-F4 | cycle-16 readiness SSOT | v2.0.14/cycle 16 retains hosted 7 not_run/exit 2 and merge blocked; current evidence is ordinary 693 passed/8 skipped of 701, inventory 254/254 (Unit 27/Integration 217/E2E 10), focused 70/70, and all earlier review approvals remain historical |
 
 ## Change history
 
@@ -176,3 +180,4 @@ Fresh remediation cycle 3 adds P3-01/P3-02 focused evidence: `worker_failure` is
 | 2026-07-16 | 2.0.11 | implementation_review | Cycle 13 restricts raw diff bases to full SHA-1 commits and ref inputs to existing refs; hosted 7 remain not_run/exit 2 and merge blocked |
 | 2026-07-16 | 2.0.12 | implementation_review | Cycle 14 rejects ambiguous shorthand refs and validates committed, staged, and unstaged diff surfaces; hosted 7 remain not_run/exit 2 and merge blocked |
 | 2026-07-16 | 2.0.13 | implementation_review | Cycle 15 adds owner-safe column ACLs, post-encode PNG validation, strict status matrices, and current 27/216/10 inventory; hosted 7 remain not_run/exit 2 and merge blocked |
+| 2026-07-16 | 2.0.14 | implementation_review | Cycle 16 restores legacy owner Storage mutation through an owner-bound one-bit tracking helper and actual actor matrix with current 27/217/10 inventory; hosted 7 remain not_run/exit 2 and merge blocked |

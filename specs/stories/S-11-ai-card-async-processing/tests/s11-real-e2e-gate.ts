@@ -9,6 +9,10 @@ import {
 } from "../../../../frontend/src/lib/ai-import/async-contract";
 import { signPreviewToken } from "../../../../frontend/src/lib/ai-import/preview-token";
 import { resolveProviderEndpointBinding } from "../../../../supabase/functions/_shared/ai-card-import/provider.ts";
+import {
+	assertOwnerProjectionBoundary,
+	fetchServiceOwnerRows,
+} from "./helpers/s11-real-e2e-data-boundary";
 
 const required = [
 	"S11_REAL_APP_BASE_URL",
@@ -84,6 +88,7 @@ const serviceHeaders = {
 	apikey: serviceRoleKey,
 	"Content-Type": "application/json",
 };
+const postgrestBoundary = { fetch, supabaseBase, anonKey } as const;
 const workerHeaders = { "x-ai-worker-secret": requiredEnvironment("S11_REAL_WORKER_SECRET") };
 const runId = crypto.randomUUID();
 const providerBodyMarker = `s11-provider-body-${runId}`;
@@ -97,7 +102,7 @@ if (sourceBytes.byteLength < 1 || sourceBytes.byteLength > 10 * 1024 * 1024) {
 
 const providerCallsBefore = await fakeProviderCalls();
 const objectPathsBefore = new Set(
-	(await ownerObjects(postgrestAHeaders)).map((row) => row.storage_path)
+	(await serviceOwnerObjects(userId)).map((row) => row.storage_path)
 );
 await assertServiceRpcDenied(anonKey, "anon");
 await assertServiceRpcDenied(ownerA.accessToken, "authenticated");
@@ -248,19 +253,21 @@ if (providerCallsAfter !== providerCallsBefore + 1) {
 	);
 }
 
-const ownerRows = await ownerObjects(postgrestAHeaders);
+const ownerRows = await serviceOwnerObjects(userId);
 const newReadyRows = ownerRows.filter(
 	(row) => row.state === "ready" && !objectPathsBefore.has(row.storage_path)
 );
 if (newReadyRows.length !== 2) {
 	throw new Error(`expected two real Edge codec outputs, found ${newReadyRows.length}`);
 }
-const userBRows = await ownerObjects(postgrestBHeaders);
-if (
-	userBRows.some((row) => newReadyRows.some((created) => created.storage_path === row.storage_path))
-) {
-	throw new Error("owner-B PostgREST RLS exposed owner-A illustration state");
-}
+await assertOwnerProjectionBoundary(
+	{
+		...postgrestBoundary,
+		ownerHeaders: postgrestAHeaders,
+		otherOwnerHeaders: postgrestBHeaders,
+	},
+	newReadyRows[0]?.id ?? ""
+);
 let managedFixtureBytes: Uint8Array | undefined;
 for (const row of newReadyRows) {
 	if (!row.storage_path.startsWith(`${userId}/s11-managed/`)) {
@@ -657,21 +664,21 @@ async function fetchStrictStatus(session: AppSession, selector: string) {
 }
 
 async function batchSideEffectSnapshot(batchId: string): Promise<Readonly<Record<string, unknown>>> {
-	const items = await fetchOwnerRows(
+	const items = await fetchInternalRows(
 		`ai_import_items?select=id,concept_id,status,result_card_id,error_code&batch_id=eq.${batchId}`
 	);
-	const jobs = await fetchOwnerRows(
+	const jobs = await fetchInternalRows(
 		`ai_import_concept_jobs?select=id,state,queue_message_id,attempt,illustration_id&batch_id=eq.${batchId}`
 	);
 	const jobIds = jobs.map((row) => String(row.id));
-	const objects = jobIds.length === 0 ? [] : await fetchOwnerRows(
+	const objects = jobIds.length === 0 ? [] : await fetchInternalRows(
 		`ai_illustration_objects?select=id,job_id,illustration_id,storage_path,state&job_id=in.(${jobIds.join(",")})`
 	);
-	const reservations = await fetchOwnerRows(
+	const reservations = await fetchInternalRows(
 		`ai_quota_reservations?select=id,reservation_key,kind,units,status&batch_id=eq.${batchId}`
 	);
 	const cardIds = items.flatMap((row) => typeof row.result_card_id === "string" ? [row.result_card_id] : []);
-	const cards = cardIds.length === 0 ? [] : await fetchOwnerRows(
+	const cards = cardIds.length === 0 ? [] : await fetchInternalRows(
 		`cards?select=id,card_key,illustration_key&id=in.(${cardIds.join(",")})`
 	);
 	return {
@@ -683,15 +690,8 @@ async function batchSideEffectSnapshot(batchId: string): Promise<Readonly<Record
 	};
 }
 
-async function fetchOwnerRows(pathAndQuery: string): Promise<Record<string, unknown>[]> {
-	const response = await fetch(`${supabaseBase}/rest/v1/${pathAndQuery}`, {
-		headers: { ...postgrestAHeaders, apikey: anonKey },
-	});
-	const body: unknown = await response.json();
-	if (response.status !== 200 || !Array.isArray(body) || !body.every(isRecord)) {
-		throw new Error(`owner-scoped side-effect snapshot failed: ${response.status}`);
-	}
-	return body;
+async function fetchInternalRows(pathAndQuery: string): Promise<Record<string, unknown>[]> {
+	return await fetchServiceOwnerRows(postgrestBoundary, serviceHeaders, userId, pathAndQuery);
 }
 
 function sortRows(rows: readonly Record<string, unknown>[]): readonly Record<string, unknown>[] {
@@ -699,12 +699,14 @@ function sortRows(rows: readonly Record<string, unknown>[]): readonly Record<str
 }
 
 async function cardIllustrationPath(cardId: string): Promise<string> {
-	const cards = await fetchOwnerRows(`cards?select=illustration_key&id=eq.${encodeURIComponent(cardId)}`);
+	const cards = await fetchInternalRows(
+		`cards?select=illustration_key&id=eq.${encodeURIComponent(cardId)}`
+	);
 	const illustrationKey = cards[0]?.illustration_key;
 	if (cards.length !== 1 || typeof illustrationKey !== "string") {
 		throw new Error("shared card illustration lookup failed");
 	}
-	const illustrations = await fetchOwnerRows(
+	const illustrations = await fetchInternalRows(
 		`illustrations?select=storage_path&illustration_key=eq.${encodeURIComponent(illustrationKey)}`
 	);
 	const storagePath = illustrations[0]?.storage_path;
@@ -837,20 +839,19 @@ async function assertServiceRpcDenied(jwt: string, role: string): Promise<void> 
 	}
 }
 
-async function ownerObjects(
-	headers: Readonly<Record<string, string>>
-): Promise<IllustrationObject[]> {
-	const response = await fetch(
-		`${supabaseBase}/rest/v1/ai_illustration_objects?select=storage_path,state&order=created_at.asc`,
-		{ headers: { ...headers, apikey: anonKey } }
+async function serviceOwnerObjects(ownerId: string): Promise<IllustrationObject[]> {
+	const body = await fetchServiceOwnerRows(
+		postgrestBoundary,
+		serviceHeaders,
+		ownerId,
+		"ai_illustration_objects?select=id,storage_path,state&order=created_at.asc"
 	);
-	if (response.status !== 200)
-		throw new Error(`authenticated PostgREST RLS query failed: ${response.status}`);
-	const body: unknown = await response.json();
-	if (!Array.isArray(body) || !body.every(isIllustrationObject)) {
-		throw new Error("authenticated PostgREST RLS response contract failed");
-	}
-	return body;
+	return body.map((row) => {
+		if (!isIllustrationObject(row)) {
+			throw new Error("service-role owner-scoped illustration response contract failed");
+		}
+		return row;
+	});
 }
 
 async function assertStorageDenied(objectUrl: string, jwt: string, role: string): Promise<void> {
@@ -1135,6 +1136,7 @@ function splitSetCookie(value: string | null): string[] {
 }
 
 interface IllustrationObject {
+	readonly id: string;
 	readonly storage_path: string;
 	readonly state: string;
 }
@@ -1150,7 +1152,8 @@ function isPreparedSource(value: unknown): value is PreparedSource {
 
 function isIllustrationObject(value: unknown): value is IllustrationObject {
 	return (
-		isRecord(value) && typeof value.storage_path === "string" && typeof value.state === "string"
+		isRecord(value) && typeof value.id === "string" && typeof value.storage_path === "string" &&
+		typeof value.state === "string"
 	);
 }
 

@@ -32,6 +32,10 @@ import {
 	safeFailure,
 } from "./helpers/s11-edge-testkit";
 import { createS11DbClient } from "./helpers/s11-db-testkit";
+import {
+	assertOwnerProjectionBoundary,
+	fetchServiceOwnerRows,
+} from "./helpers/s11-real-e2e-data-boundary";
 
 const OWNER_ID = "22000000-0000-4000-8000-000000000001";
 
@@ -1079,7 +1083,7 @@ describe("S-11 commit and queue integration", () => {
 		expect(jobs).toContain("assertOwnerSafeSelectMatrix");
 	});
 
-	it("R19-F4 readiness SSOT separates local boundaries from hosted merge acceptance", async () => {
+	it("R20-F4 readiness SSOT separates local boundaries from hosted merge acceptance", async () => {
 		const [meta, plan, traceability, operations] = await Promise.all([
 			readFile(new URL("../meta.json", import.meta.url), "utf8"),
 			readFile(new URL("../plan.md", import.meta.url), "utf8"),
@@ -1087,15 +1091,15 @@ describe("S-11 commit and queue integration", () => {
 			readFile(new URL("../operations.md", import.meta.url), "utf8"),
 		]);
 		const parsedMeta = JSON.parse(meta) as Record<string, unknown>;
-		expect(parsedMeta.remediation_cycle).toBe(15);
-		expect(parsedMeta.ssot_version).toBe("2.0.13");
+		expect(parsedMeta.remediation_cycle).toBe(16);
+		expect(parsedMeta.ssot_version).toBe("2.0.14");
 		expect(parsedMeta.verification_state).toBe("hosted_7_not_run_merge_blocked");
 		expect(meta).not.toMatch(/ready_for_commit|zero_findings|approved/u);
-		expect(plan).toContain("version: 2.0.13");
-		expect(traceability).toContain("version: 2.0.13");
+		expect(plan).toContain("version: 2.0.14");
+		expect(traceability).toContain("version: 2.0.14");
 		expect(plan).toContain("[x] **T6-01L: local boundary E2E");
 		expect(plan).toContain("[ ] **T6-01H: hosted full-system E2E");
-		expect(operations).toContain("Current cycle-15 verification state: `hosted 7 not_run; merge blocked`");
+		expect(operations).toContain("Current cycle-16 verification state: `hosted 7 not_run; merge blocked`");
 		expect(traceability).not.toMatch(/\bcurrent\s+R12\b/iu);
 	});
 
@@ -2149,30 +2153,129 @@ describe("S-11 reviewer regression boundaries", () => {
 		expect(cancelled).toBe(true);
 	});
 
-	it("F-18 reserves S-11 managed paths from owner mutation while retaining legacy owner paths", async () => {
-		const migration = await readFile(
-			new URL(
-				"../../../../supabase/migrations/20260715000000_s11_ai_card_async_processing.sql",
-				import.meta.url
+	it("R20-F1/F-18 reserves S-11 managed paths through a least-privilege owner helper", async () => {
+		const [migration, forwardMigration] = await Promise.all([
+			readFile(
+				new URL(
+					"../../../../supabase/migrations/20260715000000_s11_ai_card_async_processing.sql",
+					import.meta.url
+				),
+				"utf8"
 			),
-			"utf8"
-		);
+			readFile(
+				new URL(
+					"../../../../supabase/migrations/20260716000001_s11_storage_policy_helper.sql",
+					import.meta.url
+				),
+				"utf8"
+			),
+		]);
 		expect(migration).toContain(
 			"storage_path = owner_user_id::text || '/s11-managed/' || illustration_id::text || '.png'"
 		);
-		for (const operation of ["INSERT", "UPDATE", "DELETE"] as const) {
-			const policyStart = migration.indexOf(
-				`CREATE POLICY storage_objects_${operation.toLowerCase()}_owner_illustrations`
+		for (const sql of [migration, forwardMigration]) {
+			expect(sql).toContain(
+				"CREATE OR REPLACE FUNCTION public.ai_s11_storage_object_is_managed"
 			);
-			expect(policyStart).toBeGreaterThanOrEqual(0);
-			const policy = migration.slice(policyStart, migration.indexOf(";", policyStart) + 1);
-			expect(policy).toContain("split_part(name, '/', 1) = auth.uid()::text");
-			expect(policy).toContain("NOT EXISTS (");
-			expect(policy).toContain("public.ai_illustration_objects AS managed");
-			expect(policy).toContain("managed.storage_path = name");
+			expect(sql).toContain("SECURITY DEFINER");
+			expect(sql).toContain("SET search_path = pg_catalog, pg_temp");
+			expect(sql).toContain(
+				"ALTER FUNCTION public.ai_s11_storage_object_is_managed(text,text) OWNER TO s10_migration_owner"
+			);
+			expect(sql).toMatch(
+				/REVOKE ALL ON FUNCTION public\.ai_s11_storage_object_is_managed\(text,text\)\s+FROM PUBLIC,anon,authenticated,service_role/u
+			);
+			expect(sql).toMatch(
+				/GRANT EXECUTE ON FUNCTION public\.ai_s11_storage_object_is_managed\(text,text\)\s+TO authenticated/u
+			);
+			expect(sql).toContain("current_setting('request.jwt.claims',true)");
+			expect(sql).toContain("caller_claims->>'role'");
+			expect(sql).toContain("caller_claims->>'sub'");
+			expect(sql).toContain("caller_owner := caller_subject::uuid");
+			expect(sql).not.toContain("caller_owner := auth.uid()");
+			expect(sql).toContain("request.jwt.claim.role");
+			for (const operation of ["INSERT", "UPDATE", "DELETE"] as const) {
+				const policyStart = sql.indexOf(
+					`CREATE POLICY storage_objects_${operation.toLowerCase()}_owner_illustrations`
+				);
+				expect(policyStart).toBeGreaterThanOrEqual(0);
+				const policy = sql.slice(policyStart, sql.indexOf(";", policyStart) + 1);
+				expect(policy).toContain("split_part(name, '/', 1) = auth.uid()::text");
+				expect(policy).toContain(
+					"NOT public.ai_s11_storage_object_is_managed(bucket_id,name)"
+				);
+				expect(policy).not.toContain("public.ai_illustration_objects");
+				if (operation === "UPDATE") {
+					expect(policy.match(/ai_s11_storage_object_is_managed/g)).toHaveLength(2);
+				}
+			}
+			expect(sql).not.toContain(
+				"DROP POLICY IF EXISTS storage_objects_select_owner_illustrations"
+			);
 		}
-		expect(migration).not.toContain(
-			"DROP POLICY IF EXISTS storage_objects_select_owner_illustrations"
+	});
+
+	it("R20-F3/F-19 keeps hosted sensitive snapshots service-only while owner safe RLS remains executable", async () => {
+		const objectId = "16000000-0000-4000-8000-000000000019";
+		const calls: Array<{ url: string; authorization: string | null }> = [];
+		const fetchImplementation = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+			const url = String(input);
+			const authorization = new Headers(init?.headers).get("Authorization");
+			calls.push({ url, authorization });
+			if (url.includes("cleanup_claim_token")) {
+				return new Response(JSON.stringify({ code: "42501" }), {
+					status: 403,
+					headers: { "Content-Type": "application/json" },
+				});
+			}
+			if (authorization === "Bearer owner-a") {
+				return Response.json([{ id: objectId, owner_user_id: OWNER_ID, state: "ready" }]);
+			}
+			if (authorization === "Bearer owner-b") return Response.json([]);
+			if (authorization === "Bearer service-role") {
+				return Response.json([{ id: objectId, storage_path: `${OWNER_ID}/s11-managed/x.png` }]);
+			}
+			return Response.json({ code: "unexpected" }, { status: 500 });
+		}) as typeof fetch;
+		const boundary = {
+			fetch: fetchImplementation,
+			supabaseBase: "https://project.supabase.co",
+			anonKey: "anon-fixture",
+		};
+		await assertOwnerProjectionBoundary(
+			{
+				...boundary,
+				ownerHeaders: { Authorization: "Bearer owner-a" },
+				otherOwnerHeaders: { Authorization: "Bearer owner-b" },
+			},
+			objectId
+		);
+		await expect(
+			fetchServiceOwnerRows(
+				boundary,
+				{ Authorization: "Bearer service-role" },
+				OWNER_ID,
+				"ai_illustration_objects?select=id,storage_path"
+			)
+		).resolves.toHaveLength(1);
+		expect(calls).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ authorization: "Bearer owner-a" }),
+				expect.objectContaining({ authorization: "Bearer owner-b" }),
+				expect.objectContaining({ authorization: "Bearer service-role" }),
+			])
+		);
+		expect(calls.at(-1)?.url).toContain(`owner_user_id=eq.${OWNER_ID}`);
+
+		const hostedGate = await readFile(
+			new URL("./s11-real-e2e-gate.ts", import.meta.url),
+			"utf8"
+		);
+		expect(hostedGate).toContain("fetchServiceOwnerRows(");
+		expect(hostedGate).toContain("assertOwnerProjectionBoundary(");
+		expect(hostedGate).not.toMatch(/fetchOwnerRows\(|ownerObjects\(/u);
+		expect(hostedGate).not.toContain(
+			"ai_illustration_objects?select=storage_path,state"
 		);
 	});
 

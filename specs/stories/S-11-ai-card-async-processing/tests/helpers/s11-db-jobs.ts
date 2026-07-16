@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+	createS10DbClient,
 	runS10Psql,
 	runS10PsqlAutocommitScript,
 	runS10PsqlFile,
@@ -27,6 +28,10 @@ const VALIDATE_MIGRATION = path.join(
 const OWNER_SAFE_SELECT_MIGRATION = path.join(
 	ROOT,
 	"supabase/migrations/20260716000000_s11_owner_safe_select.sql"
+);
+const STORAGE_POLICY_HELPER_MIGRATION = path.join(
+	ROOT,
+	"supabase/migrations/20260716000001_s11_storage_policy_helper.sql"
 );
 const UPGRADE_FIXTURE = path.join(
 	ROOT,
@@ -95,6 +100,9 @@ export async function runS11DatabaseJob(
 		}
 		await runS10PsqlAutocommitScript(databaseUrl, migration);
 		await runS10PsqlFile(databaseUrl, OWNER_SAFE_SELECT_MIGRATION);
+		await assertStoragePolicyForwardRecovery(databaseUrl);
+		await runS10PsqlFile(databaseUrl, STORAGE_POLICY_HELPER_MIGRATION);
+		await runS10PsqlFile(databaseUrl, STORAGE_POLICY_HELPER_MIGRATION);
 		await backfillAndValidate(databaseUrl);
 		await runS10Psql(
 			databaseUrl,
@@ -111,6 +119,9 @@ export async function runS11DatabaseJob(
 	if (job === "upgrade") await runS10PsqlFile(databaseUrl, UPGRADE_FIXTURE);
 	await runS10PsqlFile(databaseUrl, CORE_MIGRATION);
 	await runS10PsqlFile(databaseUrl, OWNER_SAFE_SELECT_MIGRATION);
+	if (job === "upgrade") await assertStoragePolicyForwardRecovery(databaseUrl);
+	await runS10PsqlFile(databaseUrl, STORAGE_POLICY_HELPER_MIGRATION);
+	await runS10PsqlFile(databaseUrl, STORAGE_POLICY_HELPER_MIGRATION);
 	const coreOnly = environment.S11_LOCAL_CORE_ONLY === "1";
 	if (!coreOnly) await runS10PsqlFile(databaseUrl, SCHEDULE_MIGRATION);
 	await backfillAndValidate(databaseUrl);
@@ -129,6 +140,12 @@ async function assertAutocommitFailureState(
 	const expectsExpand = failpoint !== "before_constraint_swap";
 	const expectsRuntime = ["after_runtime_functions", "before_core_commit"].includes(failpoint);
 	const expectsFinalGrants = failpoint === "before_core_commit";
+	const helperContract = expectsExpand
+		? `to_regprocedure('public.ai_s11_storage_object_is_managed(text,text)') IS NOT NULL
+			AND has_function_privilege('authenticated','public.ai_s11_storage_object_is_managed(text,text)','EXECUTE')
+			AND NOT has_function_privilege('anon','public.ai_s11_storage_object_is_managed(text,text)','EXECUTE')
+			AND NOT has_function_privilege('service_role','public.ai_s11_storage_object_is_managed(text,text)','EXECUTE')`
+		: `to_regprocedure('public.ai_s11_storage_object_is_managed(text,text)') IS NULL`;
 	const constraintState = expectsExpand
 		? `EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.ai_uploads'::regclass
 			AND conname='ai_uploads_s11_status_check' AND NOT convalidated)
@@ -151,6 +168,7 @@ async function assertAutocommitFailureState(
 			AND (${expectsExpand ? "NOT has_table_privilege('authenticated','public.ai_import_concept_jobs','INSERT')" : "true"})
 			AND NOT has_column_privilege('authenticated','public.ai_uploads','cleanup_claim_token','SELECT')
 			AND (${expectsExpand ? "NOT has_column_privilege('authenticated','public.ai_import_concept_jobs','claim_token','SELECT')" : "true"})
+			AND (${helperContract})
 			AND ((SELECT count(*) FROM pg_trigger
 				WHERE tgname IN ('ai_s11_sync_upload_compat','ai_s11_track_card_reference_removal',
 					'ai_s11_guard_illustration_lifecycle','ai_s11_guard_illustration_reference')
@@ -204,6 +222,7 @@ JOIN pg_namespace namespaces ON namespaces.oid=procedures.pronamespace
 CROSS JOIN LATERAL aclexplode(COALESCE(procedures.proacl,acldefault('f',procedures.proowner))) acl
 LEFT JOIN pg_roles roles ON roles.oid=acl.grantee
 WHERE namespaces.nspname='public' AND procedures.prosecdef
+	AND procedures.proname<>'ai_s11_storage_object_is_managed'
 	AND acl.privilege_type='EXECUTE'
 	AND (acl.grantee=0 OR roles.rolname IN ('anon','authenticated'))`;
 
@@ -232,6 +251,77 @@ async function assertS10Base(databaseUrl: string): Promise<void> {
 		"SELECT (to_regprocedure('public.commit_import_internal(uuid,text,text,text,jsonb,text)') IS NOT NULL)::text"
 	);
 	if (!result.includes("true")) throw new Error("S-11 database job requires an applied S-10 base");
+}
+
+async function assertStoragePolicyForwardRecovery(databaseUrl: string): Promise<void> {
+	await runS10Psql(
+		databaseUrl,
+		`BEGIN;
+		DROP POLICY IF EXISTS storage_objects_insert_owner_illustrations ON storage.objects;
+		CREATE POLICY storage_objects_insert_owner_illustrations ON storage.objects FOR INSERT
+		WITH CHECK (bucket_id='illustrations' AND split_part(name,'/',1)=auth.uid()::text
+			AND NOT EXISTS (SELECT 1 FROM public.ai_illustration_objects managed
+				WHERE managed.owner_user_id=auth.uid() AND managed.storage_bucket=bucket_id
+					AND managed.storage_path=name));
+		DROP POLICY IF EXISTS storage_objects_update_owner_illustrations ON storage.objects;
+		CREATE POLICY storage_objects_update_owner_illustrations ON storage.objects FOR UPDATE
+		USING (bucket_id='illustrations' AND split_part(name,'/',1)=auth.uid()::text
+			AND NOT EXISTS (SELECT 1 FROM public.ai_illustration_objects managed
+				WHERE managed.owner_user_id=auth.uid() AND managed.storage_bucket=bucket_id
+					AND managed.storage_path=name))
+		WITH CHECK (bucket_id='illustrations' AND split_part(name,'/',1)=auth.uid()::text
+			AND NOT EXISTS (SELECT 1 FROM public.ai_illustration_objects managed
+				WHERE managed.owner_user_id=auth.uid() AND managed.storage_bucket=bucket_id
+					AND managed.storage_path=name));
+		DROP POLICY IF EXISTS storage_objects_delete_owner_illustrations ON storage.objects;
+		CREATE POLICY storage_objects_delete_owner_illustrations ON storage.objects FOR DELETE
+		USING (bucket_id='illustrations' AND split_part(name,'/',1)=auth.uid()::text
+			AND NOT EXISTS (SELECT 1 FROM public.ai_illustration_objects managed
+				WHERE managed.owner_user_id=auth.uid() AND managed.storage_bucket=bucket_id
+					AND managed.storage_path=name));
+		DROP FUNCTION IF EXISTS public.ai_s11_storage_object_is_managed(text,text);
+		COMMIT;`
+	);
+	await assertLegacyStoragePolicyState(databaseUrl);
+	const ownerId = "00000000-0000-4000-8000-000000000001";
+	const database = createS10DbClient(databaseUrl);
+	const legacyInsert = await database.captureError(
+		`INSERT INTO storage.objects(bucket_id,name)
+		 VALUES('illustrations','${ownerId}/legacy/pre-forward.png')`,
+		{ actor: { kind: "ownerA", role: "authenticated", userId: ownerId } }
+	);
+	if (legacyInsert.sqlState !== "42501") {
+		throw new Error("S-11 pre-forward Storage ACL regression was not reproduced");
+	}
+	const migration = await readFile(STORAGE_POLICY_HELPER_MIGRATION, "utf8");
+	let interrupted = false;
+	try {
+		await runS10PsqlAutocommitScript(
+			databaseUrl,
+			`SET app.s11_storage_policy_failpoint='after_helper';\n${migration}`
+		);
+	} catch {
+		interrupted = true;
+	}
+	if (!interrupted) throw new Error("S-11 storage policy failpoint unexpectedly completed");
+	await assertLegacyStoragePolicyState(databaseUrl);
+}
+
+async function assertLegacyStoragePolicyState(databaseUrl: string): Promise<void> {
+	const result = await runS10Psql(
+		databaseUrl,
+		`SELECT (
+			to_regprocedure('public.ai_s11_storage_object_is_managed(text,text)') IS NULL AND
+			(SELECT count(*)=3 FROM pg_policies
+				WHERE schemaname='storage' AND tablename='objects'
+					AND policyname IN ('storage_objects_insert_owner_illustrations',
+						'storage_objects_update_owner_illustrations','storage_objects_delete_owner_illustrations')
+					AND (COALESCE(qual,'') || COALESCE(with_check,'')) LIKE '%ai_illustration_objects%')
+		)::text`
+	);
+	if (!result.includes("true")) {
+		throw new Error("S-11 storage policy forward rollback did not preserve the legacy state");
+	}
 }
 
 async function assertS11Contracts(
@@ -271,12 +361,18 @@ async function assertS11Contracts(
 						'storage_objects_update_owner_illustrations',
 						'storage_objects_delete_owner_illustrations'
 					)
-					AND (COALESCE(qual,'') || COALESCE(with_check,'')) LIKE '%ai_illustration_objects%') AND
+					AND (COALESCE(qual,'') || COALESCE(with_check,'')) LIKE '%ai_s11_storage_object_is_managed%') AND
+			to_regprocedure('public.ai_s11_storage_object_is_managed(text,text)') IS NOT NULL AND
+			has_function_privilege('authenticated','public.ai_s11_storage_object_is_managed(text,text)','EXECUTE') AND
+			NOT has_function_privilege('anon','public.ai_s11_storage_object_is_managed(text,text)','EXECUTE') AND
+			NOT has_function_privilege('service_role','public.ai_s11_storage_object_is_managed(text,text)','EXECUTE') AND
 			has_function_privilege('service_role','public.get_ai_import_status(uuid,uuid,text)','EXECUTE') AND
 			NOT has_function_privilege('authenticated','public.get_ai_import_status(uuid,uuid,text)','EXECUTE') AND
-			${scheduleApplied
-				? "NOT EXISTS (SELECT 1 FROM cron.job WHERE jobname IN ('s11-ai-card-worker','s11-ai-card-cleanup'))"
-				: "to_regprocedure('public.activate_ai_card_async_schedules()') IS NULL"}
+			${
+				scheduleApplied
+					? "NOT EXISTS (SELECT 1 FROM cron.job WHERE jobname IN ('s11-ai-card-worker','s11-ai-card-cleanup'))"
+					: "to_regprocedure('public.activate_ai_card_async_schedules()') IS NULL"
+			}
 		)::text`
 	);
 	if (!result.includes("true")) throw new Error("S-11 database contract smoke failed");
@@ -370,7 +466,10 @@ async function assertOwnerSafeSelectMatrix(databaseUrl: string): Promise<void> {
 			'${ownerId}/s11-managed/${illustrationId}.png','uploading'
 		) ON CONFLICT (id) DO NOTHING`
 	);
-	for (const [actor, expected] of [[ownerId, "1"], [otherOwnerId, "0"]] as const) {
+	for (const [actor, expected] of [
+		[ownerId, "1"],
+		[otherOwnerId, "0"],
+	] as const) {
 		const safe = await runS10Psql(
 			databaseUrl,
 			`BEGIN;
@@ -420,6 +519,184 @@ async function assertOwnerSafeSelectMatrix(databaseUrl: string): Promise<void> {
 		SELECT * FROM public.ai_illustration_objects LIMIT 0;
 		ROLLBACK;`
 	);
+	await assertStorageObjectMutationMatrix(databaseUrl, {
+		ownerId,
+		otherOwnerId,
+		managedPath: `${ownerId}/s11-managed/${illustrationId}.png`,
+	});
+}
+
+async function assertStorageObjectMutationMatrix(
+	databaseUrl: string,
+	fixture: Readonly<{ ownerId: string; otherOwnerId: string; managedPath: string }>
+): Promise<void> {
+	const database = createS10DbClient(databaseUrl);
+	const owner = {
+		kind: "ownerA",
+		role: "authenticated",
+		userId: fixture.ownerId,
+	} as const;
+	const otherOwner = {
+		kind: "ownerB",
+		role: "authenticated",
+		userId: fixture.otherOwnerId,
+	} as const;
+	const legacyPath = `${fixture.ownerId}/legacy/cycle16.png`;
+	const sourcePath = `${fixture.ownerId}/s11-source/cycle16.png`;
+	const movedPath = `${fixture.ownerId}/legacy/cycle16-moved.png`;
+	const crossOwnerPath = `${fixture.otherOwnerId}/legacy/cycle16-cross.png`;
+	const legacyId = "16000000-0000-4000-8000-000000000001";
+	const managedStorageId = "16000000-0000-4000-8000-000000000002";
+
+	const catalog = await runS10Psql(
+		databaseUrl,
+		`SELECT (
+			(SELECT procedures.prosecdef AND procedures.provolatile='s'
+				AND roles.rolname='s10_migration_owner'
+				AND procedures.proconfig @> ARRAY['search_path=pg_catalog, pg_temp']::text[]
+			 FROM pg_proc procedures
+			 JOIN pg_namespace namespaces ON namespaces.oid=procedures.pronamespace
+			 JOIN pg_roles roles ON roles.oid=procedures.proowner
+			 WHERE namespaces.nspname='public'
+				AND procedures.proname='ai_s11_storage_object_is_managed')
+			AND has_function_privilege('authenticated','public.ai_s11_storage_object_is_managed(text,text)','EXECUTE')
+			AND NOT has_function_privilege('anon','public.ai_s11_storage_object_is_managed(text,text)','EXECUTE')
+			AND NOT has_function_privilege('service_role','public.ai_s11_storage_object_is_managed(text,text)','EXECUTE')
+			AND NOT EXISTS (
+				SELECT 1
+				FROM pg_proc helper
+				CROSS JOIN LATERAL aclexplode(COALESCE(helper.proacl,acldefault('f',helper.proowner))) acl
+				WHERE helper.oid='public.ai_s11_storage_object_is_managed(text,text)'::regprocedure
+					AND acl.grantee=0 AND acl.privilege_type='EXECUTE'
+			)
+		)::text`
+	);
+	if (!catalog.includes("true")) throw new Error("S-11 Storage helper catalog ACL smoke failed");
+
+	const helperRows = await database.query<{ legacy: boolean; tracked: boolean }>(
+		`SELECT
+			public.ai_s11_storage_object_is_managed('illustrations',${sqlLiteral(legacyPath)}) AS legacy,
+			public.ai_s11_storage_object_is_managed('illustrations',${sqlLiteral(fixture.managedPath)}) AS tracked`,
+		{ actor: owner }
+	);
+	if (
+		helperRows.length !== 1 ||
+		helperRows[0]?.legacy !== false ||
+		helperRows[0]?.tracked !== true
+	) {
+		throw new Error("S-11 Storage helper owner behavior failed");
+	}
+	const packedClaims = await runS10Psql(
+		databaseUrl,
+		`BEGIN;
+		SET LOCAL ROLE authenticated;
+		SET LOCAL request.jwt.claim.role='';
+		SET LOCAL request.jwt.claim.sub='';
+		SET LOCAL request.jwt.claims='{"role":"authenticated","sub":"${fixture.ownerId}"}';
+		SELECT (NOT public.ai_s11_storage_object_is_managed(
+			'illustrations',${sqlLiteral(legacyPath)}
+		))::text;
+		ROLLBACK;`
+	);
+	if (!packedClaims.includes("true")) {
+		throw new Error("S-11 Storage helper packed JWT claims fallback failed");
+	}
+	for (const [sql, actor] of [
+		[
+			`SELECT public.ai_s11_storage_object_is_managed('illustrations',${sqlLiteral(crossOwnerPath)})`,
+			owner,
+		],
+		[
+			`SELECT public.ai_s11_storage_object_is_managed('ai-card-sources',${sqlLiteral(sourcePath)})`,
+			owner,
+		],
+		[
+			`SELECT public.ai_s11_storage_object_is_managed('illustrations',${sqlLiteral(legacyPath)})`,
+			otherOwner,
+		],
+	] as const) {
+		const denied = await database.captureError(sql, { actor });
+		if (denied.sqlState !== "42501") throw new Error("S-11 Storage helper owner validation failed");
+	}
+	for (const role of ["anon", "service_role"] as const) {
+		const denied = await database.captureError(
+			`SELECT public.ai_s11_storage_object_is_managed('illustrations',${sqlLiteral(legacyPath)})`,
+			{
+				actor:
+					role === "anon"
+						? { kind: "anonymous", role, userId: null }
+						: { kind: "service", role, userId: null },
+			}
+		);
+		if (denied.sqlState !== "42501") throw new Error("S-11 Storage helper role ACL failed");
+	}
+	await database.execute(
+		`INSERT INTO storage.objects(id,bucket_id,name)
+		 VALUES('${legacyId}'::uuid,'illustrations',${sqlLiteral(legacyPath)})`,
+		{ actor: owner }
+	);
+	await database.execute(
+		`UPDATE storage.objects SET name=${sqlLiteral(sourcePath)} WHERE id='${legacyId}'::uuid`,
+		{ actor: owner }
+	);
+	const trackedDestination = await database.captureError(
+		`UPDATE storage.objects SET name=${sqlLiteral(fixture.managedPath)} WHERE id='${legacyId}'::uuid`,
+		{ actor: owner }
+	);
+	if (trackedDestination.sqlState !== "42501") {
+		throw new Error("S-11 tracked Storage destination was not denied with 42501");
+	}
+	await database.execute(
+		`UPDATE storage.objects SET name=${sqlLiteral(movedPath)} WHERE id='${legacyId}'::uuid`,
+		{ actor: owner }
+	);
+	await database.execute(`DELETE FROM storage.objects WHERE id='${legacyId}'::uuid`, {
+		actor: owner,
+	});
+
+	for (const [path, actor] of [
+		[fixture.managedPath, owner],
+		[crossOwnerPath, owner],
+		[legacyPath, otherOwner],
+	] as const) {
+		const denied = await database.captureError(
+			`INSERT INTO storage.objects(bucket_id,name) VALUES('illustrations',${sqlLiteral(path)})`,
+			{ actor }
+		);
+		if (denied.sqlState !== "42501") throw new Error("S-11 Storage INSERT actor denial failed");
+	}
+
+	await database.execute(
+		`INSERT INTO storage.objects(id,bucket_id,name)
+		 VALUES('${managedStorageId}'::uuid,'illustrations',${sqlLiteral(fixture.managedPath)})`,
+		{ actor: { kind: "service", role: "service_role", userId: null } }
+	);
+	const ownerTrackedUpdate = await database.query<{ id: string }>(
+		`UPDATE storage.objects SET metadata='{"cycle":16}'::jsonb
+		 WHERE id='${managedStorageId}'::uuid RETURNING id::text`,
+		{ actor: owner }
+	);
+	const ownerTrackedDelete = await database.query<{ id: string }>(
+		`DELETE FROM storage.objects WHERE id='${managedStorageId}'::uuid RETURNING id::text`,
+		{ actor: owner }
+	);
+	if (ownerTrackedUpdate.length !== 0 || ownerTrackedDelete.length !== 0) {
+		throw new Error("S-11 tracked Storage OLD row remained owner-mutable");
+	}
+	await database.execute(
+		`UPDATE storage.objects SET metadata='{"cycle":16}'::jsonb WHERE id='${managedStorageId}'::uuid;
+		 DELETE FROM storage.objects WHERE id='${managedStorageId}'::uuid`,
+		{ actor: { kind: "service", role: "service_role", userId: null } }
+	);
+	const rowState = await database.query<{ legacyCount: number; managedCount: number }>(
+		`SELECT
+			count(*) FILTER (WHERE id='${legacyId}'::uuid)::int AS "legacyCount",
+			count(*) FILTER (WHERE id='${managedStorageId}'::uuid)::int AS "managedCount"
+		 FROM storage.objects`
+	);
+	if (rowState[0]?.legacyCount !== 0 || rowState[0]?.managedCount !== 0) {
+		throw new Error("S-11 Storage actor matrix left unexpected row state");
+	}
 }
 
 const job = process.argv[2] as S11DatabaseJob | undefined;
