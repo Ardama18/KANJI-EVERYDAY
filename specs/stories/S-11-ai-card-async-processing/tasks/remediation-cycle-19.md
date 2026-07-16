@@ -12,7 +12,8 @@
 - [x] Bootstrap correction before RC candidate freeze: run immutable definition-only preflight before phase 1, while keeping completed candidate evidence and evidence-only child-commit binding exclusively in the final validator. Pending RC1 evidence may start local gates but cannot pass final acceptance.
 - [x] Final bootstrap correction before RC candidate freeze: `.codex/quality.json` is PR-local readiness only and dispatches the exact declared `localGates` in order, including R23, substitutes only the validated base placeholder, finishes cleanup/residue, and exits independently of Hosted/review evidence. Standalone final validation remains the merge gate. The earlier drifted local run is not candidate evidence.
 - [x] Execution-model bootstrap correction: every local gate declares an ordered `pre-provision` / `disposable` / `post-cleanup` phase and source/disposable/build context. The parent quality harness now runs with residue zero before the runner creates its three databases; disposable failures clean all three, and post-cleanup runs after verified cleanup and lease release. The failed `571b7ffd` run is not evidence.
-- [x] Freeze release contract `S11-RC1-1.0.3` after these bootstrap corrections; no policy or scope expansion is permitted.
+- [x] Secret-scan bootstrap correction: gitleaks scans only the frozen candidate range through exact non-shell `BASE..HEAD` substitution; repository history before the base cannot fail candidate readiness. Forbidden-marker scanning remains a required hosted-runtime gate with explicit `S11_FORBIDDEN_MARKERS` prerequisite. The prior full-history findings and `fa96281` diagnostic run are not final candidate evidence.
+- [x] Freeze release contract `S11-RC1-1.0.4` after these bootstrap corrections; no policy or scope expansion is permitted.
 - [x] Replace open-ended review loops with one cumulative review plus one scope-limited verification.
 
 ## Consolidated RC1

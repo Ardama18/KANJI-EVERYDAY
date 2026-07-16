@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "contractVersion": "S11-RC1-1.0.3",
+  "contractVersion": "S11-RC1-1.0.4",
   "issue": 12,
   "story": "S-11",
   "baseSha": "45969b140d1817be143fe6331159b88b647c2e29",
@@ -54,8 +54,8 @@
     { "id": "hosted-deno", "command": ["npm", "--prefix", "frontend", "run", "test:s11:deno"], "expected": { "status": "passed", "exitCode": 0 } }
   ],
   "secretScans": [
-    { "id": "gitleaks-redacted", "command": ["gitleaks", "detect", "--no-banner", "--redact", "--source", "."], "expected": { "status": "passed", "exitCode": 0 } },
-    { "id": "forbidden-marker-scan", "command": ["node", "scripts/quality/scan-s11-forbidden-markers.mjs"], "expected": { "status": "passed", "exitCode": 0 } }
+    { "id": "gitleaks-redacted", "executionContext": "candidate-local", "prerequisites": [], "command": ["gitleaks", "git", "--redact", "--no-banner", "--log-opts", "BASE..HEAD", "."], "expected": { "status": "passed", "exitCode": 0 } },
+    { "id": "forbidden-marker-scan", "executionContext": "hosted-runtime", "prerequisites": ["S11_FORBIDDEN_MARKERS"], "command": ["node", "scripts/quality/scan-s11-forbidden-markers.mjs"], "expected": { "status": "passed", "exitCode": 0 } }
   ],
   "reviewPolicy": {
     "cumulativeReviews": 1,

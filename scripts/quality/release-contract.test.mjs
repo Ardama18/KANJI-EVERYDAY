@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import {
 	readReleaseFiles,
+	resolveReleaseGateCommand,
 	validateEvidenceCommitBinding,
 	validateReleaseContractDefinition,
 	validateReleaseState,
@@ -146,3 +152,74 @@ test("post-commit evidence must bind its parent candidate and change only allowl
 		assert.notEqual(validateEvidenceCommitBinding(contract, evidence, repositoryState).length, 0);
 	}
 });
+
+test("secret scan resolves only the exact candidate two-dot placeholder", async () => {
+	const { contract } = await readReleaseFiles();
+	const gate = contract.secretScans.find((candidate) => candidate.id === "gitleaks-redacted");
+	assert.deepEqual(resolveReleaseGateCommand(gate, contract.baseSha), [
+		"gitleaks",
+		"git",
+		"--redact",
+		"--no-banner",
+		"--log-opts",
+		`${contract.baseSha}..HEAD`,
+		".",
+	]);
+	for (const scope of ["BASE...HEAD", "BASE..HEAD;HEAD", "main..HEAD"]) {
+		const malformed = clone(gate);
+		malformed.command[malformed.command.indexOf("BASE..HEAD")] = scope;
+		assert.throws(() => resolveReleaseGateCommand(malformed, contract.baseSha), /exact revision placeholder/u);
+	}
+});
+
+test("candidate-scoped gitleaks ignores base history and rejects a candidate-introduced leak", async () => {
+	const repository = await mkdtemp(path.join(tmpdir(), "kanji-release-secret-scope-"));
+	const git = async (...arguments_) => {
+		assert.equal(await runExit("git", arguments_, repository), 0);
+	};
+	try {
+		await git("init", "--quiet");
+		await git("config", "user.name", "Release Contract Test");
+		await git("config", "user.email", "release-contract@example.invalid");
+		await writeFile(path.join(repository, "historical.js"), generatedGenericCredentialFixture(), "utf8");
+		await git("add", "historical.js");
+		await git("commit", "--quiet", "-m", "historical fixture");
+		const baseSha = await readGitHead(repository);
+		await writeFile(path.join(repository, "candidate.js"), "export const candidate = true;\n", "utf8");
+		await git("add", "candidate.js");
+		await git("commit", "--quiet", "-m", "clean candidate");
+		assert.notEqual(await runExit("gitleaks", ["git", "--redact", "--no-banner", "."], repository), 0);
+		assert.equal(await runExit("gitleaks", ["git", "--redact", "--no-banner", "--log-opts", `${baseSha}..HEAD`, "."], repository), 0);
+		await writeFile(path.join(repository, "candidate-leak.js"), generatedGenericCredentialFixture(), "utf8");
+		await git("add", "candidate-leak.js");
+		await git("commit", "--quiet", "-m", "candidate regression fixture");
+		assert.notEqual(await runExit("gitleaks", ["git", "--redact", "--no-banner", "--log-opts", `${baseSha}..HEAD`, "."], repository), 0);
+	} finally {
+		await rm(repository, { recursive: true, force: true });
+	}
+});
+
+function generatedGenericCredentialFixture() {
+	const identifier = ["api", "key"].join("_");
+	const value = randomBytes(32).toString("base64url");
+	return `export const ${identifier} = "${value}";\n`;
+}
+
+async function readGitHead(repository) {
+	return await new Promise((resolve, reject) => {
+		const child = spawn("git", ["rev-parse", "HEAD"], { cwd: repository, stdio: ["ignore", "pipe", "ignore"] });
+		let output = "";
+		child.stdout.setEncoding("utf8");
+		child.stdout.on("data", (chunk) => { output += chunk; });
+		child.once("error", reject);
+		child.once("close", (code, signal) => code === 0 && signal === null ? resolve(output.trim()) : reject(new Error("git head failed")));
+	});
+}
+
+async function runExit(program, arguments_, cwd) {
+	return await new Promise((resolve) => {
+		const child = spawn(program, arguments_, { cwd, stdio: "ignore" });
+		child.once("error", () => resolve(127));
+		child.once("close", (code, signal) => resolve(signal === null ? code ?? 1 : 1));
+	});
+}

@@ -13,6 +13,7 @@ import {
 } from "./quality-database.mjs";
 import {
 	readReleaseContract,
+	resolveReleaseGateCommand,
 	validateReleaseContractDefinition,
 } from "./release-contract.mjs";
 
@@ -273,10 +274,7 @@ export function buildContractLocalQualityPhases({
 			checkEnvironment.SUPABASE_SERVICE_ROLE_KEY ?? "quality-build-service-role-key",
 	};
 	const phases = contract.localGates.map((gate) => {
-		const [program, ...declaredArguments] = gate.command;
-		const arguments_ = declaredArguments.map((argument) =>
-			argument === "BASE...HEAD" ? `${diffBase}...HEAD` : argument
-		);
+		const [program, ...arguments_] = resolveReleaseGateCommand(gate, diffBase);
 		const environment = gate.context === "source"
 			? sourceEnvironment
 			: gate.context === "build"

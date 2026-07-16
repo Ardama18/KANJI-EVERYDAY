@@ -6,8 +6,8 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 const SHA_PATTERN = /^[0-9a-f]{40}$/u;
-const CONTRACT_VERSION = "S11-RC1-1.0.3";
-const CONTRACT_DIGEST = "d62a3959253a6af9eeb2a130fb7f479c6ed2452aca66f0e1e359bc63bb39bc24";
+const CONTRACT_VERSION = "S11-RC1-1.0.4";
+const CONTRACT_DIGEST = "d05570ca865242984f5c97ae5bd50fd36690426104ce84a7f37de433454e753c";
 const LOCAL_GATE_PHASES = ["pre-provision", "disposable", "post-cleanup"];
 const LOCAL_GATE_CONTEXTS = new Set(["source", "disposable", "build"]);
 const EXPECTED_ACCEPTANCE_CRITERIA = [
@@ -69,6 +69,11 @@ export function validateReleaseContractDefinition(contract, options = {}) {
 	checkGateDefinitions(contract.hostedGates, "hosted", failures);
 	checkExactIds(readIds(contract.hostedGates), EXPECTED_HOSTED_IDS, "hosted gates", failures);
 	checkGateDefinitions(contract.secretScans, "secret scan", failures);
+	validateSecretScanExecutionModel(contract.secretScans, failures);
+	validateGatePlaceholders([
+		...(Array.isArray(contract.localGates) ? contract.localGates : []),
+		...(Array.isArray(contract.secretScans) ? contract.secretScans : []),
+	], contract.baseSha, failures);
 	validateReviewPolicy(contract.reviewPolicy, failures);
 	const binding = isRecord(contract.evidenceBinding) ? contract.evidenceBinding : {};
 	check(binding.mode === "post-commit-evidence", "release evidence binding mode drift", failures);
@@ -140,6 +145,31 @@ export function validateEvidenceCommitBinding(contract, evidence, repositoryStat
 	return failures;
 }
 
+export function resolveReleaseGateCommand(gate, baseSha) {
+	if (!isRecord(gate) || !Array.isArray(gate.command) || gate.command.length === 0) {
+		throw new Error("Release gate command is invalid");
+	}
+	if (!SHA_PATTERN.test(String(baseSha))) throw new Error("Release gate base SHA is invalid");
+	const placeholder = gate.id === "diff-committed"
+		? "BASE...HEAD"
+		: gate.id === "gitleaks-redacted"
+			? "BASE..HEAD"
+			: undefined;
+	const placeholderCount = gate.command.filter((argument) => argument === placeholder).length;
+	if (placeholder !== undefined && placeholderCount !== 1) {
+		throw new Error(`Release gate ${gate.id} must contain its exact revision placeholder once`);
+	}
+	return gate.command.map((argument) => {
+		if (argument === placeholder) {
+			return placeholder === "BASE..HEAD" ? `${baseSha}..HEAD` : `${baseSha}...HEAD`;
+		}
+		if (typeof argument === "string" && argument.includes("BASE")) {
+			throw new Error(`Release gate ${gate.id} contains an unauthorized revision placeholder`);
+		}
+		return argument;
+	});
+}
+
 function validateEvidenceGates(definitions, evidenceEntries, candidateSha, label, failures) {
 	const expected = Array.isArray(definitions) ? definitions : [];
 	const actual = Array.isArray(evidenceEntries) ? evidenceEntries : [];
@@ -189,6 +219,31 @@ function validateLocalGateExecutionModel(value, failures) {
 			check(gate.context === "source", `local gate ${gate.id} must use source context`, failures);
 		} else if (gate.phase === "disposable") {
 			check(gate.context === "disposable" || gate.context === "build", `local gate ${gate.id} must use disposable or build context`, failures);
+		}
+	}
+}
+
+function validateSecretScanExecutionModel(value, failures) {
+	if (!Array.isArray(value)) return;
+	for (const gate of value) {
+		if (!isRecord(gate)) continue;
+		if (gate.id === "gitleaks-redacted") {
+			check(gate.executionContext === "candidate-local", "gitleaks must use candidate-local execution context", failures);
+			check(Array.isArray(gate.prerequisites) && gate.prerequisites.length === 0, "gitleaks must not require hosted prerequisites", failures);
+		} else if (gate.id === "forbidden-marker-scan") {
+			check(gate.executionContext === "hosted-runtime", "forbidden marker scan must use hosted-runtime execution context", failures);
+			checkExactIds(gate.prerequisites, ["S11_FORBIDDEN_MARKERS"], "forbidden marker prerequisites", failures);
+		}
+	}
+}
+
+function validateGatePlaceholders(gates, baseSha, failures) {
+	if (!Array.isArray(gates)) return;
+	for (const gate of gates) {
+		try {
+			resolveReleaseGateCommand(gate, baseSha);
+		} catch (error) {
+			failures.push(error instanceof Error ? error.message : "Release gate placeholder is invalid");
 		}
 	}
 }
