@@ -26,6 +26,8 @@ import {
 	captureS10Snapshot,
 	createS10DbClient,
 	ensureS10ActorFixtures,
+	runS10SettledTestScope,
+	S10_DB_TEST_TIMEOUT_MS,
 	S10_ACTORS,
 	sqlLiteral,
 } from "./helpers/s10-db-testkit";
@@ -498,6 +500,22 @@ async function createCommitReservation(
 	});
 }
 
+async function captureScopedDailyUsage(params: {
+	ownerUserId: string;
+	usageDate: string;
+	kind: QuotaKind;
+}): Promise<number> {
+	const usageColumn =
+		params.kind === "card_generation" ? "generated_card_count" : "generated_image_count";
+	const rows = await database.query<{ units: number }>(`
+		SELECT ${usageColumn}::int AS units
+		FROM public.ai_usage_daily
+		WHERE owner_user_id=${sqlLiteral(params.ownerUserId)}::uuid
+			AND usage_date=${sqlLiteral(params.usageDate)}::date
+	`);
+	return rows[0]?.units ?? 0;
+}
+
 const commitSnapshotQueries = [
 	{ name: "decks", sql: `SELECT count(*)::int AS count FROM public.decks WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}'` },
 	{ name: "cards", sql: `SELECT count(*)::int AS count FROM public.cards WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}'` },
@@ -635,7 +653,7 @@ beforeAll(async () => {
 	await ensureS10ActorFixtures(database);
 });
 
-describe("S-10 AIカード登録基盤 DB統合契約", () => {
+describe("S-10 AIカード登録基盤 DB統合契約", { timeout: S10_DB_TEST_TIMEOUT_MS }, () => {
 	describe("RLS・grant・owner境界 (AC-09)", () => {
 		// AC原文: 2ユーザー・未認証actorで全SELECT/INSERT/UPDATE/DELETEを検証し、非所有privateデータへの操作をすべて拒否する。
 		// 期待結果/合格基準: ownerに許可した契約だけが成功し、非owner/anonの成功件数は0。service wrapperも保存済みownerを再検証する。
@@ -1127,7 +1145,16 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 		it("IT-COMMIT-01: 正常commitがbatch/items/tags/item_tagsとreservation linkを原子的に作りcard/deck_cards/card_tagsを0件に保つ", async () => {
 			const fixture = await createCommitFixture();
 			try {
-				await createCommitReservation(fixture);
+				const usageScope = {
+					ownerUserId: S10_ACTORS.ownerA.userId,
+					usageDate: "2048-01-01",
+					kind: "card_generation" as const,
+				};
+				const usageBaseline = await captureScopedDailyUsage(usageScope);
+				const reservation = await createCommitReservation(fixture);
+				expect(reservation.usageDate).toBe(usageScope.usageDate);
+				const usageAfterReservation = await captureScopedDailyUsage(usageScope);
+				expect(usageAfterReservation - usageBaseline).toBe(reservation.units);
 				const before = await captureS10Snapshot(database, commitSnapshotQueries);
 				const result = await commitImport({
 					source: "app_ai",
@@ -1143,7 +1170,7 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 				});
 				const rows = await database.query<{
 					batches: number; items: number; tags: number; itemTags: number;
-					cards: number; deckCards: number; cardTags: number; usage: number;
+					cards: number; deckCards: number; cardTags: number; reservationUnits: number;
 					reservationBatchId: string; reservationImportHash: string;
 				}>(`
 					SELECT
@@ -1154,7 +1181,7 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 						(SELECT count(*)::int FROM public.cards WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}') AS cards,
 						(SELECT count(*)::int FROM public.deck_cards AS links INNER JOIN public.decks ON decks.id = links.deck_id WHERE decks.owner_user_id = '${S10_ACTORS.ownerA.userId}') AS "deckCards",
 						(SELECT count(*)::int FROM public.card_tags WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}') AS "cardTags",
-						(SELECT sum(generated_card_count)::int FROM public.ai_usage_daily WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}') AS usage,
+						(SELECT coalesce(sum(units),0)::int FROM public.ai_quota_reservations WHERE reservation_key = '${fixture.reservationKey}') AS "reservationUnits",
 						(SELECT batch_id::text FROM public.ai_quota_reservations WHERE reservation_key = '${fixture.reservationKey}') AS "reservationBatchId",
 						(SELECT import_request_hash FROM public.ai_quota_reservations WHERE reservation_key = '${fixture.reservationKey}') AS "reservationImportHash"
 				`);
@@ -1163,10 +1190,11 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 					cards: (before.entries.cards[0]?.count as number) ?? 0,
 					deckCards: (before.entries.deckCards[0]?.count as number) ?? 0,
 					cardTags: (before.entries.cardTags[0]?.count as number) ?? 0,
-					usage: 2,
+					reservationUnits: 2,
 					reservationBatchId: result.batchId,
 					reservationImportHash: fixture.importRequestHash,
 				}]);
+				expect(await captureScopedDailyUsage(usageScope)).toBe(usageAfterReservation);
 			} finally {
 				await cleanupCommitFixtures([fixture.marker]);
 			}
@@ -1177,6 +1205,7 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 		// @complexity: high
 		it("IT-COMMIT-02: Stage 1各validation違反と途中例外でdeck/card/batch/item/tag/card_tags/usage/reservation差分が0になる", async () => {
 			const fixture = await createCommitFixture();
+			let rollbackMarker: string | undefined;
 			const invalidRequests: ReadonlyArray<Readonly<Record<string, unknown>>> = [
 				{ ...fixture.request, source: "app_ai" },
 				{ deck: fixture.request.deck, items: "invalid" },
@@ -1185,7 +1214,7 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 				{ deck: fixture.request.deck, items: [{ ...fixture.request.items[0], tags: Array.from({ length: 11 }, (_, index) => `tag-${index}`) }] },
 				{ deck: fixture.request.deck, items: [fixture.request.items[0], { ...fixture.request.items[1], front: "mismatch" }] },
 			];
-			try {
+			await runS10SettledTestScope(async () => {
 				const before = await captureS10Snapshot(database, commitSnapshotQueries);
 				for (const [index, request] of invalidRequests.entries()) {
 					const diagnostic = await database.captureError(commitImportSql({
@@ -1200,6 +1229,7 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 				}
 
 				const rollbackFixture = await createCommitFixture({ marker: `rollback-${randomUUID()}`, deck: { create: { name: `rollback-${fixture.marker}` } } });
+				rollbackMarker = rollbackFixture.marker;
 				await createCommitReservation(rollbackFixture);
 				const rollbackBefore = await captureS10Snapshot(database, commitSnapshotQueries);
 				const failpoint = await database.captureError(commitImportSql({
@@ -1212,10 +1242,12 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 				}), { failpoint: "commit_after_tags" });
 				expect(failpoint.sqlState).toBe("P1008");
 				expect(await captureS10Snapshot(database, commitSnapshotQueries)).toEqual(rollbackBefore);
-				await cleanupCommitFixtures([rollbackFixture.marker]);
-			} finally {
-				await cleanupCommitFixtures([fixture.marker]);
-			}
+			}, async () => {
+				await cleanupCommitFixtures([
+					fixture.marker,
+					...(rollbackMarker === undefined ? [] : [rollbackMarker]),
+				]);
+			});
 		});
 
 		// @category: edge-case
@@ -1224,7 +1256,16 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 		it("IT-COMMIT-03: 同owner/key/import hashの並行commitがbatch 1件と同一batch IDを返しitem/tag/usageを増やさない", async () => {
 			const fixture = await createCommitFixture();
 			try {
-				await createCommitReservation(fixture);
+				const usageScope = {
+					ownerUserId: S10_ACTORS.ownerA.userId,
+					usageDate: "2048-01-01",
+					kind: "card_generation" as const,
+				};
+				const usageBaseline = await captureScopedDailyUsage(usageScope);
+				const reservation = await createCommitReservation(fixture);
+				expect(reservation.usageDate).toBe(usageScope.usageDate);
+				const usageAfterReservation = await captureScopedDailyUsage(usageScope);
+				expect(usageAfterReservation - usageBaseline).toBe(reservation.units);
 				const params = {
 					source: "app_ai" as const,
 					idempotencyKey: fixture.idempotencyKey,
@@ -1238,13 +1279,17 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 				}));
 				expect(results[0]).toEqual(results[1]);
 				const batchId = results[0]?.batchId;
-				expect(await database.query<{ batches: number; items: number; tags: number; usage: number }>(`
+				expect(await database.query<{ batches: number; items: number; tags: number; reservationUnits: number }>(`
 					SELECT
 						(SELECT count(*)::int FROM public.ai_import_batches WHERE idempotency_key = '${fixture.idempotencyKey}') AS batches,
 						(SELECT count(*)::int FROM public.ai_import_items WHERE batch_id = '${batchId}') AS items,
 						(SELECT count(DISTINCT tags.id)::int FROM public.tags INNER JOIN public.ai_import_item_tags AS links ON links.tag_id = tags.id INNER JOIN public.ai_import_items AS items ON items.id = links.item_id WHERE items.batch_id = '${batchId}') AS tags,
-						(SELECT sum(generated_card_count)::int FROM public.ai_usage_daily WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}') AS usage
-				`)).toEqual([{ batches: 1, items: 2, tags: 1, usage: 2 }]);
+						(SELECT coalesce(sum(units),0)::int FROM public.ai_quota_reservations WHERE reservation_key = '${fixture.reservationKey}') AS "reservationUnits"
+				`)).toEqual([{ batches: 1, items: 2, tags: 1, reservationUnits: 2 }]);
+				expect(await captureScopedDailyUsage(usageScope)).toBe(usageAfterReservation);
+				const retried = await commitImport(params);
+				expect(retried.batchId).toBe(batchId);
+				expect(await captureScopedDailyUsage(usageScope)).toBe(usageAfterReservation);
 			} finally {
 				await cleanupCommitFixtures([fixture.marker]);
 			}
@@ -1731,6 +1776,14 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 			const uploadFixture = await createIllustrationQuotaFixture({ source: "app_ai", imageMode: "upload" });
 			const aiFixture = await createIllustrationQuotaFixture({ source: "app_ai", imageMode: "ai" });
 			try {
+				const cardUsageScope = {
+					ownerUserId: S10_ACTORS.ownerA.userId,
+					usageDate: "2045-01-01",
+					kind: "card_generation" as const,
+				};
+				const imageUsageScope = { ...cardUsageScope, kind: "illustration_concept" as const };
+				const cardUsageBaseline = await captureScopedDailyUsage(cardUsageScope);
+				const imageUsageBaseline = await captureScopedDailyUsage(imageUsageScope);
 				const remote = await reserveUsage({
 					reservationKey: remoteKey,
 					kind: "card_generation",
@@ -1752,6 +1805,8 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 				});
 				expect(remote).toMatchObject({ status: "exempt", units: 0 });
 				expect(upload).toMatchObject({ status: "exempt", units: 0 });
+				expect(await captureScopedDailyUsage(cardUsageScope) - cardUsageBaseline).toBe(0);
+				expect(await captureScopedDailyUsage(imageUsageScope) - imageUsageBaseline).toBe(0);
 
 				const forgedCard = await database.captureError(
 					reserveUsageSql({
@@ -1778,13 +1833,8 @@ describe("S-10 AIカード登録基盤 DB統合契約", () => {
 				);
 				expect(forgedCard.sqlState).toBe("P1000");
 				expect(forgedImage.sqlState).toBe("P1000");
-				expect(
-					await database.query<{ cards: number; images: number }>(`
-						SELECT generated_card_count AS cards, generated_image_count AS images
-						FROM public.ai_usage_daily
-						WHERE owner_user_id = '${S10_ACTORS.ownerA.userId}' AND usage_date = '2045-01-01'
-					`)
-				).toEqual([{ cards: 0, images: 0 }]);
+				expect(await captureScopedDailyUsage(cardUsageScope) - cardUsageBaseline).toBe(0);
+				expect(await captureScopedDailyUsage(imageUsageScope) - imageUsageBaseline).toBe(0);
 			} finally {
 				await cleanupQuotaFixtures(
 					[remoteKey, uploadKey, forgedCardKey, forgedImageKey],

@@ -2,14 +2,14 @@
 id: S-11
 feature: ai-card-async-processing
 type: traceability
-version: 2.0.15
+version: 2.0.16
 created: 2026-07-15
 updated: 2026-07-16
 status: implementation_review
 requirements: specs/stories/S-11-ai-card-async-processing/requirements.md@2.0.5
 adr: specs/adr/ADR-008-ai-card-async-queue-image-processing.md@2.0.5
 design: specs/stories/S-11-ai-card-async-processing/design.md@2.0.5
-plan: specs/stories/S-11-ai-card-async-processing/plan.md@2.0.15
+plan: specs/stories/S-11-ai-card-async-processing/plan.md@2.0.16
 ---
 
 # S-11 implementation traceability
@@ -152,6 +152,11 @@ Fresh remediation cycle 3 adds P3-01/P3-02 focused evidence: `worker_failure` is
 | R21-F1 | service snapshot credential confusion | service-only snapshots accept only case-insensitive Authorization Bearer/apikey pairs carrying the same credential; explicit service apikey survives header-name case variants, while missing/spoofed/mismatched pairs reject before fetch |
 | R21-F2 | cycle-17 readiness SSOT | v2.0.15/cycle 17 retains hosted 7 not_run/exit 2 and merge blocked; current evidence is ordinary 699 passed/8 skipped of 707, inventory 260/260 (Unit 27/Integration 223/E2E 10), focused 77/77, and all earlier review approvals remain historical |
 | R21-F3 | ordinary quality determinism | only the complete ordinary Vitest phase serializes file workers with max/min workers 1 so S-10 integration/E2E cannot share the usage owner across files during a 5-second timeout; inventory/focused/hosted gates and concurrency/lock checks inside each file remain unchanged |
+| R22-F1 | bounded S-10 DB test settlement | deterministic race proves a test timeout does not cancel its Promise; DB integration/E2E alone use 30s while every ordinary psql command settles first under statement 10s, lock 5s, and process 12s bounds; global timeout and internal concurrency remain unchanged |
+| R22-F2 | marker-isolated cleanup and snapshots | failure scope awaits cleanup before exposing the next snapshot; marker advisory lock makes duplicate cleanup safe, matching reservations determine usage deltas, and affected commit/E2E assertions avoid owner-wide usage sums |
+| R22-F3 | cycle-18 readiness SSOT | v2.0.16/cycle 18 retains hosted 7 not_run/exit 2 and merge blocked; S-11 is 27/223/10 and focused 77, S-10 Unit is 36, and two final-diff isolated runners each pass ordinary 703/8 of 711 plus DB4 with residue/source synthetic counts zero |
+| R22-R1-F1 | real process-timeout boundary | injectable runtime launches three real hanging Node children; 75ms timeout sends SIGTERM and runS10Psql/captureError/settle preserve exit→reject→next-snapshot order with no process residue while default psql remains 12s |
+| R22-R1-F2 | scoped usage ledger delta | IT-COMMIT-01/03 capture ai_usage_daily by reservation owner/date/kind, require reservation units as the exact delta, and require commit/parallel/idempotent retry to add zero; IT-QUOTA-06 requires remote_mcp/upload exempt delta zero without owner-wide sums |
 
 ## Change history
 
@@ -185,3 +190,4 @@ Fresh remediation cycle 3 adds P3-01/P3-02 focused evidence: `worker_failure` is
 | 2026-07-16 | 2.0.13 | implementation_review | Cycle 15 adds owner-safe column ACLs, post-encode PNG validation, strict status matrices, and current 27/216/10 inventory; hosted 7 remain not_run/exit 2 and merge blocked |
 | 2026-07-16 | 2.0.14 | implementation_review | Cycle 16 restores legacy owner Storage mutation through an owner-bound one-bit tracking helper and actual actor matrix with current 27/217/10 inventory; hosted 7 remain not_run/exit 2 and merge blocked |
 | 2026-07-16 | 2.0.15 | implementation_review | Cycle 17 normalizes service snapshot credentials case-insensitively, preserves explicit service apikey, and rejects missing/spoofed/mismatched pairs before fetch with current 27/223/10 inventory; hosted 7 remain not_run/exit 2 and merge blocked |
+| 2026-07-16 | 2.0.16 | implementation_review | Cycle 18 bounds S-10 DB test settlement, serializes marker cleanup, scopes usage snapshots by reservation/date, and retains hosted 7 not_run/exit 2 and merge blocked |

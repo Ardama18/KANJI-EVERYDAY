@@ -30,6 +30,19 @@ import {
 } from "@/lib/ai-import/schema";
 import canonicalFixture from "../fixtures/canonical-requests.json";
 import unicodeFixture from "../fixtures/unicode-card-key.json";
+import { cleanupS10ContractMarker } from "./helpers/s10-contract-workflow";
+import {
+	buildS10DatabaseCommandEnvironment,
+	createS10DbClient,
+	runS10Psql,
+	runS10SettledTestScope,
+	S10DatabaseCommandError,
+	type S10ProcessRuntime,
+	S10_DB_LOCK_TIMEOUT_MS,
+	S10_DB_PROCESS_TIMEOUT_MS,
+	S10_DB_STATEMENT_TIMEOUT_MS,
+	S10_DB_TEST_TIMEOUT_MS,
+} from "./helpers/s10-db-testkit";
 
 function requireFixtureById<T extends { id: string }>(values: readonly T[], id: string): T {
 	const value = values.find((candidate) => candidate.id === id);
@@ -108,6 +121,121 @@ async function expectSafePreviewFailure(
 }
 
 describe("S-10 AIカード登録基盤 Unit契約", () => {
+	describe("DB test settlement contract", () => {
+		it("UT-DB-01: test timeout相当のraceはunderlying Promiseをcancelせず後から完了し得る", async () => {
+			let release: (() => void) | undefined;
+			let operationCompleted = false;
+			const operation = new Promise<void>((resolve) => {
+				release = () => {
+					operationCompleted = true;
+					resolve();
+				};
+			});
+			const winner = await Promise.race([
+				operation.then(() => "operation" as const),
+				Promise.resolve("vitest-timeout" as const),
+			]);
+			expect(winner).toBe("vitest-timeout");
+			expect(operationCompleted).toBe(false);
+			release?.();
+			await operation;
+			expect(operationCompleted).toBe(true);
+		});
+
+		it("UT-DB-02: failure相当のoperationをsettleしてcleanup完了後だけ次snapshotを公開する", async () => {
+			let release: (() => void) | undefined;
+			let markerPresent = true;
+			let cleanupCalls = 0;
+			const gate = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			const scope = runS10SettledTestScope(async () => {
+				await gate;
+				throw new Error("intentional operation failure");
+			}, async () => {
+				markerPresent = false;
+				cleanupCalls += 1;
+			});
+			let scopeSettled = false;
+			void scope.catch(() => undefined).then(() => {
+				scopeSettled = true;
+			});
+			await Promise.resolve();
+			expect(scopeSettled).toBe(false);
+			expect(markerPresent).toBe(true);
+			release?.();
+			await expect(scope).rejects.toThrow("intentional operation failure");
+			expect(markerPresent).toBe(false);
+			expect(cleanupCalls).toBe(1);
+
+			await runS10SettledTestScope(async () => undefined, async () => {
+				markerPresent = false;
+				cleanupCalls += 1;
+			});
+			expect(markerPresent).toBe(false);
+			expect(cleanupCalls).toBe(2);
+		});
+
+		it("UT-DB-03: DB/process/test timeoutとmarker cleanupは有限・strict・marker scopedである", () => {
+			expect(S10_DB_LOCK_TIMEOUT_MS).toBe(5_000);
+			expect(S10_DB_STATEMENT_TIMEOUT_MS).toBe(10_000);
+			expect(S10_DB_PROCESS_TIMEOUT_MS).toBe(12_000);
+			expect(S10_DB_TEST_TIMEOUT_MS).toBe(30_000);
+			expect(S10_DB_LOCK_TIMEOUT_MS).toBeLessThan(S10_DB_STATEMENT_TIMEOUT_MS);
+			expect(S10_DB_PROCESS_TIMEOUT_MS).toBeLessThan(S10_DB_TEST_TIMEOUT_MS);
+			const environment = buildS10DatabaseCommandEnvironment("contract-test", {
+				PGOPTIONS: "-c application_name=inherited",
+			});
+			expect(environment.PGAPPNAME).toBe("contract-test");
+			expect(environment.PGOPTIONS).toBe(
+				"-c application_name=inherited -c statement_timeout=10000 -c lock_timeout=5000"
+			);
+			const cleanupSource = cleanupS10ContractMarker.toString();
+			expect(cleanupSource).toContain("pg_advisory_xact_lock");
+			expect(cleanupSource).toContain("reservation_key LIKE");
+			expect(cleanupSource).not.toContain("sum(generated_card_count)");
+		});
+
+		it("UT-DB-04: real child timeoutはtermination後にrun/capture/settleを全てrejectする", async () => {
+			for (const api of ["run", "capture", "settle"] as const) {
+				let childTerminated = false;
+				let childWasKilled = false;
+				let terminationSignal: NodeJS.Signals | null = null;
+				const events: string[] = [];
+				const runtime: S10ProcessRuntime = {
+					executable: process.execPath,
+					arguments: ["-e", "setInterval(() => undefined, 1000)"],
+					timeoutMs: 75,
+					onSpawn(child) {
+						child.once("exit", (_code, signal) => {
+							childTerminated = true;
+							childWasKilled = child.killed;
+							terminationSignal = signal;
+							events.push("exit");
+						});
+					},
+				};
+				const client = createS10DbClient("postgresql://unused.invalid/test", runtime);
+				const operation =
+					api === "run"
+						? runS10Psql("postgresql://unused.invalid/test", "SELECT 1", runtime)
+						: api === "capture"
+							? client.captureError("SELECT 1")
+							: client.settle("SELECT 1");
+				const observedOperation = operation.catch((error: unknown) => {
+					events.push("rejected");
+					throw error;
+				});
+				await expect(observedOperation).rejects.toBeInstanceOf(S10DatabaseCommandError);
+				expect(childTerminated).toBe(true);
+				expect(childWasKilled).toBe(true);
+				expect(terminationSignal).toBe("SIGTERM");
+				events.push("next-snapshot");
+				expect(events).toEqual(["exit", "rejected", "next-snapshot"]);
+			}
+		});
+	});
+
 	describe("Stage 1 schema", () => {
 		// AC原文 (AC-06/06a): Stage 1対象条件を不正にしたとき永続化を行わず、1〜50枚、clientItemId、tag境界を個別に拒否する。
 		// 検証/期待結果/合格基準: unknown入力を全件検査し、field path付きissueを返し、成功時だけbranded normalized typeを返す。

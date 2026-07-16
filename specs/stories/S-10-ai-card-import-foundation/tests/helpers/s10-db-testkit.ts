@@ -1,4 +1,9 @@
-import { execFile, spawn } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
+
+export const S10_DB_STATEMENT_TIMEOUT_MS = 10_000;
+export const S10_DB_LOCK_TIMEOUT_MS = 5_000;
+export const S10_DB_PROCESS_TIMEOUT_MS = 12_000;
+export const S10_DB_TEST_TIMEOUT_MS = 30_000;
 
 export type S10ActorKind = "ownerA" | "ownerB" | "anonymous" | "service";
 
@@ -29,6 +34,13 @@ export interface S10DatabaseErrorDiagnostic {
 	readonly sqlState: string | null;
 	readonly constraint: string | null;
 	readonly detail?: string;
+}
+
+export interface S10ProcessRuntime {
+	readonly executable?: string;
+	readonly arguments?: readonly string[];
+	readonly timeoutMs?: number;
+	readonly onSpawn?: (child: ChildProcess) => void;
 }
 
 export interface S10DbClient {
@@ -88,11 +100,14 @@ export function requireS10TestDatabaseUrl(
 	return databaseUrl;
 }
 
-export function createS10DbClient(databaseUrl = requireS10TestDatabaseUrl()): S10DbClient {
+export function createS10DbClient(
+	databaseUrl = requireS10TestDatabaseUrl(),
+	processRuntime?: S10ProcessRuntime
+): S10DbClient {
 	return {
 		databaseUrl,
 		async execute(sql: string, context?: S10ExecutionContext): Promise<void> {
-			await runS10Psql(databaseUrl, buildContextSql(sql, context));
+			await runS10Psql(databaseUrl, buildContextSql(sql, context), processRuntime);
 		},
 		async query<T extends Record<string, unknown>>(
 			sql: string,
@@ -104,22 +119,43 @@ export function createS10DbClient(databaseUrl = requireS10TestDatabaseUrl()): S1
 				SELECT COALESCE(json_agg(row_to_json(result_row)), '[]'::json)::text
 				FROM result_row
 			`;
-			const output = await runS10Psql(databaseUrl, buildContextSql(wrapped, context));
+			const output = await runS10Psql(
+				databaseUrl,
+				buildContextSql(wrapped, context),
+				processRuntime
+			);
 			return parseRows<T>(output.trim());
 		},
 		async captureError(
 			sql: string,
 			context?: S10ExecutionContext
 		): Promise<S10DatabaseErrorDiagnostic> {
-			return await capturePsqlError(databaseUrl, buildContextSql(sql, context));
+			return await capturePsqlError(databaseUrl, buildContextSql(sql, context), processRuntime);
 		},
 		async settle(
 			sql: string,
 			context?: S10ExecutionContext
 		): Promise<S10DatabaseErrorDiagnostic | null> {
-			return await settlePsql(databaseUrl, buildContextSql(sql, context));
+			return await settlePsql(databaseUrl, buildContextSql(sql, context), processRuntime);
 		},
 	};
+}
+
+/**
+ * Vitest test timeouts do not cancel an already-running Promise. Keep the
+ * operation and its marker cleanup in one Promise so the next snapshot is not
+ * exposed until both have settled. The psql boundary below is independently
+ * bounded so this scope rejects before the enclosing DB test timeout.
+ */
+export async function runS10SettledTestScope<T>(
+	operation: () => Promise<T>,
+	cleanup: () => Promise<void>
+): Promise<T> {
+	try {
+		return await operation();
+	} finally {
+		await cleanup();
+	}
 }
 
 export async function ensureS10ActorFixtures(client: S10DbClient): Promise<void> {
@@ -295,15 +331,23 @@ function parseRows<T extends Record<string, unknown>>(output: string): T[] {
 	return parsed as T[];
 }
 
-export async function runS10Psql(databaseUrl: string, sql: string): Promise<string> {
+export async function runS10Psql(
+	databaseUrl: string,
+	sql: string,
+	processRuntime?: S10ProcessRuntime
+): Promise<string> {
 	return await new Promise((resolve, reject) => {
-		execFile(
-			"psql",
-			[databaseUrl, "-v", "ON_ERROR_STOP=1", "-X", "-A", "-t", "-q", "-c", sql],
+		const child = execFile(
+			processRuntime?.executable ?? "psql",
+			[
+				...(processRuntime?.arguments ??
+					[databaseUrl, "-v", "ON_ERROR_STOP=1", "-X", "-A", "-t", "-q", "-c", sql]),
+			],
 			{
 				encoding: "utf8",
-				env: { ...process.env, PGAPPNAME: "s10-ai-card-import-tests" },
+				env: buildS10DatabaseCommandEnvironment("s10-ai-card-import-tests"),
 				maxBuffer: 10 * 1024 * 1024,
+				timeout: processRuntime?.timeoutMs ?? S10_DB_PROCESS_TIMEOUT_MS,
 			},
 			(error, stdout, stderr) => {
 				if (error !== null) {
@@ -314,6 +358,7 @@ export async function runS10Psql(databaseUrl: string, sql: string): Promise<stri
 				resolve(stdout);
 			}
 		);
+		processRuntime?.onSpawn?.(child);
 	});
 }
 
@@ -374,12 +419,13 @@ export async function runS10PsqlFile(databaseUrl: string, filePath: string): Pro
 
 async function capturePsqlError(
 	databaseUrl: string,
-	sql: string
+	sql: string,
+	processRuntime?: S10ProcessRuntime
 ): Promise<S10DatabaseErrorDiagnostic> {
 	return await new Promise((resolve, reject) => {
-		execFile(
-			"psql",
-			[
+		const child = execFile(
+			processRuntime?.executable ?? "psql",
+			processRuntime?.arguments === undefined ? [
 				databaseUrl,
 				"-v",
 				"ON_ERROR_STOP=1",
@@ -391,15 +437,20 @@ async function capturePsqlError(
 				"-q",
 				"-c",
 				sql,
-			],
+			] : [...processRuntime.arguments],
 			{
 				encoding: "utf8",
-				env: { ...process.env, PGAPPNAME: "s10-ai-card-import-tests" },
+				env: buildS10DatabaseCommandEnvironment("s10-ai-card-import-tests"),
 				maxBuffer: 10 * 1024 * 1024,
+				timeout: processRuntime?.timeoutMs ?? S10_DB_PROCESS_TIMEOUT_MS,
 			},
 			(error, _stdout, stderr) => {
 				if (error === null) {
 					reject(new Error("S-10 database command unexpectedly succeeded"));
+					return;
+				}
+				if (error.killed === true || (error.signal !== undefined && error.signal !== null)) {
+					reject(new S10DatabaseCommandError(null, stderr));
 					return;
 				}
 				const sqlState = /ERROR:\s+([0-9A-Z]{5}):/u.exec(stderr)?.[1] ?? null;
@@ -418,25 +469,34 @@ async function capturePsqlError(
 				resolve(diagnostic);
 			}
 		);
+		processRuntime?.onSpawn?.(child);
 	});
 }
 
 async function settlePsql(
 	databaseUrl: string,
-	sql: string
+	sql: string,
+	processRuntime?: S10ProcessRuntime
 ): Promise<S10DatabaseErrorDiagnostic | null> {
-	return await new Promise((resolve) => {
-		execFile(
-			"psql",
-			[databaseUrl, "-v", "ON_ERROR_STOP=1", "-v", "VERBOSITY=verbose", "-X", "-A", "-t", "-q", "-c", sql],
+	return await new Promise((resolve, reject) => {
+		const child = execFile(
+			processRuntime?.executable ?? "psql",
+			[
+				...(processRuntime?.arguments ?? [databaseUrl, "-v", "ON_ERROR_STOP=1", "-v", "VERBOSITY=verbose", "-X", "-A", "-t", "-q", "-c", sql]),
+			],
 			{
 				encoding: "utf8",
-				env: { ...process.env, PGAPPNAME: "s10-ai-card-import-tests" },
+				env: buildS10DatabaseCommandEnvironment("s10-ai-card-import-tests"),
 				maxBuffer: 10 * 1024 * 1024,
+				timeout: processRuntime?.timeoutMs ?? S10_DB_PROCESS_TIMEOUT_MS,
 			},
 			(error, _stdout, stderr) => {
 				if (error === null) {
 					resolve(null);
+					return;
+				}
+				if (error.killed === true || (error.signal !== undefined && error.signal !== null)) {
+					reject(new S10DatabaseCommandError(null, stderr));
 					return;
 				}
 				resolve({
@@ -445,5 +505,30 @@ async function settlePsql(
 				});
 			}
 		);
+		processRuntime?.onSpawn?.(child);
 	});
+}
+
+export function buildS10DatabaseCommandEnvironment(
+	applicationName: string,
+	environment: Readonly<Record<string, string | undefined>> = process.env
+): NodeJS.ProcessEnv {
+	const inheritedOptions = environment.PGOPTIONS?.trim();
+	const nodeEnvironment = environment.NODE_ENV;
+	const boundedOptions = [
+		`-c statement_timeout=${S10_DB_STATEMENT_TIMEOUT_MS}`,
+		`-c lock_timeout=${S10_DB_LOCK_TIMEOUT_MS}`,
+	].join(" ");
+	return {
+		...environment,
+		NODE_ENV:
+			nodeEnvironment === "development" || nodeEnvironment === "production"
+				? nodeEnvironment
+				: "test",
+		PGAPPNAME: applicationName,
+		PGOPTIONS:
+			inheritedOptions === undefined || inheritedOptions.length === 0
+				? boundedOptions
+				: `${inheritedOptions} ${boundedOptions}`,
+	};
 }

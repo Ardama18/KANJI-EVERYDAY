@@ -234,7 +234,14 @@ test("repository quality provisions three distinct S-11 migration databases", as
 });
 
 test("ordinary Vitest alone serializes file workers without changing later gates", async () => {
-	const runner = await readFile(new URL("./run-quality-with-database.mjs", import.meta.url), "utf8");
+	const [runner, vitestConfig, testkit, integration, e2e, contractWorkflow] = await Promise.all([
+		readFile(new URL("./run-quality-with-database.mjs", import.meta.url), "utf8"),
+		readFile(new URL("../../frontend/vitest.config.ts", import.meta.url), "utf8"),
+		readFile(new URL("../../specs/stories/S-10-ai-card-import-foundation/tests/helpers/s10-db-testkit.ts", import.meta.url), "utf8"),
+		readFile(new URL("../../specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.int.test.ts", import.meta.url), "utf8"),
+		readFile(new URL("../../specs/stories/S-10-ai-card-import-foundation/tests/ai-card-import-foundation.e2e.test.ts", import.meta.url), "utf8"),
+		readFile(new URL("../../specs/stories/S-10-ai-card-import-foundation/tests/helpers/s10-contract-workflow.ts", import.meta.url), "utf8"),
+	]);
 	const ordinaryStart = runner.indexOf('"complete ordinary Vitest"');
 	const inventoryStart = runner.indexOf('"S-11 inventory"', ordinaryStart);
 	const focusedStart = runner.indexOf('"S-11 focused 77 regressions"', inventoryStart);
@@ -255,6 +262,29 @@ test("ordinary Vitest alone serializes file workers without changing later gates
 	assert.doesNotMatch(inventoryPhase, /maxWorkers|minWorkers/u);
 	assert.doesNotMatch(focusedPhase, /maxWorkers|minWorkers/u);
 	assert.equal(runner.match(/--maxWorkers=1|--minWorkers=1/gu)?.length, 2);
+	assert.doesNotMatch(vitestConfig, /testTimeout/u);
+	assert.match(testkit, /S10_DB_STATEMENT_TIMEOUT_MS = 10_000/u);
+	assert.match(testkit, /S10_DB_LOCK_TIMEOUT_MS = 5_000/u);
+	assert.match(testkit, /S10_DB_PROCESS_TIMEOUT_MS = 12_000/u);
+	assert.match(testkit, /S10_DB_TEST_TIMEOUT_MS = 30_000/u);
+	assert.equal(
+		testkit.match(/timeout: processRuntime\?\.timeoutMs \?\? S10_DB_PROCESS_TIMEOUT_MS/gu)?.length,
+		3
+	);
+	assert.match(testkit, /processRuntime\?\.onSpawn\?\.\(child\)/u);
+	assert.match(testkit, /runS10SettledTestScope/u);
+	for (const databaseSuite of [integration, e2e]) {
+		assert.match(databaseSuite, /\{ timeout: S10_DB_TEST_TIMEOUT_MS \}/u);
+	}
+	assert.match(integration, /captureScopedDailyUsage/u);
+	assert.match(integration, /usageAfterReservation - usageBaseline/u);
+	assert.match(integration, /expect\(await captureScopedDailyUsage\(usageScope\)\)\.toBe\(usageAfterReservation\)/u);
+	assert.match(integration, /const retried = await commitImport\(params\)/u);
+	assert.match(integration, /const cardUsageBaseline = await captureScopedDailyUsage\(cardUsageScope\)/u);
+	assert.match(integration, /captureScopedDailyUsage\(cardUsageScope\) - cardUsageBaseline\)\.toBe\(0\)/u);
+	assert.doesNotMatch(integration, /sum\(generated_card_count\).*IT-COMMIT/u);
+	assert.match(contractWorkflow, /pg_advisory_xact_lock\(hashtextextended/u);
+	assert.match(contractWorkflow, /WHERE reservation_key LIKE/u);
 });
 
 test("quality diff base rejects ambiguous shorthand refs but accepts exact full refs", async () => {

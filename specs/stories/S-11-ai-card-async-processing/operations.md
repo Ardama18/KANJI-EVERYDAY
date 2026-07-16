@@ -1,6 +1,6 @@
 # S-11 operations and rollback runbook
 
-Current cycle-17 verification state: `hosted 7 not_run; merge blocked`. Local boundary
+Current cycle-18 verification state: `hosted 7 not_run; merge blocked`. Local boundary
 E2E, isolated PostgreSQL, and code-readiness results do not complete hosted
 full-system E2E or authorize merge.
 
@@ -332,4 +332,14 @@ Age cleanup is exact: source/orphan rows are protected through 23:59:59 and beco
 - The starting helper/test diff had unknown provenance. It was preserved and adopted because the independent review identified a concrete credential-confusion risk and the change strengthens the service-only security boundary without changing production code or database schema.
 - The ordinary Vitest phase alone runs with one file worker. The root cause was separate S-10 integration/E2E files concurrently sharing the usage owner; after one path's five-second timeout, another file could observe transient rows. Serial file workers make root quality deterministic while every concurrency and lock scenario inside each test file still runs unchanged. S-11 inventory, focused, and hosted/external gates retain their existing worker behavior.
 - Current inventory is 260/260 (Unit 27, Integration 223, E2E 10), focused is 77/77, and ordinary Vitest is 699 passed/8 conditional skips of 707 definitions. Hosted external-prerequisite gates remain the same seven structured `not_run`/exit 2 blockers.
+- Hosted real integration/E2E, resource, Deno, and three direct database prerequisite gates remain `not_run`/exit 2 until their explicit prerequisites are supplied. Verification remains `hosted 7 not_run; merge blocked`.
+
+## Final ship review remediation cycle 18 (2026-07-16)
+
+- Root cause: Vitest's test timeout rejects its own runner boundary but does not cancel the test Promise or the `execFile("psql")` child. The previous unbounded child could therefore complete mutation and `finally` cleanup after the next test had started.
+- S-10 DB integration/E2E tests alone now use a realistic 30-second test timeout. Each ordinary S-10 database command is independently bounded by PostgreSQL statement timeout 10 seconds, lock timeout 5 seconds, and child-process timeout 12 seconds; process termination is rejected instead of being misreported as a SQL business error. Global Vitest timeout and cycle-17 one-worker ordinary phase remain unchanged.
+- IT-COMMIT-02 and E2E-CONTRACT-03/04 await operation settlement and cleanup as one scope. Marker cleanup takes a marker-derived transaction advisory lock, derives usage deltas only from matching reservations, and is safe to invoke twice. Affected usage assertions use reservation key/date rather than owner-wide sums.
+- Final-review deterministic non-DB evidence is UT-DB 4/4, quality database harness 32/32, and typecheck pass.
+- Final review remediation adds UT-DB-04 with three real hanging Node children. A 75ms injected process timeout terminates each with SIGTERM, then runS10Psql, captureError, and settle reject `S10DatabaseCommandError`; explicit exit→reject→next-snapshot ordering proves no live child crosses the boundary, and the production/default psql timeout remains 12 seconds. IT-COMMIT-01/03 now compare exact owner/date/kind `ai_usage_daily` baselines against reservation units and prove commit plus idempotent retry add no usage; IT-QUOTA-06 proves remote_mcp card and upload-image exempt reservations each add zero. Current inventory is S-10 Unit 36 and ordinary 711 definitions; S-11 remains 27/223/10 (260) and focused 77.
+- Two consecutive isolated full runners passed the final diff. Both passed ordinary 703/8 of 711, DB4, S-11 260, and focused 77. Run 1 measured ordinary 63.12s, S-10 Integration 42.617s, IT-COMMIT-02 5.510s, and IT-FINALIZE-05 2.291s; run 2 measured ordinary 65.80s, S-10 Integration 41.164s, IT-COMMIT-02 4.095s, and IT-FINALIZE-05 2.140s. The run-1 IT-COMMIT-02 result exceeded the old five-second default and passed under the bounded 30-second DB-suite timeout. After each run strict residue was zero and source synthetic owner-A batches, reservations, usage, and decks were each zero.
 - Hosted real integration/E2E, resource, Deno, and three direct database prerequisite gates remain `not_run`/exit 2 until their explicit prerequisites are supplied. Verification remains `hosted 7 not_run; merge blocked`.

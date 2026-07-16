@@ -1136,7 +1136,7 @@ describe("S-11 commit and queue integration", () => {
 		expect(jobs).toContain("assertOwnerSafeSelectMatrix");
 	});
 
-	it("R21-F2 readiness SSOT separates local boundaries from hosted merge acceptance", async () => {
+	it("R22-F3 readiness SSOT separates local boundaries from hosted merge acceptance", async () => {
 		const [meta, plan, traceability, operations] = await Promise.all([
 			readFile(new URL("../meta.json", import.meta.url), "utf8"),
 			readFile(new URL("../plan.md", import.meta.url), "utf8"),
@@ -1144,15 +1144,15 @@ describe("S-11 commit and queue integration", () => {
 			readFile(new URL("../operations.md", import.meta.url), "utf8"),
 		]);
 		const parsedMeta = JSON.parse(meta) as Record<string, unknown>;
-		expect(parsedMeta.remediation_cycle).toBe(17);
-		expect(parsedMeta.ssot_version).toBe("2.0.15");
+		expect(parsedMeta.remediation_cycle).toBe(18);
+		expect(parsedMeta.ssot_version).toBe("2.0.16");
 		expect(parsedMeta.verification_state).toBe("hosted_7_not_run_merge_blocked");
 		expect(meta).not.toMatch(/ready_for_commit|zero_findings|approved/u);
-		expect(plan).toContain("version: 2.0.15");
-		expect(traceability).toContain("version: 2.0.15");
+		expect(plan).toContain("version: 2.0.16");
+		expect(traceability).toContain("version: 2.0.16");
 		expect(plan).toContain("[x] **T6-01L: local boundary E2E");
 		expect(plan).toContain("[ ] **T6-01H: hosted full-system E2E");
-		expect(operations).toContain("Current cycle-17 verification state: `hosted 7 not_run; merge blocked`");
+		expect(operations).toContain("Current cycle-18 verification state: `hosted 7 not_run; merge blocked`");
 		expect(traceability).not.toMatch(/\bcurrent\s+R12\b/iu);
 	});
 

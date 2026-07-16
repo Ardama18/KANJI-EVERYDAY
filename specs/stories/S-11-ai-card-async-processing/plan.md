@@ -2,7 +2,7 @@
 id: S-11
 feature: ai-card-async-processing
 type: plan
-version: 2.0.15
+version: 2.0.16
 created: 2026-07-15
 updated: 2026-07-16
 based_on: specs/stories/S-11-ai-card-async-processing/design.md
@@ -702,6 +702,18 @@ any post-cycle-8 remediation or any hosted gate.
 - [x] 開始時に由来不明だったhelper/test差分は破棄せず、独立reviewのcredential-confusion指摘とsecurity benefitを理由にcycle 17へ採用する。
 - [ ] hosted full-system acceptance 7件が明示的前提環境でpassする。完了まではmerge blockedを維持する。
 
+## Final ship review remediation cycle 18
+
+- [x] R22-F1: Vitest timeoutがunderlying Promise/`psql`をcancelしない根因を決定的なrace契約で固定し、S-10 DB commandをstatement 10秒、lock 5秒、process 12秒でtest timeoutより先にsettleさせる。
+- [x] R22-F1: S-10 DB integration/E2E describeだけに30秒timeoutを設定し、global Vitest timeoutとcycle 17のordinary一worker設定は変更しない。file内の並行commit/deadlock/lock検査も維持する。
+- [x] R22-F2: IT-COMMIT-02とE2E-CONTRACT-03/04をoperation+cleanupの単一settled scopeへ入れ、marker cleanupをmarker advisory lockで直列化して二重実行を冪等にする。
+- [x] R22-F2: affected commit/E2E probeのusageをreservation keyまたはそのusage dateへ限定し、batch snapshotからowner-wide usage joinを除去する。
+- [x] R22-F3: meta/plan/traceability/operations/tasksをv2.0.16 / cycle 18 / `hosted 7 not_run; merge blocked`へ同期する。S-11 inventory 260件とfocused 77件は不変、最終review remediation後のS-10 Unitは36件、ordinary definition inventoryは711件となる。
+- [x] final-review non-DB GreenはUT-DB 4/4、quality database harness 32/32、typecheckで確認する。最終差分を親runnerの隔離full gateで2回連続実行し、両回ordinary 703 pass/8 conditional skip of 711、DB4、S-11 260、focused 77、strict residue 0、source synthetic ownerA batches/reservations/usage/decks各0を確認する。run 1はordinary 63.12秒・S-10 Integration 42.617秒・IT-COMMIT-02 5.510秒・IT-FINALIZE-05 2.291秒、run 2はordinary 65.80秒・S-10 Integration 41.164秒・IT-COMMIT-02 4.095秒・IT-FINALIZE-05 2.140秒だった。run 1のIT-COMMIT-02が旧default 5秒を越えて成功し、DB限定30秒境界がtimeout漏洩を防ぐことも実測した。
+- [x] R22-R1-F1: injectable process runtimeで実Node子プロセスを75ms timeoutによりSIGTERM終了し、runS10Psql/captureError/settleの3経路がexit→reject→next snapshotの順で完了してprocess residueを残さないことをUT-DB-04で確認する。default psql 12秒境界は維持する。
+- [x] R22-R1-F2: IT-COMMIT-01/03でreservation owner/date/kindに限定した`ai_usage_daily` baselineを取得し、予約deltaがunitsと一致、commit・並行commit・idempotent retryで追加delta 0を検証する。IT-QUOTA-06でもremote_mcp cardとupload imageのexempt予約delta 0を同じscoped baselineで固定する。最終review差分後のdisposable DB/full実測は親runnerで再確認する。
+- [ ] hosted full-system acceptance 7件が明示的前提環境でpassする。完了まではmerge blockedを維持する。
+
 ## 変更履歴
 
 | 日付 | 版 | status | 変更内容 |
@@ -733,3 +745,4 @@ any post-cycle-8 remediation or any hosted gate.
 | 2026-07-16 | 2.0.13 | implementation_review | cycle 15、owner-safe column ACL、正規化後PNG再検証、strict status matrix、hosted merge-blocked SSOTを反映 |
 | 2026-07-16 | 2.0.14 | implementation_review | cycle 16、owner-bound Storage tracking helper、OLD/NEW mutation policy、実DBactor matrix、hosted merge-blocked SSOTを反映 |
 | 2026-07-16 | 2.0.15 | implementation_review | cycle 17、case-insensitive service credential pair、explicit apikey保持、spoof/missing/mismatch拒否、hosted merge-blocked SSOTを反映 |
+| 2026-07-16 | 2.0.16 | implementation_review | cycle 18、bounded S-10 DB test settlement、marker cleanup直列化、reservation/date scoped snapshot、hosted merge-blocked SSOTを反映 |
