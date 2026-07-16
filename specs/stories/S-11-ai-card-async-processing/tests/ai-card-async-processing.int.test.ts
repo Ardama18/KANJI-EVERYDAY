@@ -4,6 +4,7 @@ import { deflateSync } from "node:zlib";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hashImportRequest } from "../../../../frontend/src/lib/ai-import/canonical-request";
+import { parseImportStatusResponse } from "../../../../frontend/src/lib/ai-import/async-contract";
 import { signPreviewToken } from "../../../../frontend/src/lib/ai-import/preview-token";
 import { createSourceImageCodec } from "../../../../frontend/src/lib/ai-import/source-image-codec";
 import { runCleanup } from "../../../../supabase/functions/_shared/ai-card-import/cleanup.ts";
@@ -12,6 +13,7 @@ import {
 	normalizeIllustration,
 	sanitizeSourceImage,
 } from "../../../../supabase/functions/_shared/ai-card-import/image-codec.ts";
+import { MAX_IMAGE_BYTES } from "../../../../supabase/functions/_shared/ai-card-import/image-validation.ts";
 import { resolveProviderName } from "../../../../supabase/functions/_shared/ai-card-import/provider.ts";
 import {
 	createSafeLogger,
@@ -32,6 +34,29 @@ import {
 import { createS11DbClient } from "./helpers/s11-db-testkit";
 
 const OWNER_ID = "22000000-0000-4000-8000-000000000001";
+
+function statusFixture(status: string, states: readonly string[]) {
+	return {
+		batchId: BATCH_ID,
+		status,
+		counts: {
+			total: states.length,
+			succeeded: states.filter((state) => state === "succeeded").length,
+			failed: states.filter((state) => state === "failed").length,
+		},
+		items: states.map((itemStatus, index) => ({
+			itemId: `22000000-0000-4000-8000-${String(index + 100).padStart(12, "0")}`,
+			conceptId: `matrix-${index}`,
+			status: itemStatus,
+			cardId:
+				itemStatus === "succeeded"
+					? `22000000-0000-4000-8000-${String(index + 200).padStart(12, "0")}`
+					: null,
+			errorCode: itemStatus === "failed" ? "PROVIDER_PERMANENT_ERROR" : null,
+		})),
+	};
+}
+
 const routeBoundary = vi.hoisted(() => ({
 	userId: "22000000-0000-4000-8000-000000000001",
 	rpc: vi.fn(),
@@ -471,6 +496,40 @@ describe("S-11 commit and queue integration", () => {
 		expect(
 			(await GET(new Request(`http://local/api/ai/imports/status?batchId=${BATCH_ID}`))).status
 		).toBe(502);
+	});
+
+	it.each([
+		["queued all undone", "queued", ["undone", "undone"]],
+		["processing mixed undone", "processing", ["processing", "undone"]],
+		["undone mixed succeeded", "undone", ["undone", "succeeded"]],
+		["completed mixed undone", "completed", ["succeeded", "undone"]],
+		["partial mixed undone", "partial", ["succeeded", "failed", "undone"]],
+		["failed mixed undone", "failed", ["failed", "undone"]],
+	] as const)("R19-F3 rejects contradictory status matrix: %s", async (_name, status, states) => {
+		const data = statusFixture(status, states);
+		expect(parseImportStatusResponse(data)).toBeUndefined();
+		routeBoundary.rpc.mockResolvedValueOnce({ data, error: null });
+		const { GET } = await import("../../../../frontend/app/api/ai/imports/status/route");
+		expect(
+			(await GET(new Request(`http://local/api/ai/imports/status?batchId=${BATCH_ID}`))).status
+		).toBe(502);
+	});
+
+	it.each([
+		["queued", ["queued", "succeeded", "failed"]],
+		["processing", ["processing", "queued", "succeeded", "failed"]],
+		["completed", ["succeeded", "succeeded"]],
+		["partial", ["succeeded", "failed"]],
+		["failed", ["failed", "failed"]],
+		["undone", ["undone", "undone"]],
+	] as const)("R19-F3 accepts reachable status matrix: %s", async (status, states) => {
+		const data = statusFixture(status, states);
+		expect(parseImportStatusResponse(data)).toBeDefined();
+		routeBoundary.rpc.mockResolvedValueOnce({ data, error: null });
+		const { GET } = await import("../../../../frontend/app/api/ai/imports/status/route");
+		expect(
+			(await GET(new Request(`http://local/api/ai/imports/status?batchId=${BATCH_ID}`))).status
+		).toBe(200);
 	});
 
 	it("IT-04 conditionally claims queued work before finalizing", async () => {
@@ -1000,7 +1059,27 @@ describe("S-11 commit and queue integration", () => {
 		expect(jobs).toContain("atomic_swap_error");
 	});
 
-	it("R15-F2 readiness SSOT separates local boundaries from hosted merge acceptance", async () => {
+	it("R19-F1 installs owner-safe column projections without exposing fencing tokens", async () => {
+		const [core, hardening, jobs] = await Promise.all([
+			readFile(new URL("../../../../supabase/migrations/20260715000000_s11_ai_card_async_processing.sql", import.meta.url), "utf8"),
+			readFile(new URL("../../../../supabase/migrations/20260716000000_s11_owner_safe_select.sql", import.meta.url), "utf8"),
+			readFile(new URL("./helpers/s11-db-jobs.ts", import.meta.url), "utf8"),
+		]);
+		for (const sql of [core, hardening]) {
+			expect(sql).toContain("REVOKE SELECT ON public.ai_uploads");
+			expect(sql).toContain("GRANT SELECT (id,owner_user_id,upload_key,purpose,mime_type,byte_size,status");
+			expect(sql).toContain("GRANT SELECT (id,owner_user_id,batch_id,concept_id,state,attempt");
+			expect(sql).toContain("GRANT SELECT ON public.ai_uploads,public.ai_import_concept_jobs");
+			expect(sql).not.toMatch(/GRANT SELECT ON public\.ai_import_concept_jobs[^;]+TO authenticated/u);
+		}
+		expect(hardening).toContain("cleanup_claim_token");
+		expect(hardening).toContain("raw_cleanup_claim_token");
+		expect(hardening).toContain("terminal_claim_token_hash");
+		expect(jobs).toContain("OWNER_SAFE_SELECT_MIGRATION");
+		expect(jobs).toContain("assertOwnerSafeSelectMatrix");
+	});
+
+	it("R19-F4 readiness SSOT separates local boundaries from hosted merge acceptance", async () => {
 		const [meta, plan, traceability, operations] = await Promise.all([
 			readFile(new URL("../meta.json", import.meta.url), "utf8"),
 			readFile(new URL("../plan.md", import.meta.url), "utf8"),
@@ -1008,15 +1087,15 @@ describe("S-11 commit and queue integration", () => {
 			readFile(new URL("../operations.md", import.meta.url), "utf8"),
 		]);
 		const parsedMeta = JSON.parse(meta) as Record<string, unknown>;
-		expect(parsedMeta.remediation_cycle).toBe(14);
-		expect(parsedMeta.ssot_version).toBe("2.0.12");
+		expect(parsedMeta.remediation_cycle).toBe(15);
+		expect(parsedMeta.ssot_version).toBe("2.0.13");
 		expect(parsedMeta.verification_state).toBe("hosted_7_not_run_merge_blocked");
 		expect(meta).not.toMatch(/ready_for_commit|zero_findings|approved/u);
-		expect(plan).toContain("version: 2.0.12");
-		expect(traceability).toContain("version: 2.0.12");
+		expect(plan).toContain("version: 2.0.13");
+		expect(traceability).toContain("version: 2.0.13");
 		expect(plan).toContain("[x] **T6-01L: local boundary E2E");
 		expect(plan).toContain("[ ] **T6-01H: hosted full-system E2E");
-		expect(operations).toContain("Current cycle-14 verification state: `hosted 7 not_run; merge blocked`");
+		expect(operations).toContain("Current cycle-15 verification state: `hosted 7 not_run; merge blocked`");
 		expect(traceability).not.toMatch(/\bcurrent\s+R12\b/iu);
 	});
 
@@ -2496,6 +2575,84 @@ describe("S-11 reviewer regression boundaries", () => {
 		expect(result).toMatchObject({ mime: "image/png", width: 128, height: 128 });
 		expect(decode).toHaveBeenCalledWith(bytes);
 		expect(result.bytes).toBe(clean);
+	});
+
+	it.each(["ai", "upload"] as const)(
+		"R19-F2 rejects oversized normalized PNG for %s without retry or destination Storage",
+		async (imageMode) => {
+			const harness = createWorkerHarness({ imageMode });
+			const oversized = new Uint8Array(MAX_IMAGE_BYTES + 1);
+			oversized.set(pngFixture(128, 128));
+			harness.dependencies.codec.encodePng = async () => oversized;
+			expect(await processOneConcept(harness.dependencies)).toBe("failed");
+			expect(harness.state.failureCodes).toEqual(["IMAGE_TOO_LARGE"]);
+			expect(harness.state.retryDelays).toEqual([]);
+			expect(harness.state.objectWrites).toBe(0);
+			expect(harness.state.finalizeCalls).toBe(0);
+		}
+	);
+
+	it("R19-F2 rejects an oversized source normalization before write intent or destination Storage", async () => {
+		const uploadId = "22000000-0000-4000-8000-000000000019";
+		const rawPath = `${OWNER_ID}/${uploadId}/raw`;
+		const input = pngFixture(1, 1);
+		const oversized = new Uint8Array(MAX_IMAGE_BYTES + 1);
+		oversized.set(input);
+		const query = { select: vi.fn(), eq: vi.fn(), maybeSingle: vi.fn() };
+		query.select.mockReturnValue(query);
+		query.eq.mockReturnValue(query);
+		query.maybeSingle.mockResolvedValue({
+			data: {
+				id: uploadId,
+				owner_user_id: OWNER_ID,
+				status: "prepared",
+				raw_storage_path: rawPath,
+				mime_type: "image/png",
+				byte_size: input.byteLength,
+			},
+			error: null,
+		});
+		routeBoundary.from.mockReturnValue(query);
+		routeBoundary.rpc.mockResolvedValue({ data: null, error: null });
+		vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "http://127.0.0.1:54321");
+		vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "r19-test-anon");
+		vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "r19-test-service");
+		vi.stubGlobal("fetch", async () =>
+			new Response(Uint8Array.from(input).buffer, { status: 200 })
+		);
+		vi.resetModules();
+		vi.doMock("@/lib/ai-import/source-image-codec", () => ({
+			createSourceImageCodec: async () => ({
+				decode: async () => ({ width: 1, height: 1 }),
+				encodePng: async () => oversized,
+			}),
+		}));
+		try {
+			const { POST } = await import(
+				"../../../../frontend/app/api/ai/imports/sources/complete/route"
+			);
+			const response = await POST(
+				new Request("http://local/api/ai/imports/sources/complete", {
+					method: "POST",
+					body: JSON.stringify({ uploadId }),
+				})
+			);
+			expect(response.status).toBe(413);
+			expect(await response.json()).toEqual({ error: { code: "IMAGE_TOO_LARGE" } });
+			expect(routeBoundary.upload).not.toHaveBeenCalled();
+			expect(routeBoundary.remove).toHaveBeenCalledWith([rawPath]);
+			expect(routeBoundary.rpc.mock.calls).toEqual([
+				[
+					"mark_ai_upload_cleanup",
+					{ p_owner_user_id: OWNER_ID, p_upload_id: uploadId, p_source_path: null },
+				],
+			]);
+		} finally {
+			vi.doUnmock("@/lib/ai-import/source-image-codec");
+			vi.resetModules();
+			vi.unstubAllGlobals();
+			vi.unstubAllEnvs();
+		}
 	});
 
 	it("HI-08 rejects truncated bytes even when the magic prefix is present", async () => {

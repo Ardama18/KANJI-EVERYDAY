@@ -81,7 +81,8 @@ export async function POST(request: Request): Promise<Response> {
 	} catch (failure) {
 		await bucket.remove([row.raw_storage_path]);
 		await markCleanup(service, authData.user.id, uploadId);
-		return error(safeImageCode(failure), 422);
+		const code = safeImageCode(failure);
+		return error(code, code === "IMAGE_TOO_LARGE" ? 413 : 422);
 	}
 	const sourcePath = `${authData.user.id}/${uploadId}/source`;
 	const { error: intentError } = await service.rpc("mark_ai_source_write_intent", {

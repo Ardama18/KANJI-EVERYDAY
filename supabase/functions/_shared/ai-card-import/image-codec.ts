@@ -46,6 +46,7 @@ export async function sanitizeSourceImage(
 	} catch {
 		throw new Error("IMAGE_DECODE_FAILED");
 	}
+	assertNormalizedPng(bytes, decoded.width, decoded.height);
 	return { bytes, mime: "image/png", width: decoded.width, height: decoded.height };
 }
 
@@ -78,15 +79,24 @@ export async function normalizeIllustration(
 	}
 	// The 64px minimum is an input-quality constraint. Aspect-preserving downscaling
 	// may legitimately make the normalized short edge smaller than 64px.
+	assertNormalizedPng(bytes, width, height, MAX_ILLUSTRATION_EDGE);
+	return { bytes, mime: "image/png", width, height };
+}
+
+function assertNormalizedPng(
+	bytes: Uint8Array,
+	expectedWidth: number,
+	expectedHeight: number,
+	maxEdge?: number
+): void {
 	const normalized = inspectImage(bytes, "image/png");
 	if (!normalized.ok) throw new Error(normalized.code);
 	if (
-		normalized.width !== width ||
-		normalized.height !== height ||
-		normalized.width > MAX_ILLUSTRATION_EDGE ||
-		normalized.height > MAX_ILLUSTRATION_EDGE
+		normalized.width !== expectedWidth ||
+		normalized.height !== expectedHeight ||
+		(maxEdge !== undefined &&
+			(normalized.width > maxEdge || normalized.height > maxEdge))
 	) {
 		throw new Error("IMAGE_DECODE_FAILED");
 	}
-	return { bytes, mime: "image/png", width, height };
 }

@@ -168,16 +168,21 @@ function statusMatchesCounts(
 	status: ImportBatchStatus,
 	items: readonly ImportStatusResponse["items"][number][]
 ): boolean {
+	if (items.length === 0) return false;
 	const succeeded = items.filter((item) => item.status === "succeeded").length;
 	const failed = items.filter((item) => item.status === "failed").length;
-	if (status === "completed") return items.length > 0 && succeeded === items.length;
+	const undone = items.filter((item) => item.status === "undone").length;
+	if (undone > 0) return status === "undone" && undone === items.length;
+	if (status === "undone") return false;
+	if (status === "completed") return succeeded === items.length;
 	if (status === "partial")
 		return succeeded > 0 && failed > 0 && succeeded + failed === items.length;
-	if (status === "failed") return items.length > 0 && failed === items.length;
-	if (status === "undone")
-		return items.length > 0 && items.every((item) => item.status === "undone");
+	if (status === "failed") return failed === items.length;
 	if (status === "processing") return items.some((item) => item.status === "processing");
-	return !items.some((item) => item.status === "processing") && succeeded + failed < items.length;
+	return (
+		items.some((item) => item.status === "queued") &&
+		!items.some((item) => item.status === "processing")
+	);
 }
 
 function isBatchStatus(value: unknown): value is ImportBatchStatus {

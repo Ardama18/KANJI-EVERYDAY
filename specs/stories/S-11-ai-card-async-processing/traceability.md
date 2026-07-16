@@ -2,14 +2,14 @@
 id: S-11
 feature: ai-card-async-processing
 type: traceability
-version: 2.0.12
+version: 2.0.13
 created: 2026-07-15
 updated: 2026-07-16
 status: implementation_review
 requirements: specs/stories/S-11-ai-card-async-processing/requirements.md@2.0.5
 adr: specs/adr/ADR-008-ai-card-async-queue-image-processing.md@2.0.5
 design: specs/stories/S-11-ai-card-async-processing/design.md@2.0.5
-plan: specs/stories/S-11-ai-card-async-processing/plan.md@2.0.12
+plan: specs/stories/S-11-ai-card-async-processing/plan.md@2.0.13
 ---
 
 # S-11 implementation traceability
@@ -141,6 +141,10 @@ Fresh remediation cycle 3 adds P3-01/P3-02 focused evidence: `worker_failure` is
 | R18-F1 | unambiguous ref identity | shorthand candidates across `refs/`, heads, tags, remotes, and remote HEAD are matched against the complete existing ref set and only one exact match may peel to a commit; full refs remain exact and detached HEAD is rejected |
 | R18-F2 | complete diff surfaces | quality phases run committed `base...HEAD`, staged `--cached`, and unstaged whitespace checks in order, propagating the first nonzero exit and skipping later surfaces |
 | R18-F3 | cycle-14 readiness SSOT | v2.0.12/cycle 14 retains hosted 7 not_run/exit 2 and merge blocked; all earlier review approvals remain historical |
+| R19-F1 | owner-safe S-11 reads | authenticated receives only safe column projections under owner RLS; claim/cleanup/raw/source/storage tokens and paths fail with SQLSTATE 42501, other owner sees no row, and service role retains full SELECT across fresh/upgrade/recovery |
+| R19-F2 | normalized PNG output boundary | uploaded-source and provider encode outputs are re-inspected for PNG identity, exact dimensions, 16MP, and 10MiB before destination write; oversize is permanent `IMAGE_TOO_LARGE` with retry/write/finalize zero |
+| R19-F3 | strict status matrix | all-undone is only `undone`; undone mixed with active or terminal states and every declared/computed contradiction fail closed as 502 while six reachable status families remain valid |
+| R19-F4 | cycle-15 readiness SSOT | v2.0.13/cycle 15 retains hosted 7 not_run/exit 2 and merge blocked; all earlier review approvals remain historical |
 
 ## Change history
 
@@ -171,3 +175,4 @@ Fresh remediation cycle 3 adds P3-01/P3-02 focused evidence: `worker_failure` is
 | 2026-07-16 | 2.0.10 | implementation_review | Cycle 12 adds committed base...HEAD whitespace validation and uppercase prepared success-path boundary proof; hosted 7 remain not_run/exit 2 and merge blocked |
 | 2026-07-16 | 2.0.11 | implementation_review | Cycle 13 restricts raw diff bases to full SHA-1 commits and ref inputs to existing refs; hosted 7 remain not_run/exit 2 and merge blocked |
 | 2026-07-16 | 2.0.12 | implementation_review | Cycle 14 rejects ambiguous shorthand refs and validates committed, staged, and unstaged diff surfaces; hosted 7 remain not_run/exit 2 and merge blocked |
+| 2026-07-16 | 2.0.13 | implementation_review | Cycle 15 adds owner-safe column ACLs, post-encode PNG validation, strict status matrices, and current 27/216/10 inventory; hosted 7 remain not_run/exit 2 and merge blocked |

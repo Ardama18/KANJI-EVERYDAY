@@ -24,6 +24,10 @@ const VALIDATE_MIGRATION = path.join(
 	ROOT,
 	"supabase/migrations/20260715000002_s11_ai_card_async_validate.sql"
 );
+const OWNER_SAFE_SELECT_MIGRATION = path.join(
+	ROOT,
+	"supabase/migrations/20260716000000_s11_owner_safe_select.sql"
+);
 const UPGRADE_FIXTURE = path.join(
 	ROOT,
 	"specs/stories/S-11-ai-card-async-processing/tests/fixtures/pre-s11-seed.sql"
@@ -90,6 +94,7 @@ export async function runS11DatabaseJob(
 			}
 		}
 		await runS10PsqlAutocommitScript(databaseUrl, migration);
+		await runS10PsqlFile(databaseUrl, OWNER_SAFE_SELECT_MIGRATION);
 		await backfillAndValidate(databaseUrl);
 		await runS10Psql(
 			databaseUrl,
@@ -105,6 +110,7 @@ export async function runS11DatabaseJob(
 	}
 	if (job === "upgrade") await runS10PsqlFile(databaseUrl, UPGRADE_FIXTURE);
 	await runS10PsqlFile(databaseUrl, CORE_MIGRATION);
+	await runS10PsqlFile(databaseUrl, OWNER_SAFE_SELECT_MIGRATION);
 	const coreOnly = environment.S11_LOCAL_CORE_ONLY === "1";
 	if (!coreOnly) await runS10PsqlFile(databaseUrl, SCHEDULE_MIGRATION);
 	await backfillAndValidate(databaseUrl);
@@ -143,6 +149,8 @@ async function assertAutocommitFailureState(
 			AND (EXISTS (SELECT 1 FROM pg_policy
 				WHERE polname='ai_import_concept_jobs_select_owner')) = ${expectsExpand}
 			AND (${expectsExpand ? "NOT has_table_privilege('authenticated','public.ai_import_concept_jobs','INSERT')" : "true"})
+			AND NOT has_column_privilege('authenticated','public.ai_uploads','cleanup_claim_token','SELECT')
+			AND (${expectsExpand ? "NOT has_column_privilege('authenticated','public.ai_import_concept_jobs','claim_token','SELECT')" : "true"})
 			AND ((SELECT count(*) FROM pg_trigger
 				WHERE tgname IN ('ai_s11_sync_upload_compat','ai_s11_track_card_reference_removal',
 					'ai_s11_guard_illustration_lifecycle','ai_s11_guard_illustration_reference')
@@ -272,6 +280,7 @@ async function assertS11Contracts(
 		)::text`
 	);
 	if (!result.includes("true")) throw new Error("S-11 database contract smoke failed");
+	await assertOwnerSafeSelectMatrix(databaseUrl);
 	if (job !== "upgrade") return;
 	const lifecycle = await runS10Psql(
 		databaseUrl,
@@ -289,6 +298,128 @@ async function assertS11Contracts(
 		)::text`
 	);
 	if (!lifecycle.includes("true")) throw new Error("S-11 upload lifecycle backfill smoke failed");
+}
+
+async function assertOwnerSafeSelectMatrix(databaseUrl: string): Promise<void> {
+	const catalog = await runS10Psql(
+		databaseUrl,
+		`SELECT (
+			NOT has_table_privilege('authenticated','public.ai_uploads','SELECT') AND
+			NOT has_table_privilege('authenticated','public.ai_import_concept_jobs','SELECT') AND
+			NOT has_table_privilege('authenticated','public.ai_upload_consumers','SELECT') AND
+			NOT has_table_privilege('authenticated','public.ai_illustration_objects','SELECT') AND
+			has_column_privilege('authenticated','public.ai_uploads','status','SELECT') AND
+			has_column_privilege('authenticated','public.ai_import_concept_jobs','state','SELECT') AND
+			has_column_privilege('authenticated','public.ai_upload_consumers','created_at','SELECT') AND
+			has_column_privilege('authenticated','public.ai_illustration_objects','state','SELECT') AND
+			NOT has_column_privilege('authenticated','public.ai_uploads','cleanup_claim_token','SELECT') AND
+			NOT has_column_privilege('authenticated','public.ai_uploads','raw_cleanup_claim_token','SELECT') AND
+			NOT has_column_privilege('authenticated','public.ai_uploads','source_write_intent_path','SELECT') AND
+			NOT has_column_privilege('authenticated','public.ai_import_concept_jobs','claim_token','SELECT') AND
+			NOT has_column_privilege('authenticated','public.ai_import_concept_jobs','terminal_claim_token_hash','SELECT') AND
+			NOT has_column_privilege('authenticated','public.ai_illustration_objects','cleanup_claim_token','SELECT') AND
+			NOT has_column_privilege('anon','public.ai_uploads','status','SELECT') AND
+			has_table_privilege('service_role','public.ai_uploads','SELECT') AND
+			has_table_privilege('service_role','public.ai_import_concept_jobs','SELECT') AND
+			has_table_privilege('service_role','public.ai_upload_consumers','SELECT') AND
+			has_table_privilege('service_role','public.ai_illustration_objects','SELECT')
+		)::text`
+	);
+	if (!catalog.includes("true")) throw new Error("S-11 owner-safe column ACL smoke failed");
+
+	const ownerId = "00000000-0000-4000-8000-000000000001";
+	const otherOwnerId = "00000000-0000-4000-8000-000000000002";
+	const uploadId = "15000000-0000-4000-8000-000000000015";
+	const batchId = "15000000-0000-4000-8000-000000000016";
+	const jobId = "15000000-0000-4000-8000-000000000017";
+	const illustrationId = "15000000-0000-4000-8000-000000000018";
+	const objectId = "15000000-0000-4000-8000-000000000019";
+	await runS10Psql(
+		databaseUrl,
+		`INSERT INTO public.ai_uploads(
+			id,owner_user_id,upload_key,purpose,storage_path,mime_type,byte_size,status
+		) VALUES (
+			'${uploadId}','${ownerId}','s11-owner-safe-matrix','card_illustration',
+			'${ownerId}/${uploadId}/source','image/png',24,'ready'
+		) ON CONFLICT (id) DO NOTHING;
+		INSERT INTO public.ai_import_batches(
+			id,owner_user_id,source,status,idempotency_key,import_request_hash,
+			requested_card_count,requested_image_count
+		) VALUES (
+			'${batchId}','${ownerId}','app_ai','committed','s11-owner-safe-matrix',
+			repeat('a',64),1,1
+		) ON CONFLICT (id) DO NOTHING;
+		INSERT INTO public.illustrations(
+			id,owner_user_id,illustration_key,status,storage_path
+		) VALUES (
+			'${illustrationId}','${ownerId}','s11-owner-safe-matrix','ready',
+			'${ownerId}/s11-managed/${illustrationId}.png'
+		) ON CONFLICT (id) DO NOTHING;
+		INSERT INTO public.ai_import_concept_jobs(
+			id,owner_user_id,batch_id,concept_id,state,illustration_id
+		) VALUES (
+			'${jobId}','${ownerId}','${batchId}','owner-safe-matrix','queued','${illustrationId}'
+		) ON CONFLICT (id) DO NOTHING;
+		INSERT INTO public.ai_upload_consumers(upload_id,job_id,owner_user_id)
+		VALUES ('${uploadId}','${jobId}','${ownerId}')
+		ON CONFLICT (upload_id,job_id) DO NOTHING;
+		INSERT INTO public.ai_illustration_objects(
+			id,owner_user_id,job_id,illustration_id,storage_path,state
+		) VALUES (
+			'${objectId}','${ownerId}','${jobId}','${illustrationId}',
+			'${ownerId}/s11-managed/${illustrationId}.png','uploading'
+		) ON CONFLICT (id) DO NOTHING`
+	);
+	for (const [actor, expected] of [[ownerId, "1"], [otherOwnerId, "0"]] as const) {
+		const safe = await runS10Psql(
+			databaseUrl,
+			`BEGIN;
+			SET LOCAL ROLE authenticated;
+			SET LOCAL request.jwt.claim.role='authenticated';
+			SET LOCAL request.jwt.claim.sub='${actor}';
+			SELECT (
+				(SELECT count(id) FROM public.ai_uploads WHERE id='${uploadId}')=${expected} AND
+				(SELECT count(id) FROM public.ai_import_concept_jobs WHERE id='${jobId}')=${expected} AND
+				(SELECT count(job_id) FROM public.ai_upload_consumers WHERE job_id='${jobId}')=${expected} AND
+				(SELECT count(id) FROM public.ai_illustration_objects WHERE id='${objectId}')=${expected}
+			)::text;
+			ROLLBACK;`
+		);
+		if (!safe.includes("true")) {
+			throw new Error("S-11 owner-safe RLS projection failed");
+		}
+	}
+	for (const statement of [
+		"SELECT cleanup_claim_token,raw_cleanup_claim_token,source_write_intent_path FROM public.ai_uploads LIMIT 0",
+		"SELECT claim_token,terminal_claim_token_hash FROM public.ai_import_concept_jobs LIMIT 0",
+		"SELECT cleanup_claim_token,storage_path,digest FROM public.ai_illustration_objects LIMIT 0",
+	]) {
+		await runS10Psql(
+			databaseUrl,
+			`BEGIN; SET LOCAL ROLE authenticated;
+			SET LOCAL request.jwt.claim.role='authenticated';
+			SET LOCAL request.jwt.claim.sub='${ownerId}';
+			DO $owner_safe_matrix$
+			BEGIN
+				EXECUTE ${sqlLiteral(statement)};
+				RAISE EXCEPTION 'S-11 owner token projection unexpectedly succeeded';
+			EXCEPTION
+				WHEN insufficient_privilege THEN
+					IF SQLSTATE <> '42501' THEN RAISE; END IF;
+			END
+			$owner_safe_matrix$;
+			ROLLBACK;`
+		);
+	}
+	await runS10Psql(
+		databaseUrl,
+		`BEGIN; SET LOCAL ROLE service_role;
+		SELECT * FROM public.ai_uploads LIMIT 0;
+		SELECT * FROM public.ai_import_concept_jobs LIMIT 0;
+		SELECT * FROM public.ai_upload_consumers LIMIT 0;
+		SELECT * FROM public.ai_illustration_objects LIMIT 0;
+		ROLLBACK;`
+	);
 }
 
 const job = process.argv[2] as S11DatabaseJob | undefined;

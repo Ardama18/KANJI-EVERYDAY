@@ -7,6 +7,7 @@ import type {
 import {
 	type ImageCodec,
 	normalizeIllustration,
+	sanitizeSourceImage,
 } from "../../../../supabase/functions/_shared/ai-card-import/image-codec.ts";
 import {
 	MAX_IMAGE_BYTES,
@@ -190,6 +191,40 @@ describe("S-11 image validation", () => {
 				{ decode: async () => ({ width: 128, height: 128 }), encodePng: async () => new Uint8Array([1, 2, 3]) }
 			)
 		).rejects.toThrow("IMAGE_FORMAT_INVALID");
+	});
+
+	it.each([
+		["oversized PNG", "oversized", "IMAGE_TOO_LARGE"],
+		["non-PNG bytes", "jpeg", "IMAGE_FORMAT_INVALID"],
+		["over-16MP PNG", "dimensions", "IMAGE_DIMENSIONS_INVALID"],
+		["dimension mismatch", "mismatch", "IMAGE_DECODE_FAILED"],
+	] as const)("#8e rejects a %s after source and provider encoding", async (_name, fixture, code) => {
+		const encoded =
+			fixture === "oversized"
+				? png(128, 128, MAX_IMAGE_BYTES + 1)
+				: fixture === "jpeg"
+					? jpeg(128, 128)
+					: fixture === "dimensions"
+						? png(4001, 4000)
+						: png(127, 128);
+		const codec = {
+			decode: async () => ({ width: 128, height: 128 }),
+			encodePng: async () => encoded,
+		};
+		const message = async (operation: Promise<unknown>) => {
+			try {
+				await operation;
+				return "resolved";
+			} catch (error) {
+				return error instanceof Error ? error.message : "unknown";
+			}
+		};
+		expect(
+			await message(sanitizeSourceImage({ bytes: png(128, 128), declaredMime: "image/png" }, codec))
+		).toBe(code);
+		expect(
+			await message(normalizeIllustration({ bytes: png(128, 128), declaredMime: "image/png" }, codec))
+		).toBe(code);
 	});
 });
 
