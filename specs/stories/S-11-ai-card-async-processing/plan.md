@@ -2,14 +2,14 @@
 id: S-11
 feature: ai-card-async-processing
 type: plan
-version: 2.0.16
+version: 2.0.17
 created: 2026-07-15
 updated: 2026-07-16
 based_on: specs/stories/S-11-ai-card-async-processing/design.md
 requirements: specs/stories/S-11-ai-card-async-processing/requirements.md
 adr: specs/adr/ADR-008-ai-card-async-queue-image-processing.md
 ui_design: none
-status: implementation_review
+status: rc1_remediation
 ---
 
 # 作業計画書: AIカード非同期Queue・画像処理
@@ -394,7 +394,7 @@ git status --short
 
 数量gateは現行Unit 27件、Integration 223件、E2E 10件である。93/102/110/127/139/142/147/153/154/155/162/163/168/179/181/189/195/198/200/216/217 Integrationは各変更履歴時点のhistorical inventoryでありcurrent evidenceではない。R21-F1はservice-only snapshot credentialのcase-insensitive同値pair、spoof/missing/mismatch拒否、明示apikey保持へ接続する。R20-F1/F2はowner-safe column ACLとStorage owner mutationを両立するone-bit helper、OLD/NEW policy、実DBactor matrixへ接続する。R19-F1〜F3はowner-safe SELECT、正規化後PNG再検証、status矛盾fail-closedへ接続する。R15-F1/F2はatomic constraint swapとhosted merge-blocked SSOTへ接続する。R14-F1〜F3はtrue autocommit、global default privilege、canonical UUID、typed preview secretへ接続する。R13-F1〜F5はresponse-loss reconciliation、autocommit recovery、default privilege、schedule value validation、run-scoped residueへ接続する。R12-F1〜F5はcompletion/cleanup競合、入力境界、段階migration、resource secret、3 DB分離品質gateへ接続する。cycle 7 R11-F1/F2はQueue RPCのempty/malformed分離とoutbox safe-code runtime allowlistへ接続し、R11-R2-F2はactual prepare routeの5件受理/6件副作用前拒否へ接続する。cycle 6 R10-F1/F2は全production lock pathのcards→illustrations→tracking順、bounded complete/attach concurrency、provider cancellation-safe oversize classificationへ接続する。review-attempt-1 R10-R1-F1はS-10 different-key attachのOLD+NEW一括canonical lockとA↔B二順序gateへ接続する。review-attempt-2 R10-R2-F1/F2はcaller JWT lifecycle authorityとterminal outbox fault後のsource releaseへ接続する。
 
-cycle 16のR20-F3はhosted内部snapshot/pathのservice-role限定、adapter強制owner filter、owner JWT safe projection成功、other-owner 0件、sensitive projection 403/42501へ接続する。cycle 17のR21-F1はそのadapterをcase-insensitive `Headers` 境界で強化し、explicit service apikeyをanon defaultで上書きしない。Integration 216/217はそれぞれcycle 15/16時点のhistorical inventoryであり、現行223件には含まれない。現行合計は260/260、root quality focusedの実測は77/77、ordinary Vitestは699 passed/8 conditional skips of 707 definitionsである。
+cycle 16のR20-F3はhosted内部snapshot/pathのservice-role限定、adapter強制owner filter、owner JWT safe projection成功、other-owner 0件、sensitive projection 403/42501へ接続する。cycle 17のR21-F1はそのadapterをcase-insensitive `Headers` 境界で強化し、explicit service apikeyをanon defaultで上書きしない。Integration 216/217とcycle 17時点の260/260、focused 77/77、ordinary 699 passed/8 conditional skips of 707 definitionsは履歴値である。RC1完了後のcurrent inventoryは固定release evidenceへ再記録する。
 
 ## Rollback・compensation
 
@@ -714,6 +714,15 @@ any post-cycle-8 remediation or any hosted gate.
 - [x] R22-R1-F2: IT-COMMIT-01/03でreservation owner/date/kindに限定した`ai_usage_daily` baselineを取得し、予約deltaがunitsと一致、commit・並行commit・idempotent retryで追加delta 0を検証する。IT-QUOTA-06でもremote_mcp cardとupload imageのexempt予約delta 0を同じscoped baselineで固定する。最終review差分後のdisposable DB/full実測は親runnerで再確認する。
 - [ ] hosted full-system acceptance 7件が明示的前提環境でpassする。完了まではmerge blockedを維持する。
 
+## Root-resolution RC1 remediation cycle 19
+
+- [x] Issue #12を唯一のSSOTとして、`.codex/release-contract.json`へissue/story/pinned base、AC 9件、明示out-of-scope、local/Hosted7/secret gate、candidate/evidence binding、merge blockerを固定する。
+- [x] reviewは固定rubricの累積review 1回と、既指摘・regression・impactだけのverification 1回に有限化する。後発scope拡張はH/Mのsecurity/data loss-corruptionまたは明示AC failureだけ、ASKは凍結contractの曖昧さだけとし、review-until-clean loopを廃止する。
+- [x] H/Mはblock、LはAC/security/data-integrity failureが実証された場合だけblockし、それ以外はfollow-upとする。
+- [x] release validatorはmissing/duplicate/unknown gate、contract drift、SHA/base/evidence mismatch、unresolved local/Hosted/review/secret stateをfail closedにし、authoritative quality runnerの最終gateへ接続する。
+- [ ] RC1のstream retry taxonomy、cleanup-finally、aggregate DB scope、共通child supervisorをRed/Greenで完了する。
+- [ ] 同一candidate SHAでlocal gates、Hosted7、secret scan、累積review 1回、限定verification 1回を証跡化する。Hosted7は現在`not_run`/exit 2のため未受入・merge blockedである。
+
 ## 変更履歴
 
 | 日付 | 版 | status | 変更内容 |
@@ -746,3 +755,4 @@ any post-cycle-8 remediation or any hosted gate.
 | 2026-07-16 | 2.0.14 | implementation_review | cycle 16、owner-bound Storage tracking helper、OLD/NEW mutation policy、実DBactor matrix、hosted merge-blocked SSOTを反映 |
 | 2026-07-16 | 2.0.15 | implementation_review | cycle 17、case-insensitive service credential pair、explicit apikey保持、spoof/missing/mismatch拒否、hosted merge-blocked SSOTを反映 |
 | 2026-07-16 | 2.0.16 | implementation_review | cycle 18、bounded S-10 DB test settlement、marker cleanup直列化、reservation/date scoped snapshot、hosted merge-blocked SSOTを反映 |
+| 2026-07-16 | 2.0.17 | rc1_remediation | 固定release contract、有限review policy、candidate-bound evidenceとHosted7 merge blockerを導入。RC1実装・local/hosted evidenceはpending |

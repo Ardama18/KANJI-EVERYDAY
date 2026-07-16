@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": "S11-RC1-1.0.0",
+  "issue": 12,
+  "story": "S-11",
+  "baseSha": "45969b140d1817be143fe6331159b88b647c2e29",
+  "candidateSha": "a94133703a4ae0bdb36d7750d55df15bcb5d1d17",
+  "state": "pending_rc1",
+  "localGates": [],
+  "hostedGates": [
+    { "id": "hosted-fresh", "status": "not_run", "exitCode": 2, "candidateSha": "a94133703a4ae0bdb36d7750d55df15bcb5d1d17" },
+    { "id": "hosted-upgrade", "status": "not_run", "exitCode": 2, "candidateSha": "a94133703a4ae0bdb36d7750d55df15bcb5d1d17" },
+    { "id": "hosted-failure", "status": "not_run", "exitCode": 2, "candidateSha": "a94133703a4ae0bdb36d7750d55df15bcb5d1d17" },
+    { "id": "hosted-real-integration", "status": "not_run", "exitCode": 2, "candidateSha": "a94133703a4ae0bdb36d7750d55df15bcb5d1d17" },
+    { "id": "hosted-real-e2e", "status": "not_run", "exitCode": 2, "candidateSha": "a94133703a4ae0bdb36d7750d55df15bcb5d1d17" },
+    { "id": "hosted-resource", "status": "not_run", "exitCode": 2, "candidateSha": "a94133703a4ae0bdb36d7750d55df15bcb5d1d17" },
+    { "id": "hosted-deno", "status": "not_run", "exitCode": 2, "candidateSha": "a94133703a4ae0bdb36d7750d55df15bcb5d1d17" }
+  ],
+  "secretScans": [],
+  "reviews": { "cumulative": null, "verification": null },
+  "redaction": { "containsSecrets": false, "rawLogsIncluded": false }
+}

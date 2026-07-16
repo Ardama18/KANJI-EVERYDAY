@@ -11,6 +11,11 @@ import {
 	parseSourceDatabaseUrl,
 	withDisposableS10Database,
 } from "./quality-database.mjs";
+import {
+	readReleaseFiles,
+	validateReleaseState,
+	validateRepositoryEvidenceBinding,
+} from "./release-contract.mjs";
 
 export function createTerminationHandler({
 	getCleanup,
@@ -246,15 +251,7 @@ async function runQualityPhases({ freshUrl, upgradeUrl, failureUrl }) {
 		[
 			"complete ordinary Vitest",
 			"npm",
-			[
-				"--prefix",
-				"frontend",
-				"run",
-				"test",
-				"--",
-				"--maxWorkers=1",
-				"--minWorkers=1",
-			],
+			["--prefix", "frontend", "run", "test"],
 			checkEnvironment,
 		],
 		[
@@ -264,7 +261,7 @@ async function runQualityPhases({ freshUrl, upgradeUrl, failureUrl }) {
 			checkEnvironment,
 		],
 		[
-			"S-11 focused 77 regressions",
+			"S-11 focused release regressions",
 			"npm",
 			[
 				"--prefix",
@@ -281,6 +278,15 @@ async function runQualityPhases({ freshUrl, upgradeUrl, failureUrl }) {
 	];
 	const exitCode = await runQualityPhaseSequence(phases);
 	if (exitCode !== 0) return exitCode;
+	const { contract, evidence } = await readReleaseFiles();
+	const releaseFailures = [
+		...validateReleaseState(contract, evidence, { expectedBaseSha: diffBase }),
+		...await validateRepositoryEvidenceBinding(contract, evidence),
+	];
+	if (releaseFailures.length > 0) {
+		process.stderr.write(`${JSON.stringify({ gate: "s11-release-contract", status: "blocked", failures: releaseFailures })}\n`);
+		return 2;
+	}
 	process.stdout.write("Repository quality checks passed.\n");
 	return 0;
 }
