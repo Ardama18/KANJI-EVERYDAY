@@ -77,12 +77,15 @@ export async function POST(request: Request): Promise<Response> {
 		await markCleanup(service, authData.user.id, uploadId);
 		return error("IMAGE_TOO_LARGE", 413);
 	}
+	let codec: Awaited<ReturnType<typeof createSourceImageCodec>>;
+	try {
+		codec = await createSourceImageCodec();
+	} catch {
+		return error("SOURCE_READ_FAILED", 503);
+	}
 	let sanitized: NormalizedImage;
 	try {
-		sanitized = await sanitizeSourceImage(
-			{ bytes, declaredMime: row.mime_type },
-			await createSourceImageCodec()
-		);
+		sanitized = await sanitizeSourceImage({ bytes, declaredMime: row.mime_type }, codec);
 	} catch (failure) {
 		await bucket.remove([row.raw_storage_path]);
 		await markCleanup(service, authData.user.id, uploadId);

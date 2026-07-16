@@ -3,14 +3,29 @@ import { createRequire } from "node:module";
 
 import type { ImageCodec } from "../../../../supabase/functions/_shared/ai-card-import/image-codec";
 
-let initialization: Promise<void> | undefined;
-let magickModule: typeof import("@imagemagick/magick-wasm") | undefined;
+type MagickModule = typeof import("@imagemagick/magick-wasm");
 
-export async function createSourceImageCodec(): Promise<ImageCodec> {
-	initialization ??= initialize();
-	await initialization;
-	if (magickModule === undefined) throw new Error("IMAGE_CODEC_INITIALIZATION_FAILED");
-	const { ImageMagick, MagickFormat } = magickModule;
+export function createSourceImageCodecFactory(
+	loadModule: () => Promise<MagickModule>
+): () => Promise<ImageCodec> {
+	let initialization: Promise<MagickModule> | undefined;
+	return async () => {
+		if (initialization === undefined) initialization = loadModule();
+		const attempt = initialization;
+		let module: MagickModule;
+		try {
+			module = await attempt;
+		} catch {
+			if (initialization === attempt) initialization = undefined;
+			throw new Error("IMAGE_CODEC_INITIALIZATION_FAILED");
+		}
+		return createCodec(module);
+	};
+}
+
+export const createSourceImageCodec = createSourceImageCodecFactory(initialize);
+
+function createCodec({ ImageMagick, MagickFormat }: MagickModule): ImageCodec {
 	return {
 		async decode(bytes) {
 			return await new Promise((resolve, reject) => {
@@ -39,9 +54,10 @@ export async function createSourceImageCodec(): Promise<ImageCodec> {
 	};
 }
 
-async function initialize(): Promise<void> {
-	magickModule = await import(/* webpackIgnore: true */ "@imagemagick/magick-wasm");
+async function initialize(): Promise<MagickModule> {
+	const magickModule = await import(/* webpackIgnore: true */ "@imagemagick/magick-wasm");
 	const wasmSpecifier = "@imagemagick/magick-wasm/magick.wasm";
 	const path = createRequire(import.meta.url).resolve(wasmSpecifier);
 	await magickModule.initializeImageMagick(new Uint8Array(await readFile(path)));
+	return magickModule;
 }

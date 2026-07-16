@@ -27,6 +27,7 @@ Targeted RC1 evidence before candidate commit: release validator 5/5, quality da
 S-10 UT-DB 6/6, and S-11 R23-F1 6/6 passed; typecheck passed. These are working-tree
 results, not candidate-bound release evidence, and do not change the Hosted7 blocker.
 - [x] Correct the ordinary Vitest concurrency explanation against `fileParallelism:false`, remove redundant CLI worker flags, and retain an executable deterministic-runner assertion.
+- [x] Fixed cumulative review M1 / R23-F3: codec setup failure is a safe retryable 503 that leaves prepared/raw state untouched; rejected initialization cache is cleared, while successful concurrent initialization remains singleton. This remediation does not expand the frozen rubric.
 
 ## Evidence pending
 

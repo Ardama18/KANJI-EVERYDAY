@@ -6,7 +6,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { hashImportRequest } from "../../../../frontend/src/lib/ai-import/canonical-request";
 import { parseImportStatusResponse } from "../../../../frontend/src/lib/ai-import/async-contract";
 import { signPreviewToken } from "../../../../frontend/src/lib/ai-import/preview-token";
-import { createSourceImageCodec } from "../../../../frontend/src/lib/ai-import/source-image-codec";
+import {
+	createSourceImageCodec,
+	createSourceImageCodecFactory,
+} from "../../../../frontend/src/lib/ai-import/source-image-codec";
 import { runCleanup } from "../../../../supabase/functions/_shared/ai-card-import/cleanup.ts";
 import { SAFE_IMPORT_ERROR_CODES } from "../../../../supabase/functions/_shared/ai-card-import/contracts.ts";
 import {
@@ -2914,6 +2917,95 @@ describe("S-11 reviewer regression boundaries", () => {
 			vi.unstubAllGlobals();
 			vi.unstubAllEnvs();
 		}
+	});
+
+	it("R23-F3 M1 keeps prepared source retryable when codec initialization fails once", async () => {
+		const uploadId = "22000000-0000-4000-8000-000000000024";
+		const rawPath = `${OWNER_ID}/${uploadId}/raw`;
+		const sourcePath = `${OWNER_ID}/${uploadId}/source`;
+		const png = Uint8Array.from(Buffer.from(
+			"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+			"base64"
+		));
+		const query = { select: vi.fn(), eq: vi.fn(), maybeSingle: vi.fn() };
+		query.select.mockReturnValue(query);
+		query.eq.mockReturnValue(query);
+		query.maybeSingle.mockResolvedValue({
+			data: {
+				id: uploadId,
+				owner_user_id: OWNER_ID,
+				status: "prepared",
+				raw_storage_path: rawPath,
+				mime_type: "image/png",
+				byte_size: png.byteLength,
+			},
+			error: null,
+		});
+		routeBoundary.from.mockReturnValue(query);
+		routeBoundary.rpc.mockImplementation(async (name: string) => name === "mark_ai_source_ready"
+			? { data: { uploadId, status: "ready", path: sourcePath }, error: null }
+			: { data: null, error: null });
+		vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "http://127.0.0.1:54321");
+		vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "codec-retry-test-anon");
+		vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "codec-retry-test-service");
+		vi.stubGlobal("fetch", async () => new Response(png, { status: 200 }));
+		const initializeCodec = vi.fn()
+			.mockRejectedValueOnce(new TypeError("unsafe initialization detail"))
+			.mockResolvedValue({
+				decode: async () => ({ width: 1, height: 1 }),
+				encodePng: async () => png,
+			});
+		vi.resetModules();
+		vi.doMock("@/lib/ai-import/source-image-codec", () => ({
+			createSourceImageCodec: initializeCodec,
+		}));
+		try {
+			const { POST } = await import("../../../../frontend/app/api/ai/imports/sources/complete/route");
+			const request = () => new Request("http://local/api/ai/imports/sources/complete", {
+				method: "POST",
+				body: JSON.stringify({ uploadId }),
+			});
+			const first = await POST(request());
+			expect(first.status).toBe(503);
+			const firstPayload = await first.json();
+			expect(firstPayload).toEqual({ error: { code: "SOURCE_READ_FAILED" } });
+			expect(JSON.stringify(firstPayload)).not.toContain("unsafe initialization detail");
+			expect(routeBoundary.remove).not.toHaveBeenCalled();
+			expect(routeBoundary.upload).not.toHaveBeenCalled();
+			expect(routeBoundary.rpc).not.toHaveBeenCalled();
+
+			const second = await POST(request());
+			expect(second.status).toBe(200);
+			expect(await second.json()).toEqual({ uploadId, status: "ready", path: sourcePath });
+			expect(initializeCodec).toHaveBeenCalledTimes(2);
+			expect(routeBoundary.remove).toHaveBeenCalledTimes(1);
+			expect(routeBoundary.remove).toHaveBeenCalledWith([rawPath]);
+			expect(routeBoundary.rpc.mock.calls.map(([name]) => name)).toEqual([
+				"mark_ai_source_write_intent",
+				"mark_ai_source_ready",
+				"mark_ai_source_raw_deleted",
+			]);
+		} finally {
+			vi.doUnmock("@/lib/ai-import/source-image-codec");
+			vi.resetModules();
+			vi.unstubAllGlobals();
+			vi.unstubAllEnvs();
+		}
+	});
+
+	it("R23-F3 M1 clears a rejected codec initialization while preserving successful concurrency cache", async () => {
+		const module = {} as never;
+		const loader = vi.fn()
+			.mockRejectedValueOnce(new TypeError("unsafe initialization detail"))
+			.mockResolvedValue(module);
+		const createCodec = createSourceImageCodecFactory(loader);
+		await expect(createCodec()).rejects.toThrow("IMAGE_CODEC_INITIALIZATION_FAILED");
+		const [first, second] = await Promise.all([createCodec(), createCodec()]);
+		expect(first).toBeDefined();
+		expect(second).toBeDefined();
+		expect(loader).toHaveBeenCalledTimes(2);
+		await createCodec();
+		expect(loader).toHaveBeenCalledTimes(2);
 	});
 
 	it("R23-F1 returns safe source failure and marks cleanup when non-OK body cancellation rejects", async () => {
