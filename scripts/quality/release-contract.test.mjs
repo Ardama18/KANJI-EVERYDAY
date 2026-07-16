@@ -4,6 +4,7 @@ import test from "node:test";
 import {
 	readReleaseFiles,
 	validateEvidenceCommitBinding,
+	validateReleaseContractDefinition,
 	validateReleaseState,
 } from "./release-contract.mjs";
 
@@ -47,6 +48,19 @@ test("release contract accepts one complete candidate-bound evidence set", async
 	}), []);
 });
 
+test("pending RC1 evidence passes immutable contract-definition preflight", async () => {
+	const { contract, evidence } = await readReleaseFiles();
+	assert.equal(evidence.state, "pending_rc1");
+	assert.deepEqual(validateReleaseContractDefinition(contract, {
+		expectedBaseSha: contract.baseSha,
+	}), []);
+});
+
+test("pending RC1 evidence still fails final accepted-evidence validation", async () => {
+	const { contract, evidence } = await readReleaseFiles();
+	assert.ok(validateReleaseState(contract, evidence).some((failure) => /unresolved/u.test(failure)));
+});
+
 test("release contract fails closed for missing, duplicate, and unknown gates", async () => {
 	const { contract } = await readReleaseFiles();
 	for (const mutate of [
@@ -64,7 +78,7 @@ test("release contract fails closed for contract drift and bad identities", asyn
 	const { contract } = await readReleaseFiles();
 	const drifted = clone(contract);
 	drifted.hostedGates[0].command.push("--drift");
-	assert.ok(validateReleaseState(drifted, acceptedEvidence(drifted)).includes("release contract drift"));
+	assert.ok(validateReleaseContractDefinition(drifted).includes("release contract drift"));
 	for (const field of ["baseSha", "candidateSha"]) {
 		const evidence = acceptedEvidence(contract);
 		evidence[field] = "not-a-sha";

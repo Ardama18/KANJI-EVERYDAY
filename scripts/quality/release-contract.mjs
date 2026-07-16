@@ -6,8 +6,8 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 const SHA_PATTERN = /^[0-9a-f]{40}$/u;
-const CONTRACT_VERSION = "S11-RC1-1.0.0";
-const CONTRACT_DIGEST = "164f23b2a0f69da74c7e3ba5817c7ea49b03d0b0f7cb626fef31c37da5bc431a";
+const CONTRACT_VERSION = "S11-RC1-1.0.1";
+const CONTRACT_DIGEST = "878f9f364e5118371a59096f74e8fb4bc39279f1a1f94fd1c75e5fe7c256acb8";
 const EXPECTED_ACCEPTANCE_CRITERIA = [
 	"AC-01-async-commit-under-two-seconds",
 	"AC-02-reconnectable-owner-status",
@@ -33,15 +33,20 @@ export async function readReleaseFiles(input = {}) {
 	const contractPath = input.contractPath ?? new URL("../../.codex/release-contract.json", import.meta.url);
 	const evidencePath = input.evidencePath ?? new URL("../../.codex/release-evidence.json", import.meta.url);
 	const [contract, evidence] = await Promise.all([
-		readJson(contractPath, "release contract"),
+		readReleaseContract({ contractPath }),
 		readJson(evidencePath, "release evidence"),
 	]);
 	return { contract, evidence };
 }
 
-export function validateReleaseState(contract, evidence, options = {}) {
+export async function readReleaseContract(input = {}) {
+	const contractPath = input.contractPath ?? new URL("../../.codex/release-contract.json", import.meta.url);
+	return await readJson(contractPath, "release contract");
+}
+
+export function validateReleaseContractDefinition(contract, options = {}) {
 	const failures = [];
-	if (!isRecord(contract) || !isRecord(evidence)) return ["release contract and evidence must be objects"];
+	if (!isRecord(contract)) return ["release contract must be an object"];
 	check(contract.schemaVersion === 1, "unknown release contract schema", failures);
 	check(
 		createHash("sha256").update(JSON.stringify(contract)).digest("hex") === CONTRACT_DIGEST,
@@ -67,7 +72,15 @@ export function validateReleaseState(contract, evidence, options = {}) {
 	check(binding.allGateRunsMustUseCandidateSha === true, "candidate binding must cover every gate", failures);
 	const merge = isRecord(contract.mergePolicy) ? contract.mergePolicy : {};
 	check(merge.hostedSevenRequired === true && merge.unresolvedStatusBlocksMerge === true, "hosted merge blocker drift", failures);
+	return failures;
+}
 
+
+export function validateReleaseState(contract, evidence, options = {}) {
+	const failures = validateReleaseContractDefinition(contract, options);
+	if (!isRecord(contract) || !isRecord(evidence)) {
+		return [...failures, "release contract and evidence must be objects"];
+	}
 	check(evidence.schemaVersion === 1, "unknown release evidence schema", failures);
 	check(evidence.contractVersion === contract.contractVersion, "release evidence contract mismatch", failures);
 	check(evidence.issue === contract.issue && evidence.story === contract.story, "release evidence issue/story mismatch", failures);

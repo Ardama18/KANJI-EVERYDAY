@@ -221,6 +221,12 @@ test("success keeps the source available and the target exists only inside the c
 
 test("repository quality provisions three distinct S-11 migration databases", async () => {
 	const runner = await readFile(new URL("./run-quality-with-database.mjs", import.meta.url), "utf8");
+	const preflight = runner.indexOf("const preflightFailures = validateReleaseContractDefinition");
+	const firstPhase = runner.indexOf('"S-11 local core fresh migration"');
+	const finalValidation = runner.indexOf("const releaseFailures = [", firstPhase);
+	assert.ok(preflight >= 0 && firstPhase > preflight && finalValidation > firstPhase);
+	assert.match(runner.slice(preflight, firstPhase), /return 2/u);
+	assert.doesNotMatch(runner.slice(preflight, firstPhase), /validateReleaseState|validateRepositoryEvidenceBinding/u);
 	assert.match(runner, /S11_FRESH_DATABASE_URL/u);
 	assert.match(runner, /S11_UPGRADE_DATABASE_URL/u);
 	assert.match(runner, /S11_FAILURE_DATABASE_URL/u);

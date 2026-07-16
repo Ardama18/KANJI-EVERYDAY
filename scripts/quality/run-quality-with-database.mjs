@@ -13,6 +13,8 @@ import {
 } from "./quality-database.mjs";
 import {
 	readReleaseFiles,
+	readReleaseContract,
+	validateReleaseContractDefinition,
 	validateReleaseState,
 	validateRepositoryEvidenceBinding,
 } from "./release-contract.mjs";
@@ -212,6 +214,14 @@ function cleanupRegistration(activeCleanups) {
 
 async function runQualityPhases({ freshUrl, upgradeUrl, failureUrl }) {
 	const diffBase = await resolveQualityDiffBase(process.env);
+	const releaseContract = await readReleaseContract();
+	const preflightFailures = validateReleaseContractDefinition(releaseContract, {
+		expectedBaseSha: diffBase,
+	});
+	if (preflightFailures.length > 0) {
+		process.stderr.write(`${JSON.stringify({ gate: "s11-release-contract-preflight", status: "blocked", failures: preflightFailures })}\n`);
+		return 2;
+	}
 	const checkEnvironment = {
 		// Keep legacy S-10 integration on the rollback-verified S-10 target;
 		// S-11 DB gates use their explicit fresh/upgrade URLs below.
