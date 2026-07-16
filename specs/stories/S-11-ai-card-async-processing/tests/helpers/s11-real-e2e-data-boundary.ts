@@ -44,6 +44,11 @@ export async function fetchServiceOwnerRows(
 	resourceAndQuery: string
 ): Promise<Record<string, unknown>[]> {
 	assertCanonicalUuid(ownerId, "service owner filter");
+	const authorization = headerValue(serviceHeaders, "authorization");
+	const apiKey = headerValue(serviceHeaders, "apikey");
+	if (apiKey === undefined || authorization !== `Bearer ${apiKey}`) {
+		throw new Error("service owner snapshot requires the service-role bearer/apikey pair");
+	}
 	if (/(?:\?|&)owner_user_id=/u.test(resourceAndQuery)) {
 		throw new Error("service owner filter must be added by the boundary adapter");
 	}
@@ -107,7 +112,7 @@ async function fetchRows(
 ): Promise<Record<string, unknown>[]> {
 	const response = await boundary.fetch(
 		`${boundary.supabaseBase}/rest/v1/${resourceAndQuery}`,
-		{ headers: { ...headers, apikey: boundary.anonKey } }
+		{ headers: { apikey: boundary.anonKey, ...headers } }
 	);
 	const body: unknown = await response.json();
 	if (response.status !== 200 || !Array.isArray(body) || !body.every(isRecord)) {
@@ -118,6 +123,14 @@ async function fetchRows(
 
 function assertCanonicalUuid(value: string, label: string): void {
 	if (!UUID_PATTERN.test(value)) throw new Error(`${label} must be a canonical UUID`);
+}
+
+function headerValue(
+	headers: Readonly<Record<string, string>>,
+	name: string
+): string | undefined {
+	const entry = Object.entries(headers).find(([key]) => key.toLowerCase() === name);
+	return entry?.[1];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

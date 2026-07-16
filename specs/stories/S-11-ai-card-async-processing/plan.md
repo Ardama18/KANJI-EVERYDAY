@@ -25,7 +25,7 @@ status: implementation_review
 - ADR: `specs/adr/ADR-008-ai-card-async-queue-image-processing.md` v2.0.5 Accepted
 - Design Doc: `specs/stories/S-11-ai-card-async-processing/design.md` v2.0.5 Approved
 - Unit suite: `specs/stories/S-11-ai-card-async-processing/tests/ai-card-async-processing.test.ts`（現行27件）
-- Integration suite: `specs/stories/S-11-ai-card-async-processing/tests/ai-card-async-processing.int.test.ts`（現行216件。127/139/142/147/153/154/155/162/163/168/179/181/189/195/198/200件は履歴値）
+- Integration suite: `specs/stories/S-11-ai-card-async-processing/tests/ai-card-async-processing.int.test.ts`（現行217件。127/139/142/147/153/154/155/162/163/168/179/181/189/195/198/200/216件は履歴値）
 - E2E suite: `specs/stories/S-11-ai-card-async-processing/tests/ai-card-async-processing.e2e.test.ts`（10件）
 - 先行実装: `supabase/migrations/20260714000000_s10_ai_card_import_foundation.sql`
 - 先行testkit: `specs/stories/S-10-ai-card-import-foundation/tests/helpers/s10-db-testkit.ts`, `s10-db-jobs.ts`
@@ -394,7 +394,7 @@ git status --short
 
 数量gateは現行Unit 27件、Integration 217件、E2E 10件である。93/102/110/127/139/142/147/153/154/155/162/163/168/179/181/189/195/198/200 Integrationは各変更履歴時点のhistorical inventoryでありcurrent evidenceではない。R20-F1/F2はowner-safe column ACLとStorage owner mutationを両立するone-bit helper、OLD/NEW policy、実DBactor matrixへ接続する。R19-F1〜F3はowner-safe SELECT、正規化後PNG再検証、status矛盾fail-closedへ接続する。R15-F1/F2はatomic constraint swapとhosted merge-blocked SSOTへ接続する。R14-F1〜F3はtrue autocommit、global default privilege、canonical UUID、typed preview secretへ接続する。R13-F1〜F5はresponse-loss reconciliation、autocommit recovery、default privilege、schedule value validation、run-scoped residueへ接続する。R12-F1〜F5はcompletion/cleanup競合、入力境界、段階migration、resource secret、3 DB分離品質gateへ接続する。cycle 7 R11-F1/F2はQueue RPCのempty/malformed分離とoutbox safe-code runtime allowlistへ接続し、R11-R2-F2はactual prepare routeの5件受理/6件副作用前拒否へ接続する。cycle 6 R10-F1/F2は全production lock pathのcards→illustrations→tracking順、bounded complete/attach concurrency、provider cancellation-safe oversize classificationへ接続する。review-attempt-1 R10-R1-F1はS-10 different-key attachのOLD+NEW一括canonical lockとA↔B二順序gateへ接続する。review-attempt-2 R10-R2-F1/F2はcaller JWT lifecycle authorityとterminal outbox fault後のsource releaseへ接続する。
 
-cycle 16のR20-F3はhosted内部snapshot/pathのservice-role限定、adapter強制owner filter、owner JWT safe projection成功、other-owner 0件、sensitive projection 403/42501へ接続する。Integration 216はcycle 15時点のhistorical inventoryであり、現行217件には含まれない。現行合計は254/254、focusedは70/70、ordinary Vitestは693 passed/8 conditional skips of 701 definitionsである。
+cycle 16のR20-F3はhosted内部snapshot/pathのservice-role限定、adapter強制owner filter、owner JWT safe projection成功、other-owner 0件、sensitive projection 403/42501へ接続する。Integration 216はcycle 15時点のhistorical inventoryであり、現行217件には含まれない。現行合計は254/254、DB前提を満たすroot quality focusedは71/71、ordinary Vitestは693 passed/8 conditional skips of 701 definitionsである。
 
 ## Rollback・compensation
 

@@ -2253,11 +2253,19 @@ describe("S-11 reviewer regression boundaries", () => {
 		await expect(
 			fetchServiceOwnerRows(
 				boundary,
-				{ Authorization: "Bearer service-role" },
+				{ Authorization: "Bearer service-role", apikey: "service-role" },
 				OWNER_ID,
 				"ai_illustration_objects?select=id,storage_path"
 			)
 		).resolves.toHaveLength(1);
+		await expect(
+			fetchServiceOwnerRows(
+				boundary,
+				{ Authorization: "Bearer owner-a", apikey: "anon-fixture" },
+				OWNER_ID,
+				"ai_illustration_objects?select=id,storage_path"
+			)
+		).rejects.toThrow("service-role bearer/apikey pair");
 		expect(calls).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({ authorization: "Bearer owner-a" }),

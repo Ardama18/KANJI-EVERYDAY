@@ -256,7 +256,7 @@ async function runQualityPhases({ freshUrl, upgradeUrl, failureUrl }) {
 			checkEnvironment,
 		],
 		[
-			"S-11 focused 70 regressions",
+			"S-11 focused 71 regressions",
 			"npm",
 			[
 				"--prefix",
