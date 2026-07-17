@@ -881,7 +881,10 @@ async function serviceRpc(
 	return response.status === 204 ? undefined : await response.json();
 }
 
-async function assertServiceRpcDenied(jwt: string, role: string): Promise<void> {
+async function assertServiceRpcDenied(
+	jwt: string,
+	role: "anon" | "authenticated"
+): Promise<void> {
 	const response = await fetch(`${supabaseBase}/rest/v1/rpc/read_ai_import_queue`, {
 		method: "POST",
 		headers: {
@@ -892,7 +895,8 @@ async function assertServiceRpcDenied(jwt: string, role: string): Promise<void> 
 		body: JSON.stringify({ p_visibility_seconds: 300, p_quantity: 1 }),
 	});
 	const body: unknown = await response.json();
-	if (response.status !== 404 || !isRecord(body) || body.code !== "PGRST202") {
+	const expectedStatus = role === "anon" ? 401 : 403;
+	if (response.status !== expectedStatus || !isRecord(body) || body.code !== "42501") {
 		throw new Error(
 			`${role} service-only pgmq RPC denial contract failed: ${response.status}/${String(isRecord(body) ? body.code : undefined)}`
 		);

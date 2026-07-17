@@ -1282,6 +1282,23 @@ describe("S-11 commit and queue integration", () => {
 		).toHaveLength(2);
 	});
 
+	it("R24-F6 enforces exact PostgREST v14 service-only RPC denial responses by role", async () => {
+		const realE2eGate = await readFile(
+			new URL("./s11-real-e2e-gate.ts", import.meta.url),
+			"utf8"
+		);
+		const denialStart = realE2eGate.indexOf("async function assertServiceRpcDenied");
+		const denial = realE2eGate.slice(
+			denialStart,
+			realE2eGate.indexOf("async function serviceOwnerObjects", denialStart)
+		);
+		expect(denial).toContain('role: "anon" | "authenticated"');
+		expect(denial).toContain('const expectedStatus = role === "anon" ? 401 : 403;');
+		expect(denial).toContain('body.code !== "42501"');
+		expect(denial).not.toContain("PGRST202");
+		expect(denial).not.toContain("response.status !== 404");
+	});
+
 	it("R11-F1 preserves the legitimate empty Queue response as idle through the real handler path", async () => {
 		const result = await runQueueRpcThroughWorkerHandler([]);
 		expect(result.response.status).toBe(200);
