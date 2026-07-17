@@ -367,6 +367,81 @@ await db.execute(`
 	BEGIN;
 	SET LOCAL request.jwt.claim.role='service_role';
 	DO $gate$
+	DECLARE message_id bigint; claim_result jsonb; failed_result jsonb; status_result jsonb;
+	BEGIN
+		INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
+		VALUES('13500000-0000-4000-8000-00000000000a','00000000-0000-0000-0000-000000000000','authenticated','authenticated','s11-auto-fail@example.local','not-for-login',now(),'{}','{}',now(),now());
+		INSERT INTO public.decks(id,owner_user_id,name)
+		VALUES('13500000-0000-4000-8000-000000000010','13500000-0000-4000-8000-00000000000a','s11-auto-fail');
+		INSERT INTO public.ai_import_batches(
+			id,owner_user_id,source,target_deck_id,auto_created_deck_id,status,idempotency_key,
+			import_request_hash,card_reservation_key,requested_card_count,requested_image_count
+		) VALUES(
+			'13500000-0000-4000-8000-000000000020','13500000-0000-4000-8000-00000000000a','app_ai',
+			'13500000-0000-4000-8000-000000000010','13500000-0000-4000-8000-000000000010','processing',
+			's11-auto-fail',repeat('3',64),'s11-auto-fail-card',1,0
+		);
+		INSERT INTO public.ai_import_items(
+			id,owner_user_id,batch_id,client_item_id,concept_id,ordinal,pattern,skill,
+			front_text,back_text,card_key,image_mode,status
+		) VALUES(
+			'13500000-0000-4000-8000-000000000030','13500000-0000-4000-8000-00000000000a',
+			'13500000-0000-4000-8000-000000000020','auto-fail-r1','auto-fail',0,'R1','reading',
+			'漢','かん',repeat('4',64),'none','committed'
+		);
+		SELECT pgmq.send(
+			'ai_card_imports',
+			'{"version":1,"jobId":"13500000-0000-4000-8000-000000000040","batchId":"13500000-0000-4000-8000-000000000020"}'::jsonb
+		) INTO message_id;
+		INSERT INTO public.ai_import_concept_jobs(id,owner_user_id,batch_id,concept_id,state,queue_message_id)
+		VALUES(
+			'13500000-0000-4000-8000-000000000040','13500000-0000-4000-8000-00000000000a',
+			'13500000-0000-4000-8000-000000000020','auto-fail','queued',message_id
+		);
+
+		claim_result := public.claim_ai_import_concept(
+			'13500000-0000-4000-8000-000000000040',message_id,
+			'13500000-0000-4000-8000-000000000051'
+		);
+		failed_result := public.fail_ai_import_concept(
+			'13500000-0000-4000-8000-000000000040',message_id,
+			'13500000-0000-4000-8000-000000000051','PROVIDER_PERMANENT_ERROR','worker_failure'
+		);
+		status_result := public.get_ai_import_status(
+			'13500000-0000-4000-8000-00000000000a',
+			'13500000-0000-4000-8000-000000000020',NULL
+		);
+
+		IF claim_result->>'outcome'<>'claimed' OR failed_result->>'status'<>'failed' OR
+			status_result->>'status'<>'failed' OR
+			status_result#>>'{counts,total}'<>'1' OR status_result#>>'{counts,succeeded}'<>'0' OR
+			status_result#>>'{counts,failed}'<>'1' OR
+			(SELECT count(*) FROM public.ai_import_batches
+				WHERE id='13500000-0000-4000-8000-000000000020'
+					AND status='completed' AND target_deck_id IS NULL AND auto_created_deck_id IS NULL
+					AND finalized_count=0 AND failed_count=1)<>1 OR
+			EXISTS (SELECT 1 FROM public.decks WHERE id='13500000-0000-4000-8000-000000000010') OR
+			(SELECT count(*) FROM public.ai_import_items
+				WHERE id='13500000-0000-4000-8000-000000000030' AND status='failed')<>1 OR
+			(SELECT count(*) FROM public.ai_import_concept_jobs
+				WHERE id='13500000-0000-4000-8000-000000000040'
+					AND state='failed' AND terminal_message_id=message_id)<>1 OR
+			(SELECT count(*) FROM pgmq.q_ai_card_imports WHERE msg_id=message_id)<>0 OR
+			(SELECT count(*) FROM pgmq.a_ai_card_imports WHERE msg_id=message_id)<>1 OR
+			(SELECT count(*) FROM public.ai_worker_log_outbox
+				WHERE event_type='worker_failure' AND queue_message_id=message_id
+					AND job_id='13500000-0000-4000-8000-000000000040'
+					AND batch_id='13500000-0000-4000-8000-000000000020'
+					AND error_code='PROVIDER_PERMANENT_ERROR' AND dispatched_at IS NULL)<>1 THEN
+			RAISE EXCEPTION 'all-failed auto-deck terminal boundary failed';
+		END IF;
+	END $gate$;
+	ROLLBACK;
+`);
+await db.execute(`
+	BEGIN;
+	SET LOCAL request.jwt.claim.role='service_role';
+	DO $gate$
 	DECLARE message_id bigint; claim_a jsonb; claim_active jsonb; claim_b jsonb; result jsonb;
 	DECLARE gate_now timestamptz := clock_timestamp();
 	BEGIN

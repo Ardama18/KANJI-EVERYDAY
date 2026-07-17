@@ -1246,6 +1246,9 @@ BEGIN
     IF auto_deck_id IS NOT NULL AND NOT EXISTS (
       SELECT 1 FROM public.deck_cards WHERE deck_id=auto_deck_id
     ) THEN
+      UPDATE public.ai_import_batches SET
+        target_deck_id=NULL,auto_created_deck_id=NULL
+      WHERE id=job.batch_id AND owner_user_id=job.owner_user_id;
       DELETE FROM public.decks WHERE id=auto_deck_id AND owner_user_id=job.owner_user_id;
     END IF;
   END IF;

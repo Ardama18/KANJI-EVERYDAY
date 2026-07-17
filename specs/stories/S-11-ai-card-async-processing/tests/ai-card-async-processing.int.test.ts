@@ -1726,6 +1726,33 @@ describe("S-11 commit and queue integration", () => {
 		}
 	});
 
+	it("R24-F15 clears both auto-created deck references before terminal failure deletes the deck", async () => {
+		const [core, realGate] = await Promise.all([
+			readFile(
+				new URL(
+					"../../../../supabase/migrations/20260715000000_s11_ai_card_async_processing.sql",
+					import.meta.url
+				),
+				"utf8"
+			),
+			readFile(new URL("./s11-real-integration-gate.ts", import.meta.url), "utf8"),
+		]);
+		const failureStart = core.indexOf(
+			"CREATE OR REPLACE FUNCTION public.ai_s11_fail_concept_locked"
+		);
+		const failure = core.slice(failureStart, core.indexOf("$$;", failureStart));
+		const clearReferences = failure.indexOf(
+			"UPDATE public.ai_import_batches SET\n        target_deck_id=NULL,auto_created_deck_id=NULL\n      WHERE id=job.batch_id AND owner_user_id=job.owner_user_id;"
+		);
+		const deleteDeck = failure.indexOf(
+			"DELETE FROM public.decks WHERE id=auto_deck_id AND owner_user_id=job.owner_user_id;"
+		);
+		expect(clearReferences).toBeGreaterThan(-1);
+		expect(deleteDeck).toBeGreaterThan(clearReferences);
+		expect(realGate).toContain("all-failed auto-deck terminal boundary failed");
+		expect(realGate).toContain("FROM pgmq.a_ai_card_imports WHERE msg_id=message_id");
+	});
+
 	it("R11-F1 preserves the legitimate empty Queue response as idle through the real handler path", async () => {
 		const result = await runQueueRpcThroughWorkerHandler([]);
 		expect(result.response.status).toBe(200);
