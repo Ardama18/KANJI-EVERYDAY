@@ -418,7 +418,11 @@ await db.execute(`
 		EXCEPTION WHEN SQLSTATE 'P1008' THEN NULL; END;
 		result := public.finalize_ai_import_concept('12000000-0000-4000-8000-000000000040',message_id,'12000000-0000-4000-8000-0000000000b1',NULL,NULL,NULL,NULL);
 		IF result->>'status'<>'succeeded' OR
-			(SELECT count(*) FROM public.cards WHERE owner_user_id='12000000-0000-4000-8000-00000000000a' AND card_key=repeat('2',64))<>1 OR
+			(SELECT count(*) FROM public.cards finalized_card
+				JOIN public.deck_cards finalized_deck_card ON finalized_deck_card.card_id=finalized_card.id
+				WHERE finalized_card.owner_user_id='12000000-0000-4000-8000-00000000000a'
+					AND finalized_deck_card.deck_id='12000000-0000-4000-8000-000000000010'
+					AND finalized_card.front_text='f06-front' AND finalized_card.back_text='f06-back')<>1 OR
 			(SELECT count(*) FROM public.deck_cards WHERE deck_id='12000000-0000-4000-8000-000000000010')<>1 OR
 			(SELECT count(*) FROM public.ai_quota_reservations WHERE owner_user_id='12000000-0000-4000-8000-00000000000a' AND reservation_key='s11-f06-card')<>1 OR
 			(SELECT count(*) FROM pgmq.q_ai_card_imports WHERE message->>'jobId'='12000000-0000-4000-8000-000000000040')<>0 THEN
