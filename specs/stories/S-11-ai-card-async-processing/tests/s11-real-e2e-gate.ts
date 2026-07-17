@@ -931,7 +931,13 @@ async function assertStorageDenied(objectUrl: string, jwt: string, role: string)
 	const response = await fetch(objectUrl, {
 		headers: { Authorization: `Bearer ${jwt}`, apikey: anonKey },
 	});
-	await assertStorageObjectNotFound(response, `${role} private illustration denial`);
+	const scenario = `${role} private illustration denial`;
+	if (response.status !== 400) {
+		throw new Error(
+			`${scenario} did not return exact Storage HTTP 400/404/not_found contract (status=${response.status})`
+		);
+	}
+	await assertStorageObjectNotFound(response, scenario);
 }
 
 async function assertAppNotFound(response: Response, scenario: string): Promise<void> {
@@ -947,16 +953,25 @@ async function assertAppNotFound(response: Response, scenario: string): Promise<
 }
 
 async function assertStorageObjectNotFound(response: Response, scenario: string): Promise<void> {
-	const body: unknown = await response.json();
+	const contract = `${scenario} did not return exact Storage HTTP 400/404/not_found contract`;
+	if (response.status !== 400) {
+		throw new Error(`${contract} (status=${response.status})`);
+	}
+	let body: unknown;
+	try {
+		body = await response.json();
+	} catch {
+		throw new Error(`${contract} (status=400, code=unknown)`);
+	}
 	if (
-		response.status !== 400 ||
 		!isRecord(body) ||
 		body.statusCode !== "404" ||
 		body.error !== "not_found"
 	) {
-		throw new Error(
-			`${scenario} did not return exact Storage HTTP 400/404/not_found contract`
-		);
+		const errorCode = isRecord(body) && typeof body.statusCode === "string"
+			? body.statusCode
+			: "unknown";
+		throw new Error(`${contract} (status=400, code=${errorCode})`);
 	}
 }
 

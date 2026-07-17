@@ -1588,6 +1588,37 @@ describe("S-11 commit and queue integration", () => {
 		}
 	});
 
+	it("R24-F12 checks private-object Storage status before parsing response bodies", async () => {
+		const realGate = await readFile(
+			new URL("./s11-real-e2e-gate.ts", import.meta.url),
+			"utf8"
+		);
+		const deniedStart = realGate.indexOf("async function assertStorageDenied");
+		const denied = realGate.slice(
+			deniedStart,
+			realGate.indexOf("async function assertAppNotFound", deniedStart)
+		);
+		const notFoundStart = realGate.indexOf(
+			"async function assertStorageObjectNotFound"
+		);
+		const notFound = realGate.slice(
+			notFoundStart,
+			realGate.indexOf("async function fakeProviderCalls", notFoundStart)
+		);
+		expect(denied).toContain("response.status !== 400");
+		expect(denied.indexOf("response.status !== 400")).toBeLessThan(
+			denied.indexOf("assertStorageObjectNotFound(response, scenario)")
+		);
+		expect(notFound).toContain("response.status !== 400");
+		expect(notFound.indexOf("response.status !== 400")).toBeLessThan(
+			notFound.indexOf("await response.json()")
+		);
+		expect(notFound).toContain("try {");
+		expect(notFound).toContain("(status=400, code=unknown)");
+		expect(notFound).not.toContain("body.message");
+		expect(notFound).not.toContain("JSON.stringify(body)");
+	});
+
 	it("R11-F1 preserves the legitimate empty Queue response as idle through the real handler path", async () => {
 		const result = await runQueueRpcThroughWorkerHandler([]);
 		expect(result.response.status).toBe(200);
