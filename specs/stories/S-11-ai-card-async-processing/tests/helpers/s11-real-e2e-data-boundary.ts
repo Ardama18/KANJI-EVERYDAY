@@ -33,6 +33,23 @@ export interface S11PostgrestBoundary {
 	readonly anonKey: string;
 }
 
+export async function assertStorageMutationDeniedResponse(
+	response: Response,
+	scenario: string
+): Promise<void> {
+	const body: unknown = await response.json();
+	if (
+		response.status !== 400 ||
+		!isRecord(body) ||
+		body.statusCode !== "403" ||
+		body.error !== "Unauthorized"
+	) {
+		throw new Error(
+			`${scenario} did not return exact Storage HTTP 400/403/Unauthorized`
+		);
+	}
+}
+
 interface OwnerProjectionBoundary extends S11PostgrestBoundary {
 	readonly ownerHeaders: Readonly<Record<string, string>>;
 	readonly otherOwnerHeaders: Readonly<Record<string, string>>;

@@ -38,6 +38,7 @@ import {
 import { createS11DbClient } from "./helpers/s11-db-testkit";
 import {
 	assertOwnerProjectionBoundary,
+	assertStorageMutationDeniedResponse,
 	fetchServiceOwnerRows,
 } from "./helpers/s11-real-e2e-data-boundary";
 
@@ -1497,6 +1498,70 @@ describe("S-11 commit and queue integration", () => {
 		expect(finalize).not.toContain("DECLARE upload_id uuid;");
 		expect(finalize).not.toContain("INTO upload_id");
 		expect(realGate).toContain("upload-mode finalize boundary failed");
+	});
+
+	it("R24-F11 accepts only the exact wrapped Storage mutation denial contract", async () => {
+		const [realGate, boundaryHelper] = await Promise.all([
+			readFile(new URL("./s11-real-e2e-gate.ts", import.meta.url), "utf8"),
+			readFile(
+				new URL("./helpers/s11-real-e2e-data-boundary.ts", import.meta.url),
+				"utf8"
+			),
+		]);
+		const assertionStart = boundaryHelper.indexOf(
+			"export async function assertStorageMutationDeniedResponse"
+		);
+		const assertion = boundaryHelper.slice(
+			assertionStart,
+			boundaryHelper.indexOf("interface OwnerProjectionBoundary", assertionStart)
+		);
+		expect(assertion).toContain("response.status !== 400");
+		expect(assertion).toContain('body.statusCode !== "403"');
+		expect(assertion).toContain('body.error !== "Unauthorized"');
+		expect(assertion).toContain("exact Storage HTTP 400/403/Unauthorized");
+		expect(assertion).not.toContain("body.message");
+		expect(realGate).toContain("assertStorageMutationDeniedResponse(response, scenario)");
+		expect(realGate).not.toContain("exact Storage HTTP 403/403/Unauthorized");
+
+		await expect(
+			assertStorageMutationDeniedResponse(
+				Response.json(
+					{
+						statusCode: "403",
+						error: "Unauthorized",
+						message: "unsafe-storage-rls-detail",
+					},
+					{ status: 400 }
+				),
+				"managed INSERT"
+			)
+		).resolves.toBeUndefined();
+
+		for (const status of [200, 401, 403, 404, 409, 500]) {
+			let captured: unknown;
+			try {
+				await assertStorageMutationDeniedResponse(
+					Response.json(
+						{
+							statusCode: "403",
+							error: "Unauthorized",
+							message: "unsafe-storage-rls-detail",
+						},
+						{ status }
+					),
+					"managed INSERT"
+				);
+			} catch (error) {
+				captured = error;
+			}
+			expect(captured).toBeInstanceOf(Error);
+			if (captured instanceof Error) {
+				expect(captured.message).toBe(
+					"managed INSERT did not return exact Storage HTTP 400/403/Unauthorized"
+				);
+				expect(captured.message).not.toContain("unsafe-storage-rls-detail");
+			}
+		}
 	});
 
 	it("R11-F1 preserves the legitimate empty Queue response as idle through the real handler path", async () => {

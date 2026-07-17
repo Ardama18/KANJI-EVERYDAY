@@ -11,6 +11,7 @@ import { signPreviewToken } from "../../../../frontend/src/lib/ai-import/preview
 import { resolveProviderEndpointBinding } from "../../../../supabase/functions/_shared/ai-card-import/provider.ts";
 import {
 	assertOwnerProjectionBoundary,
+	assertStorageMutationDeniedResponse,
 	fetchServiceOwnerRows,
 } from "./helpers/s11-real-e2e-data-boundary";
 
@@ -1061,15 +1062,7 @@ async function assertStorageMutationDenied(
 		},
 		body: bodyBytes === undefined ? undefined : ownedArrayBuffer(bodyBytes),
 	});
-	const body: unknown = await response.json();
-	if (
-		response.status !== 403 ||
-		!isRecord(body) ||
-		body.statusCode !== "403" ||
-		body.error !== "Unauthorized"
-	) {
-		throw new Error(`${scenario} did not return exact Storage HTTP 403/403/Unauthorized`);
-	}
+	await assertStorageMutationDeniedResponse(response, scenario);
 }
 
 async function assertStorageMutationSucceeded(
