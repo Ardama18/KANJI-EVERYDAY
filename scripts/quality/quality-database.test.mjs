@@ -247,7 +247,7 @@ test("repository quality provisions three distinct S-11 migration databases", as
 	);
 	assert.equal(dispatched[0]?.[0], "release-contract");
 	assert.match(dispatched.find(([id]) => id === "s11-focused")?.[2].join(" ") ?? "", /R23-F/u);
-	assert.equal(evidence.state, "pending_rc1");
+	assert.equal(evidence.state, "pending_hosted");
 	const observed = [];
 	const commandRunner = async (program, arguments_) => {
 		observed.push([program, arguments_]);

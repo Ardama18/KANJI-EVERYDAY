@@ -1160,7 +1160,7 @@ describe("S-11 commit and queue integration", () => {
 		expect(operations).toContain("Current cycle-19 verification state: `RC1 local evidence pending; hosted 7 not_run; merge blocked`");
 		expect(traceability).not.toMatch(/\bcurrent\s+R12\b/iu);
 		expect(JSON.parse(releaseContract)).toMatchObject({ issue: 12, story: "S-11" });
-		expect(JSON.parse(releaseEvidence)).toMatchObject({ state: "pending_rc1" });
+		expect(JSON.parse(releaseEvidence)).toMatchObject({ state: "pending_hosted" });
 	});
 
 	it("R13-F3 schedule migration denies PUBLIC before creating SECURITY DEFINER functions", async () => {
