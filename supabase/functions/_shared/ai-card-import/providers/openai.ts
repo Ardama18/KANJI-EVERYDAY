@@ -33,7 +33,9 @@ export function createOpenAiProvider(input: {
 						model: input.model,
 						prompt,
 						size: "1024x1024",
-						response_format: "b64_json",
+						...(isDallEModel(input.model)
+							? { response_format: "b64_json" }
+							: { output_format: "png" }),
 					}),
 					signal,
 				});
@@ -57,6 +59,10 @@ export function createOpenAiProvider(input: {
 			}
 		},
 	};
+}
+
+function isDallEModel(model: string): boolean {
+	return model === "dall-e-2" || model === "dall-e-3";
 }
 
 function httpFailure(httpStatus: number): ProviderResult {

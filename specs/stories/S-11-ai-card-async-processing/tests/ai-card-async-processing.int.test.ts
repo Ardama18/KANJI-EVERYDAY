@@ -1173,7 +1173,22 @@ describe("S-11 commit and queue integration", () => {
 		expect(operations).toContain("Current cycle-19 verification state: `RC1 local evidence pending; hosted 7 not_run; merge blocked`");
 		expect(traceability).not.toMatch(/\bcurrent\s+R12\b/iu);
 		expect(JSON.parse(releaseContract)).toMatchObject({ issue: 12, story: "S-11" });
-		expect(JSON.parse(releaseEvidence)).toMatchObject({ state: "pending_hosted" });
+		const parsedEvidence = JSON.parse(releaseEvidence) as {
+			readonly state?: unknown;
+			readonly hostedGates?: readonly {
+				readonly status?: unknown;
+				readonly exitCode?: unknown;
+			}[];
+		};
+		expect(["pending_hosted", "accepted"]).toContain(parsedEvidence.state);
+		if (parsedEvidence.state === "accepted") {
+			expect(parsedEvidence.hostedGates).toHaveLength(7);
+			expect(
+				parsedEvidence.hostedGates?.every(
+					(gate) => gate.status === "passed" && gate.exitCode === 0
+				)
+			).toBe(true);
+		}
 	});
 
 	it("R13-F3 schedule migration denies PUBLIC before creating SECURITY DEFINER functions", async () => {
@@ -2129,6 +2144,32 @@ describe("S-11 retry, provider, and storage integration", () => {
 			await provider.generate({ prompt: "safe fixture", signal: new AbortController().signal })
 		).toMatchObject({ kind: "permanent" });
 	});
+
+	it.each([
+		["gpt-image-1", { output_format: "png" }, "response_format"],
+		["dall-e-3", { response_format: "b64_json" }, "output_format"],
+	] as const)(
+		"IT-16 sends the supported OpenAI output option for %s",
+		async (model, expectedOption, unsupportedOption) => {
+			let requestBody: Readonly<Record<string, unknown>> | undefined;
+			const provider = createOpenAiProvider({
+				apiKey: "fixture",
+				model,
+				fetchImplementation: async (_input, init) => {
+					requestBody = JSON.parse(String(init?.body)) as Readonly<Record<string, unknown>>;
+					return Response.json({ data: [] });
+				},
+			});
+			await provider.generate({ prompt: "safe fixture", signal: new AbortController().signal });
+			expect(requestBody).toMatchObject({
+				model,
+				prompt: "safe fixture",
+				size: "1024x1024",
+				...expectedOption,
+			});
+			expect(requestBody).not.toHaveProperty(unsupportedOption);
+		}
+	);
 
 	it("IT-17 transient Storage failure uses the same persistent retry policy", async () => {
 		const harness = createWorkerHarness({
