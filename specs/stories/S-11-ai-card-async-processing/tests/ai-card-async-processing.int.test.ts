@@ -1343,10 +1343,16 @@ describe("S-11 commit and queue integration", () => {
 	});
 
 	it("R24-F8 validates the cross-owner fixture and limits Hosted diagnostics to safe fields", async () => {
-		const realE2eGate = await readFile(
-			new URL("./s11-real-e2e-gate.ts", import.meta.url),
-			"utf8"
-		);
+		const [realE2eGate, s10Core] = await Promise.all([
+			readFile(new URL("./s11-real-e2e-gate.ts", import.meta.url), "utf8"),
+			readFile(
+				new URL(
+					"../../../../supabase/migrations/20260714000000_s10_ai_card_import_foundation.sql",
+					import.meta.url
+				),
+				"utf8"
+			),
+		]);
 		const assertionStart = realE2eGate.indexOf(
 			"async function assertCrossOwnerUploadCommitDenied"
 		);
@@ -1358,11 +1364,25 @@ describe("S-11 commit and queue integration", () => {
 		expect(assertion).toContain('? body.error.code\n\t\t: "unknown";');
 		expect(assertion).toContain('front: `漢-${suffix}`');
 		expect(assertion).toContain('back: `かん-${suffix}`');
+		expect(assertion).toContain("response.status !== 404");
+		expect(assertion).toContain('body.error.code !== "DECK_NOT_FOUND"');
 		expect(assertion).toContain(
-			"(status=${response.status}, code=${errorCode})"
+			"exact HTTP 404/DECK_NOT_FOUND (status=${response.status}, code=${errorCode})"
 		);
 		expect(assertion).not.toContain("JSON.stringify(body)");
 		expect(assertion).not.toContain("response.headers");
+
+		const commitStart = s10Core.indexOf(
+			"CREATE FUNCTION public.commit_import_internal"
+		);
+		const commitBody = s10Core.slice(commitStart, s10Core.indexOf("$$;", commitStart));
+		const uploadOwnerGuard = commitBody.indexOf(
+			"IF NOT FOUND OR locked_upload_owner IS DISTINCT FROM p_actor_user_id THEN"
+		);
+		expect(uploadOwnerGuard).toBeGreaterThan(-1);
+		expect(commitBody.slice(uploadOwnerGuard, uploadOwnerGuard + 220)).toContain(
+			"PERFORM public.ai_raise_import_error('DECK_NOT_FOUND');"
+		);
 
 		const fixtureValidation = await validateImportRequest({
 			deck: { create: { name: "S11 cross owner fixture" } },

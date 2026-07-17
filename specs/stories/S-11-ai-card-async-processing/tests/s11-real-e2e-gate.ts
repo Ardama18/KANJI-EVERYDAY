@@ -715,11 +715,11 @@ async function assertCrossOwnerUploadCommitDenied(uploadId: string, id: string):
 		? body.error.code
 		: "unknown";
 	if (
-		response.status !== 409 || !isRecord(body) || !isRecord(body.error) ||
-		body.error.code !== "CONFLICT"
+		response.status !== 404 || !isRecord(body) || !isRecord(body.error) ||
+		body.error.code !== "DECK_NOT_FOUND"
 	) {
 		throw new Error(
-			`owner-B cross-owner upload commit did not return exact HTTP 409/CONFLICT (status=${response.status}, code=${errorCode})`
+			`owner-B cross-owner upload commit did not return exact HTTP 404/DECK_NOT_FOUND (status=${response.status}, code=${errorCode})`
 		);
 	}
 }

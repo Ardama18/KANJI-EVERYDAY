@@ -54,7 +54,7 @@ Fresh remediation cycle 3 adds P3-01/P3-02 focused evidence: `worker_failure` is
 | F-06 | real SQL claim A→expiry→claim B; A finalize/fail/retry fenced, B succeeds with counts | real integration gate added; execution not_run |
 | F-07 | served R1/W1 first-delete preserve, last-delete remove, owner-B denial | real E2E gate added; execution not_run |
 | F-08 | real same-batch pair fail transaction + sibling success + exact status counts | real integration gate added; execution not_run |
-| F-09 | pre-worker anon/owner-B live source denial and owner-B upload commit 409/CONFLICT | real E2E gate added; execution not_run |
+| F-09 | pre-worker anon/owner-B live source denial and owner-B upload commit existence-hidden 404/DECK_NOT_FOUND | real E2E gate added; execution not_run |
 | F-10 | independent bundle/WASM bytes+SHA-256 and manifest/package-lock identity | static manifest/typecheck Green; resource execution not_run |
 | F-11 | strict queued/statusUrl, retry/batch/key snapshots, terminal equality, duplicate side-effect snapshot | real E2E gate added; execution not_run |
 | F-12 | source 23:59:59 protected/24:00 eligible, referenced and owner/path mismatch protected | migration fence + real integration gate added; execution not_run |
