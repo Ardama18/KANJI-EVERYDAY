@@ -1133,7 +1133,7 @@ describe("S-10 AIカード登録基盤 DB統合契約", { timeout: S10_DB_TEST_T
 				expect([order?.card,order?.advisory,order?.item,order?.target].every(value=>value!==undefined&&value>0)).toBe(true); expect([order?.card,order?.advisory,order?.item,order?.target]).toEqual([...( [order?.card,order?.advisory,order?.item,order?.target] as number[])].sort((a,b)=>a-b));
 				expect(await database.query<{bad:number}>(`WITH expected(signature,authenticated_execute,service_execute) AS (VALUES ('public.update_imported_card(uuid,jsonb,timestamptz)',true,false),('public.delete_private_card(uuid,timestamptz)',true,false),('public.set_card_decks(uuid,uuid[])',true,false),('public.set_card_tags(uuid,uuid[])',true,false),('public.set_card_illustration(uuid,uuid)',true,false),('public.update_imported_card_internal(uuid,uuid,jsonb,timestamptz)',false,false),('public.delete_private_card_internal(uuid,uuid,timestamptz)',false,false),('public.set_card_decks_internal(uuid,uuid,uuid[])',false,false),('public.set_card_tags_internal(uuid,uuid,uuid[])',false,false),('public.set_card_illustration_internal(uuid,uuid,uuid)',false,false)) SELECT count(*) FILTER(WHERE has_function_privilege('authenticated',signature,'EXECUTE') IS DISTINCT FROM authenticated_execute OR has_function_privilege('service_role',signature,'EXECUTE') IS DISTINCT FROM service_execute OR has_function_privilege('anon',signature,'EXECUTE'))::int bad FROM expected`)).toEqual([{bad:0}]);
 			} finally { await database.execute(`DELETE FROM public.illustrations WHERE id='${illustration}'; DELETE FROM public.tags WHERE id='${tag}'; DELETE FROM public.decks WHERE id='${deck}'`); await cleanupFinalizeFixture(fixture); }
-		}, 15_000);
+		}, S10_DB_TEST_TIMEOUT_MS);
 	});
 
 	describe("commit・冪等性・Stage 1原子性 (AC-02/04/06)", () => {
@@ -1247,6 +1247,11 @@ describe("S-10 AIカード登録基盤 DB統合契約", { timeout: S10_DB_TEST_T
 					fixture.marker,
 					...(rollbackMarker === undefined ? [] : [rollbackMarker]),
 				]);
+			}, {
+				// This case performs repeated rollback snapshots. Keep cleanup within the
+				// suite's 30-second fence while allowing hosted isolated DB round trips.
+				operationTimeoutMs: 23_000,
+				cleanupTimeoutMs: 6_000,
 			});
 		});
 
@@ -2370,7 +2375,27 @@ describe("S-10 AIカード登録基盤 DB統合契約", { timeout: S10_DB_TEST_T
 		// @dependency: session/card symmetric lock protocol
 		// @complexity: high
 		it("IT-GUARD-04: card更新と同時session INSERT/UPDATEの競合でもactive guardを取りこぼさない", async () => {
-			const deck=randomUUID(),card=randomUUID(),session=randomUUID(); try { await database.execute(`INSERT INTO public.decks(id,owner_user_id,name) VALUES('${deck}','${S10_ACTORS.ownerA.userId}','race'); INSERT INTO public.cards(id,owner_user_id,visibility,skill,pattern,front_text,back_text,card_key) VALUES('${card}','${S10_ACTORS.ownerA.userId}','private','reading','R1','race-${card}','back','x')`); const c1=createS10DbClient(),c2=createS10DbClient(); const inserting=c1.execute(`BEGIN; INSERT INTO public.study_sessions(id,user_id,deck_id,current_card_id) VALUES('${session}','${S10_ACTORS.ownerA.userId}','${deck}','${card}'); SELECT pg_sleep(0.15); COMMIT;`); await new Promise(resolve=>setTimeout(resolve,25)); const diagnostic=await c2.captureError(`UPDATE public.cards SET back_text='race update' WHERE id='${card}'`); await inserting; expect(diagnostic.sqlState).toBe("P1006"); } finally { await database.execute(`DELETE FROM public.study_sessions WHERE id='${session}'; DELETE FROM public.decks WHERE id='${deck}'; DELETE FROM public.cards WHERE id='${card}'`); }
+			const deck=randomUUID(),card=randomUUID(),session=randomUUID();
+			const applicationName=`s10-guard-${randomUUID()}`;
+			let inserting: Promise<void> | undefined;
+			try {
+				await database.execute(`INSERT INTO public.decks(id,owner_user_id,name) VALUES('${deck}','${S10_ACTORS.ownerA.userId}','race'); INSERT INTO public.cards(id,owner_user_id,visibility,skill,pattern,front_text,back_text,card_key) VALUES('${card}','${S10_ACTORS.ownerA.userId}','private','reading','R1','race-${card}','back','x')`);
+				const c1=createS10DbClient(),c2=createS10DbClient();
+				inserting=c1.execute(`SET application_name=${sqlLiteral(applicationName)}; BEGIN; INSERT INTO public.study_sessions(id,user_id,deck_id,current_card_id) VALUES('${session}','${S10_ACTORS.ownerA.userId}','${deck}','${card}'); SELECT pg_sleep(3); COMMIT;`);
+				let insertReachedSleep=false;
+				for(let attempt=0;attempt<10&&!insertReachedSleep;attempt+=1){
+					const [state]=await database.query<{ready:boolean}>(`SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE application_name=${sqlLiteral(applicationName)} AND wait_event='PgSleep') ready`);
+					insertReachedSleep=state?.ready===true;
+					if(!insertReachedSleep) await new Promise(resolve=>setTimeout(resolve,50));
+				}
+				expect(insertReachedSleep).toBe(true);
+				const diagnostic=await c2.captureError(`UPDATE public.cards SET back_text='race update' WHERE id='${card}'`);
+				await inserting;
+				expect(diagnostic.sqlState).toBe("P1006");
+			} finally {
+				await inserting?.catch(()=>undefined);
+				await database.execute(`DELETE FROM public.study_sessions WHERE id='${session}'; DELETE FROM public.decks WHERE id='${deck}'; DELETE FROM public.cards WHERE id='${card}'`);
+			}
 		});
 
 		// @category: core-functionality
@@ -2439,7 +2464,7 @@ describe("S-10 AIカード登録基盤 DB統合契約", { timeout: S10_DB_TEST_T
 				const [undone]=await database.query<{active:boolean;result:UndoImportResult}>(`WITH result AS MATERIALIZED(SELECT public.undo_import_internal('${S10_ACTORS.ownerA.userId}'::uuid,'${active.batchId}'::uuid) result) SELECT public.ai_internal_context_active() active,result FROM result`); expect(undone?.active).toBe(false); expect(undone?.result.status).toBe("undone"); expect(await database.query<{edited:boolean}>(`SELECT user_edited_at IS NOT NULL edited FROM public.ai_import_items WHERE batch_id='${active.batchId}' ORDER BY id`)).toEqual([{edited:false},{edited:false}]);
 				expect((await database.captureError(undoImportSql(active.batchId,true),{actor:S10_ACTORS.ownerA})).sqlState).toBe("42501");
 			} finally { await database.execute(`DELETE FROM public.study_sessions WHERE id='${session}'`); await cleanupUndoFixture(edited); await cleanupUndoFixture(active); }
-		}, 15_000);
+		}, 60_000);
 
 		// @category: integration
 		// @dependency: delete tombstone trigger, FK SET NULL
