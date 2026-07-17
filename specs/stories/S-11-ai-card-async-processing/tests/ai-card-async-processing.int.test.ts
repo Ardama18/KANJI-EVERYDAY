@@ -1280,6 +1280,22 @@ describe("S-11 commit and queue integration", () => {
 		expect(
 			guard.match(/PERFORM public\.ai_raise_import_error\('UNAUTHORIZED'\)/gu)
 		).toHaveLength(2);
+
+		const wrapperStart = core.indexOf(
+			"CREATE OR REPLACE FUNCTION public.reserve_provider_usage"
+		);
+		expect(wrapperStart).toBeGreaterThan(guardStart);
+		const wrapper = core.slice(wrapperStart, core.indexOf("$$;", wrapperStart));
+		expect(wrapper).toContain("PERFORM public.ai_s11_require_service_role();");
+		expect(wrapper).toContain("RETURN public.reserve_provider_usage_internal(");
+		expect(wrapper).toContain("statement_timestamp()");
+		expect(wrapper).not.toContain("request.jwt.claim.role");
+		expect(core).toContain(
+			"ALTER FUNCTION public.reserve_provider_usage(\n\tuuid,text,text,text,text,integer,uuid,uuid,text\n) OWNER TO s10_migration_owner;"
+		);
+		expect(core).toMatch(
+			/GRANT EXECUTE ON FUNCTION[\s\S]+public\.reserve_provider_usage\(uuid,text,text,text,text,integer,uuid,uuid,text\)[\s\S]+TO service_role;/u
+		);
 	});
 
 	it("R24-F6 enforces exact PostgREST v14 service-only RPC denial responses by role", async () => {

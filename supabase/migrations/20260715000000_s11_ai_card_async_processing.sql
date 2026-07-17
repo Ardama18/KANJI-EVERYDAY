@@ -394,6 +394,35 @@ BEGIN
 END;
 $$;
 
+-- PostgREST v14 may expose the service role only through request.jwt.claims.
+-- Keep the S-10 RPC contract while routing its authorization through the S-11
+-- guard that supports both singular and packed claims.
+CREATE OR REPLACE FUNCTION public.reserve_provider_usage(
+	p_owner_user_id uuid,
+	p_reservation_key text,
+	p_kind text,
+	p_source text,
+	p_generation_request_hash text,
+	p_units integer,
+	p_batch_id uuid DEFAULT NULL,
+	p_item_id uuid DEFAULT NULL,
+	p_concept_id text DEFAULT NULL
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+BEGIN
+	PERFORM public.ai_s11_require_service_role();
+	RETURN public.reserve_provider_usage_internal(
+		p_owner_user_id, p_reservation_key, p_kind, p_source,
+		p_generation_request_hash, p_units, p_batch_id, p_item_id, p_concept_id,
+		statement_timestamp()
+	);
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION public.ai_s11_validate_schedule_config(
 	p_project_url text,p_worker_secret text
 )
@@ -1899,6 +1928,9 @@ END;
 $$;
 
 ALTER FUNCTION public.ai_s11_require_service_role() OWNER TO s10_migration_owner;
+ALTER FUNCTION public.reserve_provider_usage(
+	uuid,text,text,text,text,integer,uuid,uuid,text
+) OWNER TO s10_migration_owner;
 ALTER FUNCTION public.ai_s11_validate_schedule_config(text,text) OWNER TO s10_migration_owner;
 ALTER FUNCTION public.ai_s11_sync_upload_compat() OWNER TO s10_migration_owner;
 ALTER FUNCTION public.backfill_ai_uploads_s11(integer) OWNER TO s10_migration_owner;
@@ -1938,6 +1970,7 @@ ALTER FUNCTION public.verify_ai_import_cleanup(uuid,text,text,uuid) OWNER TO s10
 ALTER FUNCTION public.complete_ai_import_cleanup(uuid,text,text,uuid,text) OWNER TO s10_migration_owner;
 
 REVOKE ALL ON FUNCTION public.ai_s11_require_service_role(),
+	public.reserve_provider_usage(uuid,text,text,text,text,integer,uuid,uuid,text),
 	public.ai_s11_validate_schedule_config(text,text),
 	public.ai_s11_sync_upload_compat(),
 	public.backfill_ai_uploads_s11(integer),
@@ -1977,6 +2010,7 @@ REVOKE ALL ON FUNCTION public.ai_s11_require_service_role(),
   public.complete_ai_import_cleanup(uuid,text,text,uuid,text)
   FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION public.commit_import_async(uuid,text,text,text,jsonb,text),
+	public.reserve_provider_usage(uuid,text,text,text,text,integer,uuid,uuid,text),
 	public.prepare_ai_source_upload(uuid,text,text,bigint),
 	public.mark_ai_source_write_intent(uuid,uuid,text),
 	public.mark_ai_source_ready(uuid,uuid,text,bigint,integer,integer,text),

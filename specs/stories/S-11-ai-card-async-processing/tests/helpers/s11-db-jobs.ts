@@ -340,6 +340,12 @@ async function assertS11Contracts(
 			to_regprocedure('public.claim_ai_import_concept(uuid,bigint,uuid)') IS NOT NULL AND
 			to_regprocedure('public.claim_ai_worker_log_outbox(uuid)') IS NOT NULL AND
 			to_regprocedure('public.verify_ai_import_cleanup(uuid,text,text,uuid)') IS NOT NULL AND
+			(SELECT roles.rolname='s10_migration_owner'
+				FROM pg_proc procedures JOIN pg_roles roles ON roles.oid=procedures.proowner
+				WHERE procedures.oid='public.reserve_provider_usage(uuid,text,text,text,text,integer,uuid,uuid,text)'::regprocedure) AND
+			has_function_privilege('service_role','public.reserve_provider_usage(uuid,text,text,text,text,integer,uuid,uuid,text)','EXECUTE') AND
+			NOT has_function_privilege('authenticated','public.reserve_provider_usage(uuid,text,text,text,text,integer,uuid,uuid,text)','EXECUTE') AND
+			NOT has_function_privilege('anon','public.reserve_provider_usage(uuid,text,text,text,text,integer,uuid,uuid,text)','EXECUTE') AND
 			has_table_privilege('s10_migration_owner','public.ai_import_concept_jobs','SELECT,INSERT,UPDATE,DELETE') AND
 			has_table_privilege('s10_migration_owner','public.ai_illustration_objects','SELECT,INSERT,UPDATE,DELETE') AND
 			has_table_privilege('s10_migration_owner','public.illustrations','INSERT') AND
@@ -408,6 +414,28 @@ async function assertServiceRoleClaimsMatrix(databaseUrl: string): Promise<void>
 		SELECT public.ai_s11_require_service_role()`,
 	]) {
 		await database.execute(sql);
+	}
+	const packedWrapperValidation = await database.captureError(
+		`SET request.jwt.claim.role='';
+		SET request.jwt.claims='{"role":"service_role"}';
+		SELECT public.reserve_provider_usage(
+			'10000000-0000-4000-8000-00000000000a'::uuid,
+			'', 'card_generation', 'app_ai', repeat('0',64), 1
+		)`
+	);
+	if (packedWrapperValidation.sqlState !== "P1000") {
+		throw new Error("S-11 packed service-role reserve wrapper boundary failed");
+	}
+	const singularWrapperDenial = await database.captureError(
+		`SET request.jwt.claim.role='authenticated';
+		SET request.jwt.claims='{"role":"service_role"}';
+		SELECT public.reserve_provider_usage(
+			'10000000-0000-4000-8000-00000000000a'::uuid,
+			'', 'card_generation', 'app_ai', repeat('0',64), 1
+		)`
+	);
+	if (singularWrapperDenial.sqlState !== "42501") {
+		throw new Error("S-11 singular service-role reserve wrapper precedence failed");
 	}
 	for (const sql of [
 		`SET request.jwt.claim.role='';
