@@ -423,6 +423,7 @@ await db.execute(`
 			(SELECT count(*) FROM public.ai_quota_reservations WHERE owner_user_id='12000000-0000-4000-8000-00000000000a' AND reservation_key='s11-f06-card')<>1 OR
 			(SELECT count(*) FROM pgmq.q_ai_card_imports WHERE message->>'jobId'='12000000-0000-4000-8000-000000000040')<>0 THEN
 			RAISE EXCEPTION 'F-06 reclaimed B side-effect fence failed';
+		END IF;
 	END $gate$;
 	ROLLBACK;
 `);
