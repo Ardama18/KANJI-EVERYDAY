@@ -207,19 +207,30 @@ await db.execute(`
 		ON CONFLICT(id) DO NOTHING;
 		INSERT INTO public.decks(id,owner_user_id,name)
 		VALUES('11000000-0000-4000-8000-000000000010','10000000-0000-4000-8000-00000000000a','s11-real-gate');
+		INSERT INTO public.ai_uploads(
+			id,owner_user_id,upload_key,purpose,storage_path,mime_type,byte_size,status
+		) VALUES (
+			'11000000-0000-4000-8000-000000000070','10000000-0000-4000-8000-00000000000a',
+			's11-finalize-upload','card_illustration',
+			'10000000-0000-4000-8000-00000000000a/11000000-0000-4000-8000-000000000070/source',
+			'image/png',64,'ready'
+		);
 		INSERT INTO public.ai_import_batches(id,owner_user_id,source,target_deck_id,status,idempotency_key,import_request_hash,card_reservation_key,requested_card_count,requested_image_count)
-		VALUES('11000000-0000-4000-8000-000000000020','10000000-0000-4000-8000-00000000000a','app_ai','11000000-0000-4000-8000-000000000010','processing','s11-real-gate',repeat('a',64),'s11-real-card',1,0);
-		INSERT INTO public.ai_import_items(id,owner_user_id,batch_id,client_item_id,concept_id,ordinal,pattern,skill,front_text,back_text,card_key,image_mode,status)
-		VALUES('11000000-0000-4000-8000-000000000030','10000000-0000-4000-8000-00000000000a','11000000-0000-4000-8000-000000000020','single-r1','single',0,'R1','reading','fixture-front','fixture-back',repeat('c',64),'none','processing');
+		VALUES('11000000-0000-4000-8000-000000000020','10000000-0000-4000-8000-00000000000a','app_ai','11000000-0000-4000-8000-000000000010','processing','s11-real-gate',repeat('a',64),'s11-real-card',1,1);
+		INSERT INTO public.ai_import_items(id,owner_user_id,batch_id,client_item_id,concept_id,ordinal,pattern,skill,front_text,back_text,card_key,image_mode,upload_id,status)
+		VALUES('11000000-0000-4000-8000-000000000030','10000000-0000-4000-8000-00000000000a','11000000-0000-4000-8000-000000000020','single-r1','single',0,'R1','reading','fixture-front','fixture-back',repeat('c',64),'upload','11000000-0000-4000-8000-000000000070','processing');
 		INSERT INTO public.ai_quota_reservations(owner_user_id,reservation_key,kind,source,generation_request_hash,import_request_hash,usage_date,batch_id,units,status,provider_started_at)
 		VALUES('10000000-0000-4000-8000-00000000000a','s11-real-card','card_generation','app_ai',repeat('b',64),repeat('a',64),current_date,'11000000-0000-4000-8000-000000000020',1,'reserved',now());
 		SELECT pgmq.send('ai_card_imports','{"version":1,"jobId":"11000000-0000-4000-8000-000000000040","batchId":"11000000-0000-4000-8000-000000000020"}'::jsonb) INTO pair_message;
 		INSERT INTO public.ai_import_concept_jobs(id,owner_user_id,batch_id,concept_id,state,queue_message_id,claim_token,claim_expires_at)
 		VALUES('11000000-0000-4000-8000-000000000040','10000000-0000-4000-8000-00000000000a','11000000-0000-4000-8000-000000000020','single','processing',pair_message,'11000000-0000-4000-8000-000000000041',now()+interval '5 minutes');
+		INSERT INTO public.ai_upload_consumers(upload_id,job_id,owner_user_id)
+		VALUES('11000000-0000-4000-8000-000000000070','11000000-0000-4000-8000-000000000040','10000000-0000-4000-8000-00000000000a');
 		finalized := public.finalize_ai_import_concept('11000000-0000-4000-8000-000000000040',pair_message,'11000000-0000-4000-8000-000000000041',NULL,NULL,NULL,NULL);
 		IF finalized->>'status'<>'succeeded' OR
-		   (SELECT count(*) FROM public.ai_import_items WHERE batch_id='11000000-0000-4000-8000-000000000020' AND status='finalized')<>1 THEN
-			RAISE EXCEPTION 'single-pattern finalize boundary failed';
+		   (SELECT count(*) FROM public.ai_import_items WHERE batch_id='11000000-0000-4000-8000-000000000020' AND status='finalized')<>1 OR
+		   (SELECT status FROM public.ai_uploads WHERE id='11000000-0000-4000-8000-000000000070')<>'ready' THEN
+			RAISE EXCEPTION 'upload-mode finalize boundary failed';
 		END IF;
 
 		INSERT INTO public.ai_uploads(id,owner_user_id,upload_key,purpose,storage_path,mime_type,byte_size,status,source_storage_path,source_storage_bucket,detected_mime_type,width,height,sha256,delete_due_at)

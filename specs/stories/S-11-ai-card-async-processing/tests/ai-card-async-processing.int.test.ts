@@ -1472,6 +1472,33 @@ describe("S-11 commit and queue integration", () => {
 		}
 	});
 
+	it("R24-F10 disambiguates the upload-mode finalize source identifier", async () => {
+		const [core, realGate] = await Promise.all([
+			readFile(
+				new URL(
+					"../../../../supabase/migrations/20260715000000_s11_ai_card_async_processing.sql",
+					import.meta.url
+				),
+				"utf8"
+			),
+			readFile(new URL("./s11-real-integration-gate.ts", import.meta.url), "utf8"),
+		]);
+		const finalizeStart = core.indexOf(
+			"CREATE OR REPLACE FUNCTION public.finalize_ai_import_concept"
+		);
+		const finalize = core.slice(finalizeStart, core.indexOf("$$;", finalizeStart));
+		expect(finalize).toContain("DECLARE source_upload_id uuid;");
+		expect(finalize).toContain(
+			"SELECT min(items.upload_id::text)::uuid INTO source_upload_id"
+		);
+		expect(finalize).toContain(
+			"items.upload_id IS DISTINCT FROM source_upload_id"
+		);
+		expect(finalize).not.toContain("DECLARE upload_id uuid;");
+		expect(finalize).not.toContain("INTO upload_id");
+		expect(realGate).toContain("upload-mode finalize boundary failed");
+	});
+
 	it("R11-F1 preserves the legitimate empty Queue response as idle through the real handler path", async () => {
 		const result = await runQueueRpcThroughWorkerHandler([]);
 		expect(result.response.status).toBe(200);

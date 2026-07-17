@@ -1283,7 +1283,7 @@ DECLARE processing_count integer;
 DECLARE pattern_count integer;
 DECLARE duplicate_found boolean;
 DECLARE insert_conflict boolean := false;
-DECLARE upload_id uuid;
+DECLARE source_upload_id uuid;
 BEGIN
   PERFORM public.ai_s11_require_service_role();
 	PERFORM public.ai_s11_assert_active_claim(p_job_id,p_claim_token,p_message_id);
@@ -1363,17 +1363,17 @@ BEGIN
     illustration_key := NULL;
   END IF;
 
-  SELECT min(items.upload_id::text)::uuid INTO upload_id
+  SELECT min(items.upload_id::text)::uuid INTO source_upload_id
   FROM public.ai_import_items items
   WHERE items.batch_id=job.batch_id AND items.concept_id=job.concept_id;
-  IF upload_id IS NOT NULL THEN
+  IF source_upload_id IS NOT NULL THEN
     PERFORM 1 FROM public.ai_uploads uploads
-    WHERE uploads.id=upload_id AND uploads.owner_user_id=job.owner_user_id
+    WHERE uploads.id=source_upload_id AND uploads.owner_user_id=job.owner_user_id
       AND uploads.status='ready' FOR UPDATE;
     IF NOT FOUND OR EXISTS (
       SELECT 1 FROM public.ai_import_items items
       WHERE items.batch_id=job.batch_id AND items.concept_id=job.concept_id
-        AND items.upload_id IS DISTINCT FROM upload_id
+        AND items.upload_id IS DISTINCT FROM source_upload_id
     ) THEN PERFORM public.ai_raise_import_error('CONFLICT'); END IF;
   END IF;
 
