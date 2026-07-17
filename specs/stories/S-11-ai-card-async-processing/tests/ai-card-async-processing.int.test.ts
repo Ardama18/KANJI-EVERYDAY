@@ -40,6 +40,7 @@ import {
 	assertOwnerProjectionBoundary,
 	assertStorageMutationDeniedResponse,
 	fetchServiceOwnerRows,
+	waitForStorageObjectNotFound,
 } from "./helpers/s11-real-e2e-data-boundary";
 
 const OWNER_ID = "22000000-0000-4000-8000-000000000001";
@@ -1589,25 +1590,28 @@ describe("S-11 commit and queue integration", () => {
 	});
 
 	it("R24-F12 checks private-object Storage status before parsing response bodies", async () => {
-		const realGate = await readFile(
-			new URL("./s11-real-e2e-gate.ts", import.meta.url),
-			"utf8"
-		);
+		const [realGate, boundaryHelper] = await Promise.all([
+			readFile(new URL("./s11-real-e2e-gate.ts", import.meta.url), "utf8"),
+			readFile(
+				new URL("./helpers/s11-real-e2e-data-boundary.ts", import.meta.url),
+				"utf8"
+			),
+		]);
 		const deniedStart = realGate.indexOf("async function assertStorageDenied");
 		const denied = realGate.slice(
 			deniedStart,
 			realGate.indexOf("async function assertAppNotFound", deniedStart)
 		);
-		const notFoundStart = realGate.indexOf(
-			"async function assertStorageObjectNotFound"
+		const notFoundStart = boundaryHelper.indexOf(
+			"export async function assertStorageObjectNotFoundResponse"
 		);
-		const notFound = realGate.slice(
+		const notFound = boundaryHelper.slice(
 			notFoundStart,
-			realGate.indexOf("async function fakeProviderCalls", notFoundStart)
+			boundaryHelper.indexOf("const STORAGE_DELETE_MAX_ATTEMPTS", notFoundStart)
 		);
 		expect(denied).toContain("response.status !== 400");
 		expect(denied.indexOf("response.status !== 400")).toBeLessThan(
-			denied.indexOf("assertStorageObjectNotFound(response, scenario)")
+			denied.indexOf("assertStorageObjectNotFoundResponse(response, scenario)")
 		);
 		expect(notFound).toContain("response.status !== 400");
 		expect(notFound.indexOf("response.status !== 400")).toBeLessThan(
@@ -1617,6 +1621,61 @@ describe("S-11 commit and queue integration", () => {
 		expect(notFound).toContain("(status=400, code=unknown)");
 		expect(notFound).not.toContain("body.message");
 		expect(notFound).not.toContain("JSON.stringify(body)");
+	});
+
+	it("R24-F13 bounds eventual Storage deletion polling to HTTP 200 retries", async () => {
+		const boundaryHelper = await readFile(
+			new URL("./helpers/s11-real-e2e-data-boundary.ts", import.meta.url),
+			"utf8"
+		);
+		expect(boundaryHelper).toContain("const STORAGE_DELETE_MAX_ATTEMPTS = 12;");
+		expect(boundaryHelper).toContain("const STORAGE_DELETE_RETRY_DELAY_MS = 250;");
+		expect(boundaryHelper).toContain("if (response.status === 400)");
+		expect(boundaryHelper).toContain("if (response.status !== 200)");
+
+		const available = () => new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
+			status: 200,
+			headers: { "Content-Type": "image/png" },
+		});
+		const deleted = () => Response.json(
+			{ statusCode: "404", error: "not_found", message: "unsafe-storage-detail" },
+			{ status: 400 }
+		);
+		const sequence = [available(), available(), deleted()];
+		const sequenceFetch = vi.fn(async () => sequence.shift() ?? available());
+		const sequenceWaits: number[] = [];
+		await expect(
+			waitForStorageObjectNotFound(sequenceFetch, "terminal source", {
+				wait: async (delayMs) => { sequenceWaits.push(delayMs); },
+			})
+		).resolves.toBeUndefined();
+		expect(sequenceFetch).toHaveBeenCalledTimes(3);
+		expect(sequenceWaits).toEqual([250, 250]);
+
+		const persistentFetch = vi.fn(async () => available());
+		const persistentWaits: number[] = [];
+		await expect(
+			waitForStorageObjectNotFound(persistentFetch, "persistent source", {
+				wait: async (delayMs) => { persistentWaits.push(delayMs); },
+			})
+		).rejects.toThrow(
+			"persistent source Storage deletion poll exhausted (status=200, attempts=12)"
+		);
+		expect(persistentFetch).toHaveBeenCalledTimes(12);
+		expect(persistentWaits).toHaveLength(11);
+
+		const unexpected = new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
+			status: 503,
+			headers: { "Content-Type": "application/octet-stream" },
+		});
+		const unexpectedFetch = vi.fn(async () => unexpected);
+		await expect(
+			waitForStorageObjectNotFound(unexpectedFetch, "unexpected source", {
+				wait: async () => { throw new Error("unexpected retry"); },
+			})
+		).rejects.toThrow("unexpected source Storage deletion poll failed (status=503)");
+		expect(unexpectedFetch).toHaveBeenCalledTimes(1);
+		expect(unexpected.bodyUsed).toBe(false);
 	});
 
 	it("R11-F1 preserves the legitimate empty Queue response as idle through the real handler path", async () => {

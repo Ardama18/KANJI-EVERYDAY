@@ -12,7 +12,9 @@ import { resolveProviderEndpointBinding } from "../../../../supabase/functions/_
 import {
 	assertOwnerProjectionBoundary,
 	assertStorageMutationDeniedResponse,
+	assertStorageObjectNotFoundResponse,
 	fetchServiceOwnerRows,
+	waitForStorageObjectNotFound,
 } from "./helpers/s11-real-e2e-data-boundary";
 
 interface PreparedSource {
@@ -341,8 +343,10 @@ for (const row of newReadyRows) {
 if (managedFixtureBytes === undefined) throw new Error("managed Storage fixture bytes were absent");
 await assertManagedStorageMutationBoundary(newReadyRows[0].storage_path, managedFixtureBytes);
 const sourceUrl = storageObjectUrl("ai-card-sources", `${userId}/${prepared.uploadId}/source`);
-const deletedSource = await fetch(sourceUrl, { headers: serviceHeaders });
-await assertStorageObjectNotFound(deletedSource, "terminal upload consumer source");
+await waitForStorageObjectNotFound(
+	async () => await fetch(sourceUrl, { headers: serviceHeaders }),
+	"terminal upload consumer source"
+);
 
 const ownerBStatus = await fetchApp(
 	ownerB,
@@ -367,16 +371,11 @@ if (afterFirstDelete.status !== 200) {
 }
 await assertStorageDenied(storageObjectUrl("illustrations", sharedPath), ownerB.accessToken, "owner-B shared object");
 await deleteOwnerCard(sharedItems[1]?.cardId ?? "");
-let sharedRemoved = false;
-for (let index = 0; index < 12; index += 1) {
-	await invokeCleanup();
-	const object = await fetch(storageObjectUrl("illustrations", sharedPath), { headers: serviceHeaders });
-	if (object.status === 200) continue;
-	await assertStorageObjectNotFound(object, "last-reference shared illustration");
-	sharedRemoved = true;
-	break;
-}
-if (!sharedRemoved) throw new Error("last shared-card deletion did not remove the object");
+await waitForStorageObjectNotFound(
+	async () => await fetch(storageObjectUrl("illustrations", sharedPath), { headers: serviceHeaders }),
+	"last-reference shared illustration",
+	{ beforeAttempt: invokeCleanup }
+);
 
 const retryScenario = await runProviderRuntimeScenario("transient_once", runId);
 const permanentScenario = await runProviderRuntimeScenario("permanent", runId);
@@ -937,7 +936,7 @@ async function assertStorageDenied(objectUrl: string, jwt: string, role: string)
 			`${scenario} did not return exact Storage HTTP 400/404/not_found contract (status=${response.status})`
 		);
 	}
-	await assertStorageObjectNotFound(response, scenario);
+	await assertStorageObjectNotFoundResponse(response, scenario);
 }
 
 async function assertAppNotFound(response: Response, scenario: string): Promise<void> {
@@ -949,29 +948,6 @@ async function assertAppNotFound(response: Response, scenario: string): Promise<
 		body.error.code !== "NOT_FOUND"
 	) {
 		throw new Error(`${scenario} did not return exact HTTP 404/NOT_FOUND`);
-	}
-}
-
-async function assertStorageObjectNotFound(response: Response, scenario: string): Promise<void> {
-	const contract = `${scenario} did not return exact Storage HTTP 400/404/not_found contract`;
-	if (response.status !== 400) {
-		throw new Error(`${contract} (status=${response.status})`);
-	}
-	let body: unknown;
-	try {
-		body = await response.json();
-	} catch {
-		throw new Error(`${contract} (status=400, code=unknown)`);
-	}
-	if (
-		!isRecord(body) ||
-		body.statusCode !== "404" ||
-		body.error !== "not_found"
-	) {
-		const errorCode = isRecord(body) && typeof body.statusCode === "string"
-			? body.statusCode
-			: "unknown";
-		throw new Error(`${contract} (status=400, code=${errorCode})`);
 	}
 }
 

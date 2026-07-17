@@ -59,6 +59,68 @@ export async function assertStorageMutationDeniedResponse(
 	}
 }
 
+export async function assertStorageObjectNotFoundResponse(
+	response: Response,
+	scenario: string
+): Promise<void> {
+	const contract = `${scenario} did not return exact Storage HTTP 400/404/not_found contract`;
+	if (response.status !== 400) {
+		throw new Error(`${contract} (status=${response.status})`);
+	}
+	let body: unknown;
+	try {
+		body = await response.json();
+	} catch {
+		throw new Error(`${contract} (status=400, code=unknown)`);
+	}
+	if (
+		!isRecord(body) ||
+		body.statusCode !== "404" ||
+		body.error !== "not_found"
+	) {
+		const errorCode = isRecord(body) && typeof body.statusCode === "string"
+			? body.statusCode
+			: "unknown";
+		throw new Error(`${contract} (status=400, code=${errorCode})`);
+	}
+}
+
+const STORAGE_DELETE_MAX_ATTEMPTS = 12;
+const STORAGE_DELETE_RETRY_DELAY_MS = 250;
+
+export async function waitForStorageObjectNotFound(
+	fetchObject: () => Promise<Response>,
+	scenario: string,
+	options: Readonly<{
+		beforeAttempt?: () => Promise<void>;
+		wait?: (delayMs: number) => Promise<void>;
+	}> = {}
+): Promise<void> {
+	const wait = options.wait ?? (async (delayMs: number) => {
+		await new Promise((resolve) => setTimeout(resolve, delayMs));
+	});
+	for (let attempt = 1; attempt <= STORAGE_DELETE_MAX_ATTEMPTS; attempt += 1) {
+		await options.beforeAttempt?.();
+		const response = await fetchObject();
+		if (response.status === 400) {
+			await assertStorageObjectNotFoundResponse(response, scenario);
+			return;
+		}
+		if (response.status !== 200) {
+			throw new Error(
+				`${scenario} Storage deletion poll failed (status=${response.status})`
+			);
+		}
+		await response.body?.cancel();
+		if (attempt === STORAGE_DELETE_MAX_ATTEMPTS) {
+			throw new Error(
+				`${scenario} Storage deletion poll exhausted (status=200, attempts=${STORAGE_DELETE_MAX_ATTEMPTS})`
+			);
+		}
+		await wait(STORAGE_DELETE_RETRY_DELAY_MS);
+	}
+}
+
 interface OwnerProjectionBoundary extends S11PostgrestBoundary {
 	readonly ownerHeaders: Readonly<Record<string, string>>;
 	readonly otherOwnerHeaders: Readonly<Record<string, string>>;
