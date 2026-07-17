@@ -1405,6 +1405,59 @@ describe("S-11 commit and queue integration", () => {
 		expect(fixtureValidation.success).toBe(true);
 	});
 
+	it("R24-F9 limits Hosted snapshot diagnostics to safe resource, status, and code fields", async () => {
+		const boundaryHelper = await readFile(
+			new URL("./helpers/s11-real-e2e-data-boundary.ts", import.meta.url),
+			"utf8"
+		);
+		const fetchRowsStart = boundaryHelper.indexOf("async function fetchRows");
+		const fetchRows = boundaryHelper.slice(
+			fetchRowsStart,
+			boundaryHelper.indexOf("function assertCanonicalUuid", fetchRowsStart)
+		);
+		expect(boundaryHelper).toContain(
+			"const POSTGREST_RESOURCE_PATTERN = /^[a-z][a-z0-9_]{0,62}$/u;"
+		);
+		expect(boundaryHelper).toContain(
+			"`service-role owner-scoped ${resourceName} snapshot`"
+		);
+		expect(fetchRows).toContain('typeof body.code === "string"');
+		expect(fetchRows).toContain('? body.code\n\t\t\t: "unknown";');
+		expect(fetchRows).toContain(
+			"failed: status=${response.status}, code=${errorCode}"
+		);
+		expect(fetchRows).not.toContain("JSON.stringify(body)");
+		expect(fetchRows).not.toContain("response.headers");
+
+		for (const [body, expectedCode] of [
+			[{ code: "42501", message: "unsafe-postgrest-detail" }, "42501"],
+			[{ code: { unsafe: "unsafe-postgrest-detail" } }, "unknown"],
+		] as const) {
+			let captured: unknown;
+			try {
+				await fetchServiceOwnerRows(
+					{
+						fetch: vi.fn(async () => Response.json(body, { status: 403 })) as typeof fetch,
+						supabaseBase: "https://project.supabase.co",
+						anonKey: ANON_TEST_API_KEY,
+					},
+					{ Authorization: SERVICE_TEST_AUTHORIZATION, apikey: SERVICE_TEST_API_KEY },
+					OWNER_ID,
+					"ai_import_items?select=id"
+				);
+			} catch (error) {
+				captured = error;
+			}
+			expect(captured).toBeInstanceOf(Error);
+			if (captured instanceof Error) {
+				expect(captured.message).toBe(
+					`service-role owner-scoped ai_import_items snapshot failed: status=403, code=${expectedCode}`
+				);
+				expect(captured.message).not.toContain("unsafe-postgrest-detail");
+			}
+		}
+	});
+
 	it("R11-F1 preserves the legitimate empty Queue response as idle through the real handler path", async () => {
 		const result = await runQueueRpcThroughWorkerHandler([]);
 		expect(result.response.status).toBe(200);

@@ -1,5 +1,6 @@
 const UUID_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const POSTGREST_RESOURCE_PATTERN = /^[a-z][a-z0-9_]{0,62}$/u;
 
 const OWNER_SAFE_OBJECT_COLUMNS = [
 	"id",
@@ -52,12 +53,16 @@ export async function fetchServiceOwnerRows(
 	if (/(?:\?|&)owner_user_id=/u.test(resourceAndQuery)) {
 		throw new Error("service owner filter must be added by the boundary adapter");
 	}
+	const resourceName = resourceAndQuery.split("?", 1)[0] ?? "";
+	if (!POSTGREST_RESOURCE_PATTERN.test(resourceName)) {
+		throw new Error("service owner snapshot resource must be a safe identifier");
+	}
 	const separator = resourceAndQuery.includes("?") ? "&" : "?";
 	return await fetchRows(
 		boundary,
 		`${resourceAndQuery}${separator}owner_user_id=eq.${encodeURIComponent(ownerId)}`,
 		serviceHeaders,
-		"service-role owner-scoped snapshot"
+		`service-role owner-scoped ${resourceName} snapshot`
 	);
 }
 
@@ -120,7 +125,10 @@ async function fetchRows(
 	);
 	const body: unknown = await response.json();
 	if (response.status !== 200 || !Array.isArray(body) || !body.every(isRecord)) {
-		throw new Error(`${label} failed: ${response.status}`);
+		const errorCode = isRecord(body) && typeof body.code === "string"
+			? body.code
+			: "unknown";
+		throw new Error(`${label} failed: status=${response.status}, code=${errorCode}`);
 	}
 	return body;
 }
