@@ -1691,6 +1691,41 @@ describe("S-11 commit and queue integration", () => {
 		expect(unexpected.bodyUsed).toBe(false);
 	});
 
+	it("R24-F14 keeps provider runtime R1 fixtures schema-valid for every failure mode", async () => {
+		const realGate = await readFile(
+			new URL("./s11-real-e2e-gate.ts", import.meta.url),
+			"utf8"
+		);
+		const scenarioStart = realGate.indexOf(
+			"async function runProviderRuntimeScenario"
+		);
+		const scenario = realGate.slice(
+			scenarioStart,
+			realGate.indexOf("async function runRecoverableWorkerScenario", scenarioStart)
+		);
+		expect(scenario).toContain('front: `漢-${suffix}`');
+		expect(scenario).toContain('back: `かん-${suffix}`');
+		expect(scenario).not.toContain('front: `front-${suffix}`');
+		expect(scenario).not.toContain('back: `back-${suffix}`');
+
+		for (const mode of ["transient_once", "permanent"] as const) {
+			const suffix = `${mode}-fixture`;
+			const validation = await validateImportRequest({
+				deck: { create: { name: `S11 ${suffix}` } },
+				items: [{
+					clientItemId: `item-${suffix}`,
+					conceptId: `concept-${suffix}`,
+					pattern: "R1",
+					front: `漢-${suffix}`,
+					back: `かん-${suffix}`,
+					tags: [],
+					image: { mode: "ai" },
+				}],
+			});
+			expect(validation.success, mode).toBe(true);
+		}
+	});
+
 	it("R11-F1 preserves the legitimate empty Queue response as idle through the real handler path", async () => {
 		const result = await runQueueRpcThroughWorkerHandler([]);
 		expect(result.response.status).toBe(200);
