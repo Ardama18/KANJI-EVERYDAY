@@ -1624,14 +1624,22 @@ describe("S-11 commit and queue integration", () => {
 	});
 
 	it("R24-F13 bounds eventual Storage deletion polling to HTTP 200 retries", async () => {
-		const boundaryHelper = await readFile(
-			new URL("./helpers/s11-real-e2e-data-boundary.ts", import.meta.url),
-			"utf8"
-		);
+		const [boundaryHelper, realGate] = await Promise.all([
+			readFile(
+				new URL("./helpers/s11-real-e2e-data-boundary.ts", import.meta.url),
+				"utf8"
+			),
+			readFile(new URL("./s11-real-e2e-gate.ts", import.meta.url), "utf8"),
+		]);
 		expect(boundaryHelper).toContain("const STORAGE_DELETE_MAX_ATTEMPTS = 12;");
 		expect(boundaryHelper).toContain("const STORAGE_DELETE_RETRY_DELAY_MS = 250;");
+		expect(boundaryHelper).toContain("fetchObject: (attempt: number) => Promise<Response>");
 		expect(boundaryHelper).toContain("if (response.status === 400)");
 		expect(boundaryHelper).toContain("if (response.status !== 200)");
+		expect(realGate).toContain(
+			'probe.searchParams.set("s11-delete-probe", String(attempt));'
+		);
+		expect(realGate.match(/cache: "no-store"/gu)).toHaveLength(2);
 
 		const available = () => new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
 			status: 200,
@@ -1642,7 +1650,11 @@ describe("S-11 commit and queue integration", () => {
 			{ status: 400 }
 		);
 		const sequence = [available(), available(), deleted()];
-		const sequenceFetch = vi.fn(async () => sequence.shift() ?? available());
+		const sequenceAttempts: number[] = [];
+		const sequenceFetch = vi.fn(async (attempt: number) => {
+			sequenceAttempts.push(attempt);
+			return sequence.shift() ?? available();
+		});
 		const sequenceWaits: number[] = [];
 		await expect(
 			waitForStorageObjectNotFound(sequenceFetch, "terminal source", {
@@ -1650,6 +1662,7 @@ describe("S-11 commit and queue integration", () => {
 			})
 		).resolves.toBeUndefined();
 		expect(sequenceFetch).toHaveBeenCalledTimes(3);
+		expect(sequenceAttempts).toEqual([0, 1, 2]);
 		expect(sequenceWaits).toEqual([250, 250]);
 
 		const persistentFetch = vi.fn(async () => available());

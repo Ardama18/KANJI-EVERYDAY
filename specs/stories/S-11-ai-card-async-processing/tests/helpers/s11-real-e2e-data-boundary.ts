@@ -89,7 +89,7 @@ const STORAGE_DELETE_MAX_ATTEMPTS = 12;
 const STORAGE_DELETE_RETRY_DELAY_MS = 250;
 
 export async function waitForStorageObjectNotFound(
-	fetchObject: () => Promise<Response>,
+	fetchObject: (attempt: number) => Promise<Response>,
 	scenario: string,
 	options: Readonly<{
 		beforeAttempt?: () => Promise<void>;
@@ -99,9 +99,9 @@ export async function waitForStorageObjectNotFound(
 	const wait = options.wait ?? (async (delayMs: number) => {
 		await new Promise((resolve) => setTimeout(resolve, delayMs));
 	});
-	for (let attempt = 1; attempt <= STORAGE_DELETE_MAX_ATTEMPTS; attempt += 1) {
+	for (let attempt = 0; attempt < STORAGE_DELETE_MAX_ATTEMPTS; attempt += 1) {
 		await options.beforeAttempt?.();
-		const response = await fetchObject();
+		const response = await fetchObject(attempt);
 		if (response.status === 400) {
 			await assertStorageObjectNotFoundResponse(response, scenario);
 			return;
@@ -112,7 +112,7 @@ export async function waitForStorageObjectNotFound(
 			);
 		}
 		await response.body?.cancel();
-		if (attempt === STORAGE_DELETE_MAX_ATTEMPTS) {
+		if (attempt === STORAGE_DELETE_MAX_ATTEMPTS - 1) {
 			throw new Error(
 				`${scenario} Storage deletion poll exhausted (status=200, attempts=${STORAGE_DELETE_MAX_ATTEMPTS})`
 			);

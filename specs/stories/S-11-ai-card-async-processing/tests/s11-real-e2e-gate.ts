@@ -344,7 +344,10 @@ if (managedFixtureBytes === undefined) throw new Error("managed Storage fixture 
 await assertManagedStorageMutationBoundary(newReadyRows[0].storage_path, managedFixtureBytes);
 const sourceUrl = storageObjectUrl("ai-card-sources", `${userId}/${prepared.uploadId}/source`);
 await waitForStorageObjectNotFound(
-	async () => await fetch(sourceUrl, { headers: serviceHeaders }),
+	async (attempt) => await fetch(storageDeleteProbeUrl(sourceUrl, attempt), {
+		headers: serviceHeaders,
+		cache: "no-store",
+	}),
 	"terminal upload consumer source"
 );
 
@@ -372,7 +375,10 @@ if (afterFirstDelete.status !== 200) {
 await assertStorageDenied(storageObjectUrl("illustrations", sharedPath), ownerB.accessToken, "owner-B shared object");
 await deleteOwnerCard(sharedItems[1]?.cardId ?? "");
 await waitForStorageObjectNotFound(
-	async () => await fetch(storageObjectUrl("illustrations", sharedPath), { headers: serviceHeaders }),
+	async (attempt) => await fetch(
+		storageDeleteProbeUrl(storageObjectUrl("illustrations", sharedPath), attempt),
+		{ headers: serviceHeaders, cache: "no-store" }
+	),
 	"last-reference shared illustration",
 	{ beforeAttempt: invokeCleanup }
 );
@@ -937,6 +943,12 @@ async function assertStorageDenied(objectUrl: string, jwt: string, role: string)
 		);
 	}
 	await assertStorageObjectNotFoundResponse(response, scenario);
+}
+
+function storageDeleteProbeUrl(objectUrl: string, attempt: number): string {
+	const probe = new URL(objectUrl);
+	probe.searchParams.set("s11-delete-probe", String(attempt));
+	return probe.toString();
 }
 
 async function assertAppNotFound(response: Response, scenario: string): Promise<void> {
