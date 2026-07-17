@@ -8,9 +8,11 @@ export interface WorkerInvocationDependencies {
 
 export interface WorkerRequestDependencies extends WorkerInvocationDependencies {
 	readonly workerSecret: () => string | undefined;
+	readonly stagingSupportSecret?: () => string | undefined;
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const STAGING_SUPPORT_HEADER = "x-s11-staging-support-secret";
 
 /**
  * Actual HTTP boundary. Configuration lookup is intentionally lazy so missing,
@@ -38,6 +40,19 @@ export async function handleWorkerRequest(
 		if (request.headers.get("x-ai-worker-secret") !== configuredSecret) {
 			return new Response(null, { status: 401 });
 		}
+		const candidateStagingSecret = request.headers.get(STAGING_SUPPORT_HEADER);
+		if (candidateStagingSecret !== null) {
+			const configuredStagingSecret = dependencies.stagingSupportSecret?.()?.trim();
+			if (
+				configuredStagingSecret === undefined ||
+				configuredStagingSecret.length === 0 ||
+				candidateStagingSecret.length === 0 ||
+				!await constantTimeSecretMatch(candidateStagingSecret, configuredStagingSecret)
+			) {
+				return new Response(null, { status: 403 });
+			}
+			throw new Error("STAGING_RECOVERABLE_PROBE");
+		}
 		return Response.json({ outcome: await dependencies.execute(), ...(invocationId === undefined ? {} : { invocationId }) });
 	} catch {
 		dependencies.log({
@@ -50,6 +65,21 @@ export async function handleWorkerRequest(
 			{ status: 500 }
 		);
 	}
+}
+
+async function constantTimeSecretMatch(left: string, right: string): Promise<boolean> {
+	const encoder = new TextEncoder();
+	const [leftDigest, rightDigest] = await Promise.all([
+		crypto.subtle.digest("SHA-256", encoder.encode(left)),
+		crypto.subtle.digest("SHA-256", encoder.encode(right)),
+	]);
+	const leftBytes = new Uint8Array(leftDigest);
+	const rightBytes = new Uint8Array(rightDigest);
+	let difference = 0;
+	for (let index = 0; index < leftBytes.length; index += 1) {
+		difference |= leftBytes[index] ^ rightBytes[index];
+	}
+	return difference === 0;
 }
 
 /**

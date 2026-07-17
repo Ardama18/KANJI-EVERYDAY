@@ -24,6 +24,7 @@ const required = [
 	"S11_REAL_USER_B_PASSWORD",
 	"S11_REAL_PREVIEW_HMAC_SECRET",
 	"S11_REAL_WORKER_SECRET",
+	"S11_REAL_STAGING_SUPPORT_SECRET",
 	"S11_REAL_ANON_KEY",
 	"S11_REAL_SERVICE_ROLE_KEY",
 	"S11_REAL_SOURCE_FIXTURE_PATH",
@@ -53,6 +54,9 @@ const recoverableWorkerUrl = requiredEnvironment("S11_REAL_RECOVERABLE_WORKER_UR
 const supabaseBase = requiredEnvironment("S11_REAL_SUPABASE_URL").replace(/\/$/u, "");
 const anonKey = requiredEnvironment("S11_REAL_ANON_KEY");
 const serviceRoleKey = requiredEnvironment("S11_REAL_SERVICE_ROLE_KEY");
+const stagingSupportHeaders = {
+	"x-s11-staging-support-secret": requiredEnvironment("S11_REAL_STAGING_SUPPORT_SECRET"),
+} as const;
 const expectedProviderBinding = resolveProviderEndpointBinding({
 	ILLUSTRATION_PROVIDER_ENDPOINT: requiredEnvironment("S11_REAL_FAKE_PROVIDER_ENDPOINT"),
 	ILLUSTRATION_PROVIDER_ENDPOINT_BINDING: requiredEnvironment(
@@ -454,7 +458,11 @@ async function runRecoverableWorkerScenario(): Promise<string> {
 	const invocationId = crypto.randomUUID();
 	const response = await fetch(recoverableWorkerUrl, {
 		method: "POST",
-		headers: { ...workerHeaders, "x-ai-worker-invocation-id": invocationId },
+		headers: {
+			...workerHeaders,
+			...stagingSupportHeaders,
+			"x-ai-worker-invocation-id": invocationId,
+		},
 	});
 	const body: unknown = await response.json();
 	if (
@@ -494,7 +502,7 @@ async function assertWorkerArtifactIdentity(): Promise<void> {
 		if (attestation.origin === new URL(deploymentUrl).origin) {
 			throw new Error("immutable control-plane artifact attestation must be independent of worker runtime");
 		}
-		const response = await fetch(attestation);
+		const response = await fetch(attestation, { headers: stagingSupportHeaders });
 		const body: unknown = await response.json();
 		if (
 			response.status !== 200 ||
@@ -516,6 +524,7 @@ async function setFakeProviderMode(
 	const response = await fetch(requiredEnvironment("S11_REAL_FAKE_PROVIDER_CONTROL_URL"), {
 		method: "POST",
 		headers: {
+			...stagingSupportHeaders,
 			"Content-Type": "application/json",
 			"x-s11-provider-binding": expectedProviderBinding.binding,
 		},
@@ -537,7 +546,7 @@ async function assertRuntimeLogs(
 ): Promise<void> {
 	const url = new URL(requiredEnvironment("S11_REAL_RUNTIME_LOGS_URL"));
 	url.searchParams.set("runId", runIdentifier);
-	const response = await fetch(url);
+	const response = await fetch(url, { headers: stagingSupportHeaders });
 	const body: unknown = await response.json();
 	if (
 		response.status !== 200 || !isRecord(body) || body.complete !== true ||
@@ -594,6 +603,7 @@ async function assertRuntimeLogs(
 		...sensitiveMarkers,
 		requiredEnvironment("S11_REAL_PREVIEW_HMAC_SECRET"),
 		requiredEnvironment("S11_REAL_WORKER_SECRET"),
+		requiredEnvironment("S11_REAL_STAGING_SUPPORT_SECRET"),
 		requiredEnvironment("S11_REAL_ANON_KEY"),
 		requiredEnvironment("S11_REAL_SERVICE_ROLE_KEY"),
 		requiredEnvironment("S11_REAL_PROVIDER_SECRET_MARKER"),
@@ -888,7 +898,9 @@ async function assertStorageObjectNotFound(response: Response, scenario: string)
 }
 
 async function fakeProviderCalls(requireCurrentBinding = false): Promise<number> {
-	const response = await fetch(requiredEnvironment("S11_REAL_FAKE_PROVIDER_STATS_URL"));
+	const response = await fetch(requiredEnvironment("S11_REAL_FAKE_PROVIDER_STATS_URL"), {
+		headers: stagingSupportHeaders,
+	});
 	const body: unknown = await response.json();
 	if (
 		response.status !== 200 ||

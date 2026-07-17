@@ -12,6 +12,7 @@ Deno.serve(async (request) => {
 	return await handleWorkerRequest(request, {
 		log: logger,
 		workerSecret: () => Deno.env.get("AI_CARD_WORKER_SECRET"),
+		stagingSupportSecret: () => Deno.env.get("S11_STAGING_SUPPORT_SECRET"),
 		execute: async () => {
 			const supabaseUrl = requiredEnvironment("SUPABASE_URL");
 			const serviceRoleKey = requiredEnvironment("SUPABASE_SERVICE_ROLE_KEY");

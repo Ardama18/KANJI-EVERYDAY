@@ -1314,6 +1314,84 @@ describe("S-11 retry, provider, and storage integration", () => {
 	);
 
 	it.each([
+		["missing configuration", undefined, "probe-secret", 403],
+		["blank configuration", "  \t", "probe-secret", 403],
+		["blank request", "probe-secret", "", 403],
+		["mismatch", "probe-secret", "wrong-secret", 403],
+		["match", " probe-secret ", "probe-secret", 500],
+	] as const)(
+		"R24-F1 staging recoverable probe enforces the %s boundary without executing work",
+		async (_case, configuredSecret, requestSecret, expectedStatus) => {
+			const { handleWorkerRequest } = await import(
+				"../../../../supabase/functions/_shared/ai-card-import/worker-entrypoint.ts"
+			);
+			const invocationId = "33000000-0000-4000-8000-000000000002";
+			const logs: SafeLogEvent[] = [];
+			let executions = 0;
+			const response = await handleWorkerRequest(
+				new Request("http://worker.local", {
+					method: "POST",
+					headers: {
+						"x-ai-worker-secret": "worker-secret",
+						"x-ai-worker-invocation-id": invocationId,
+						"x-s11-staging-support-secret": requestSecret,
+					},
+				}),
+				{
+					workerSecret: () => "worker-secret",
+					stagingSupportSecret: () => configuredSecret,
+					execute: async () => {
+						executions += 1;
+						return "idle";
+					},
+					log: (event) => logs.push(event),
+				}
+			);
+			expect(response.status).toBe(expectedStatus);
+			expect(executions).toBe(0);
+			if (expectedStatus === 500) {
+				expect(await response.json()).toEqual({ errorCode: "INTERNAL_ERROR", invocationId });
+				expect(logs).toEqual([{
+					event: "worker_recoverable",
+					errorCode: "INTERNAL_ERROR",
+					invocationId,
+				}]);
+				expect(JSON.stringify(logs)).not.toContain(requestSecret);
+			} else {
+				expect(await response.text()).toBe("");
+				expect(logs).toEqual([]);
+			}
+		}
+	);
+
+	it("R24-F1 absent staging probe header leaves the ordinary worker path unchanged", async () => {
+		const { handleWorkerRequest } = await import(
+			"../../../../supabase/functions/_shared/ai-card-import/worker-entrypoint.ts"
+		);
+		let executions = 0;
+		const response = await handleWorkerRequest(
+			new Request("http://worker.local", {
+				method: "POST",
+				headers: { "x-ai-worker-secret": "worker-secret" },
+			}),
+			{
+				workerSecret: () => "worker-secret",
+				stagingSupportSecret: () => undefined,
+				execute: async () => {
+					executions += 1;
+					return "idle";
+				},
+				log: () => {
+					throw new Error("ordinary path must not emit a recoverable log");
+				},
+			}
+		);
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({ outcome: "idle" });
+		expect(executions).toBe(1);
+	});
+
+	it.each([
 		["missing", undefined, undefined, 500],
 		["blank", "  \t", "", 500],
 		["missing header", "cleanup-secret", undefined, 401],
@@ -1596,16 +1674,26 @@ describe("S-11 retry, provider, and storage integration", () => {
 	});
 
 	it("F2 real runtime gate binds both deployments to control-plane artifact attestations and probe correlation", async () => {
-		const gate = await readFile(new URL("./s11-real-e2e-gate.ts", import.meta.url), "utf8");
+		const [gate, worker] = await Promise.all([
+			readFile(new URL("./s11-real-e2e-gate.ts", import.meta.url), "utf8"),
+			readFile(
+				new URL("../../../../supabase/functions/ai-card-import-worker/index.ts", import.meta.url),
+				"utf8"
+			),
+		]);
 		for (const name of [
 			"S11_REAL_WORKER_ARTIFACT_SHA256",
 			"S11_REAL_MAIN_WORKER_ARTIFACT_ATTESTATION_URL",
 			"S11_REAL_RECOVERABLE_WORKER_ARTIFACT_ATTESTATION_URL",
+			"S11_REAL_STAGING_SUPPORT_SECRET",
 		]) expect(gate).toContain(`"${name}"`);
 		expect(gate).toContain("immutable control-plane artifact attestation");
 		expect(gate).toContain('"x-ai-worker-invocation-id"');
+		expect(gate).toContain('"x-s11-staging-support-secret"');
+		expect(gate.match(/stagingSupportHeaders/gu)?.length).toBeGreaterThanOrEqual(6);
 		expect(gate).toContain("correlated worker_recoverable count was not exactly one");
 		expect(gate).toContain("correlated recoverable invocation emitted worker_failure");
+		expect(worker).toContain('Deno.env.get("S11_STAGING_SUPPORT_SECRET")');
 	});
 
 	it("F3 malformed poison ACKs once with one safe observation and no terminal failure", async () => {
