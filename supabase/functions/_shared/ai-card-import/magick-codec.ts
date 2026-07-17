@@ -89,5 +89,9 @@ async function initialize(wasmBytes: Uint8Array | undefined): Promise<void> {
 		(await Deno.readFile(
 			new URL("magick.wasm", import.meta.resolve("npm:@imagemagick/magick-wasm@0.0.35"))
 		));
-	await initializeImageMagick(bytes);
+	// Passing the raw bytes makes the Emscripten module retain the full WASM
+	// payload after instantiation. Compile first so only the immutable module is
+	// retained while request image buffers are decoded inside the Edge envelope.
+	const module = await WebAssembly.compile(bytes);
+	await initializeImageMagick(module);
 }

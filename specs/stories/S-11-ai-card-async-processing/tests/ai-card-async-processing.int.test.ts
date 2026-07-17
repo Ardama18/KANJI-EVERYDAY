@@ -2610,16 +2610,25 @@ describe("S-11 reviewer regression boundaries", () => {
 	});
 
 	it("R25-F1 keeps the resource gate bound to fresh-process baseline-adjusted limits", async () => {
-		const gate = await readFile(
-			new URL("./edge-resource-gate.ts", import.meta.url),
-			"utf8"
-		);
+		const [gate, codec] = await Promise.all([
+			readFile(new URL("./edge-resource-gate.ts", import.meta.url), "utf8"),
+			readFile(
+				new URL(
+					"../../../../supabase/functions/_shared/ai-card-import/magick-codec.ts",
+					import.meta.url
+				),
+				"utf8"
+			),
+		]);
 		expect(gate).toContain("const RSS_LIMIT_BYTES = 248 * 1024 * 1024");
 		expect(gate).toContain("rssBaselineBytes");
 		expect(gate).toContain("await restartEdge()");
 		expect(gate).toContain('name: "provider-max-4mib-1024px"');
 		expect(gate).toContain('["max-1mp.jpg", "image/jpeg", true]');
 		expect(gate).toContain('["max-1mp.webp", "image/webp", true]');
+		expect(codec).toContain("const module = await WebAssembly.compile(bytes)");
+		expect(codec).toContain("await initializeImageMagick(module)");
+		expect(codec).not.toContain("await initializeImageMagick(bytes)");
 	});
 
 	it("F-15 binds the configured endpoint to the selected provider request", async () => {
