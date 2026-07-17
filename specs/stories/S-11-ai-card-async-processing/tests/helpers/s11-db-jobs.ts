@@ -376,6 +376,7 @@ async function assertS11Contracts(
 		)::text`
 	);
 	if (!result.includes("true")) throw new Error("S-11 database contract smoke failed");
+	await assertServiceRoleClaimsMatrix(databaseUrl);
 	await assertOwnerSafeSelectMatrix(databaseUrl);
 	if (job !== "upgrade") return;
 	const lifecycle = await runS10Psql(
@@ -394,6 +395,37 @@ async function assertS11Contracts(
 		)::text`
 	);
 	if (!lifecycle.includes("true")) throw new Error("S-11 upload lifecycle backfill smoke failed");
+}
+
+async function assertServiceRoleClaimsMatrix(databaseUrl: string): Promise<void> {
+	const database = createS10DbClient(databaseUrl);
+	for (const sql of [
+		`SET request.jwt.claim.role='';
+		SET request.jwt.claims='{"role":"service_role"}';
+		SELECT public.ai_s11_require_service_role()`,
+		`SET request.jwt.claim.role='service_role';
+		SET request.jwt.claims='{"role":"authenticated"}';
+		SELECT public.ai_s11_require_service_role()`,
+	]) {
+		await database.execute(sql);
+	}
+	for (const sql of [
+		`SET request.jwt.claim.role='';
+		SET request.jwt.claims='{"role":"authenticated"}';
+		SELECT public.ai_s11_require_service_role()`,
+		`SET request.jwt.claim.role='authenticated';
+		SET request.jwt.claims='{"role":"service_role"}';
+		SELECT public.ai_s11_require_service_role()`,
+		`SET request.jwt.claim.role='';
+		SET request.jwt.claims='{malformed';
+		SELECT public.ai_s11_require_service_role()`,
+		"SELECT public.ai_s11_require_service_role()",
+	]) {
+		const denied = await database.captureError(sql);
+		if (denied.sqlState !== "42501") {
+			throw new Error("S-11 service-role JWT claims boundary failed");
+		}
+	}
 }
 
 async function assertOwnerSafeSelectMatrix(databaseUrl: string): Promise<void> {

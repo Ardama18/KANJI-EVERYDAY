@@ -1258,6 +1258,30 @@ describe("S-11 commit and queue integration", () => {
 		expect(realE2eGate.match(/class SsrCookieJar/gu)).toHaveLength(1);
 	});
 
+	it("R24-F5 accepts packed Hosted service-role claims without weakening singular claim precedence", async () => {
+		const core = await readFile(
+			new URL(
+				"../../../../supabase/migrations/20260715000000_s11_ai_card_async_processing.sql",
+				import.meta.url
+			),
+			"utf8"
+		);
+		const guardStart = core.indexOf(
+			"CREATE OR REPLACE FUNCTION public.ai_s11_require_service_role"
+		);
+		const guard = core.slice(guardStart, core.indexOf("$$;", guardStart));
+		expect(guard).toContain(
+			"caller_claims := NULLIF(current_setting('request.jwt.claims',true),'')::jsonb"
+		);
+		expect(guard).toMatch(
+			/caller_role := COALESCE\([\s\S]+NULLIF\(current_setting\('request\.jwt\.claim\.role',true\),''\),[\s\S]+NULLIF\(caller_claims->>'role',''\)/u
+		);
+		expect(guard).toContain("EXCEPTION WHEN invalid_text_representation THEN");
+		expect(
+			guard.match(/PERFORM public\.ai_raise_import_error\('UNAUTHORIZED'\)/gu)
+		).toHaveLength(2);
+	});
+
 	it("R11-F1 preserves the legitimate empty Queue response as idle through the real handler path", async () => {
 		const result = await runQueueRpcThroughWorkerHandler([]);
 		expect(result.response.status).toBe(200);

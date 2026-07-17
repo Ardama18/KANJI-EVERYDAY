@@ -376,8 +376,19 @@ $$;
 
 CREATE OR REPLACE FUNCTION public.ai_s11_require_service_role()
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+DECLARE caller_claims jsonb;
+DECLARE caller_role text;
 BEGIN
-  IF current_setting('request.jwt.claim.role', true) IS DISTINCT FROM 'service_role' THEN
+	BEGIN
+		caller_claims := NULLIF(current_setting('request.jwt.claims',true),'')::jsonb;
+	EXCEPTION WHEN invalid_text_representation THEN
+		PERFORM public.ai_raise_import_error('UNAUTHORIZED');
+	END;
+	caller_role := COALESCE(
+		NULLIF(current_setting('request.jwt.claim.role',true),''),
+		NULLIF(caller_claims->>'role','')
+	);
+  IF caller_role IS DISTINCT FROM 'service_role' THEN
     PERFORM public.ai_raise_import_error('UNAUTHORIZED');
   END IF;
 END;
