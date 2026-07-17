@@ -346,6 +346,9 @@ async function assertS11Contracts(
 			has_function_privilege('service_role','public.reserve_provider_usage(uuid,text,text,text,text,integer,uuid,uuid,text)','EXECUTE') AND
 			NOT has_function_privilege('authenticated','public.reserve_provider_usage(uuid,text,text,text,text,integer,uuid,uuid,text)','EXECUTE') AND
 			NOT has_function_privilege('anon','public.reserve_provider_usage(uuid,text,text,text,text,integer,uuid,uuid,text)','EXECUTE') AND
+			has_table_privilege('service_role','public.ai_quota_reservations','SELECT') AND
+			NOT has_table_privilege('authenticated','public.ai_quota_reservations','SELECT') AND
+			NOT has_table_privilege('anon','public.ai_quota_reservations','SELECT') AND
 			has_table_privilege('s10_migration_owner','public.ai_import_concept_jobs','SELECT,INSERT,UPDATE,DELETE') AND
 			has_table_privilege('s10_migration_owner','public.ai_illustration_objects','SELECT,INSERT,UPDATE,DELETE') AND
 			has_table_privilege('s10_migration_owner','public.illustrations','INSERT') AND

@@ -6,7 +6,7 @@ if (!databaseUrl) {
 	process.exit(2);
 }
 const db = createS11DbClient(databaseUrl);
-const rows = await db.query<{ queue_exists: boolean; contract_ok: boolean; acl_ok: boolean; pgmq_delegate_acl_ok: boolean; vault_decrypt_ok: boolean; bucket_ok: boolean }>(`
+const rows = await db.query<{ queue_exists: boolean; contract_ok: boolean; acl_ok: boolean; quota_acl_ok: boolean; pgmq_delegate_acl_ok: boolean; vault_decrypt_ok: boolean; bucket_ok: boolean }>(`
 	SELECT
 		to_regclass('pgmq.q_ai_card_imports') IS NOT NULL AS queue_exists,
 		to_regprocedure('public.claim_ai_import_concept(uuid,bigint,uuid)') IS NOT NULL
@@ -18,6 +18,9 @@ const rows = await db.query<{ queue_exists: boolean; contract_ok: boolean; acl_o
 		AND to_regprocedure('public.claim_ai_worker_log_outbox(uuid)') IS NOT NULL AS contract_ok,
 		NOT has_function_privilege('authenticated','public.claim_ai_import_concept(uuid,bigint,uuid)','EXECUTE')
 		AND has_function_privilege('service_role','public.claim_ai_import_concept(uuid,bigint,uuid)','EXECUTE') AS acl_ok,
+		has_table_privilege('service_role','public.ai_quota_reservations','SELECT')
+		AND NOT has_table_privilege('authenticated','public.ai_quota_reservations','SELECT')
+		AND NOT has_table_privilege('anon','public.ai_quota_reservations','SELECT') AS quota_acl_ok,
 		to_regprocedure('pgmq.format_table_name(text,text)') IS NOT NULL
 		AND to_regprocedure('pgmq.send(text,jsonb)') IS NOT NULL
 		AND to_regprocedure('pgmq.send(text,jsonb,jsonb,timestamp with time zone)') IS NOT NULL

@@ -272,6 +272,7 @@ GRANT SELECT (id,owner_user_id,illustration_id,state,reference_count,
 	ON public.ai_illustration_objects TO authenticated;
 GRANT SELECT ON public.ai_uploads,public.ai_import_concept_jobs,
 	public.ai_upload_consumers,public.ai_illustration_objects TO service_role;
+GRANT SELECT ON public.ai_quota_reservations TO service_role;
 REVOKE INSERT, UPDATE, DELETE ON public.ai_import_concept_jobs, public.ai_upload_consumers,
 	public.ai_illustration_objects
   FROM PUBLIC, anon, authenticated, service_role;

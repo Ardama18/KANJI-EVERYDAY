@@ -1121,10 +1121,11 @@ describe("S-11 commit and queue integration", () => {
 	});
 
 	it("R19-F1 installs owner-safe column projections without exposing fencing tokens", async () => {
-		const [core, hardening, jobs] = await Promise.all([
+		const [core, hardening, jobs, realGate] = await Promise.all([
 			readFile(new URL("../../../../supabase/migrations/20260715000000_s11_ai_card_async_processing.sql", import.meta.url), "utf8"),
 			readFile(new URL("../../../../supabase/migrations/20260716000000_s11_owner_safe_select.sql", import.meta.url), "utf8"),
 			readFile(new URL("./helpers/s11-db-jobs.ts", import.meta.url), "utf8"),
+			readFile(new URL("./s11-real-integration-gate.ts", import.meta.url), "utf8"),
 		]);
 		for (const sql of [core, hardening]) {
 			expect(sql).toContain("REVOKE SELECT ON public.ai_uploads");
@@ -1133,6 +1134,19 @@ describe("S-11 commit and queue integration", () => {
 			expect(sql).toContain("GRANT SELECT ON public.ai_uploads,public.ai_import_concept_jobs");
 			expect(sql).not.toMatch(/GRANT SELECT ON public\.ai_import_concept_jobs[^;]+TO authenticated/u);
 		}
+		expect(core).toContain(
+			"GRANT SELECT ON public.ai_quota_reservations TO service_role;"
+		);
+		expect(jobs).toContain(
+			"has_table_privilege('service_role','public.ai_quota_reservations','SELECT')"
+		);
+		expect(jobs).toContain(
+			"NOT has_table_privilege('authenticated','public.ai_quota_reservations','SELECT')"
+		);
+		expect(jobs).toContain(
+			"NOT has_table_privilege('anon','public.ai_quota_reservations','SELECT')"
+		);
+		expect(realGate).toContain("AS quota_acl_ok");
 		expect(hardening).toContain("cleanup_claim_token");
 		expect(hardening).toContain("raw_cleanup_claim_token");
 		expect(hardening).toContain("terminal_claim_token_hash");
