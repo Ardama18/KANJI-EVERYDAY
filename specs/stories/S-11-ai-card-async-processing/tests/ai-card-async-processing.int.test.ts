@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { hashImportRequest } from "../../../../frontend/src/lib/ai-import/canonical-request";
 import { parseImportStatusResponse } from "../../../../frontend/src/lib/ai-import/async-contract";
 import { signPreviewToken } from "../../../../frontend/src/lib/ai-import/preview-token";
+import { validateImportRequest } from "../../../../frontend/src/lib/ai-import/schema";
 import {
 	createSourceImageCodec,
 	createSourceImageCodecFactory,
@@ -1341,7 +1342,7 @@ describe("S-11 commit and queue integration", () => {
 		expect(nextConfig).not.toContain('type: "asset/resource"');
 	});
 
-	it("R24-F8 limits cross-owner Hosted diagnostics to HTTP status and safe error code", async () => {
+	it("R24-F8 validates the cross-owner fixture and limits Hosted diagnostics to safe fields", async () => {
 		const realE2eGate = await readFile(
 			new URL("./s11-real-e2e-gate.ts", import.meta.url),
 			"utf8"
@@ -1355,11 +1356,27 @@ describe("S-11 commit and queue integration", () => {
 		);
 		expect(assertion).toContain('typeof body.error.code === "string"');
 		expect(assertion).toContain('? body.error.code\n\t\t: "unknown";');
+		expect(assertion).toContain('front: `漢-${suffix}`');
+		expect(assertion).toContain('back: `かん-${suffix}`');
 		expect(assertion).toContain(
 			"(status=${response.status}, code=${errorCode})"
 		);
 		expect(assertion).not.toContain("JSON.stringify(body)");
 		expect(assertion).not.toContain("response.headers");
+
+		const fixtureValidation = await validateImportRequest({
+			deck: { create: { name: "S11 cross owner fixture" } },
+			items: [{
+				clientItemId: "cross-fixture",
+				conceptId: "cross-fixture",
+				pattern: "R1",
+				front: "漢-fixture",
+				back: "かん-fixture",
+				tags: [],
+				image: { mode: "upload", uploadId: BATCH_ID },
+			}],
+		});
+		expect(fixtureValidation.success).toBe(true);
 	});
 
 	it("R11-F1 preserves the legitimate empty Queue response as idle through the real handler path", async () => {
