@@ -4,7 +4,7 @@ feature: ai-card-async-processing
 type: design
 version: 2.0.5
 created: 2026-07-15
-updated: 2026-07-16
+updated: 2026-07-17
 status: approved
 github_issue: 12
 parent_epic: GH-9
@@ -25,7 +25,7 @@ S-10のowner、idempotency、quota、card確定primitiveを維持しながら、
 - [x] messageはconcept単位、業務正本はDB job、claim tokenで旧workerをfenceする。
 - [x] retryはnetwork/408/429/5xxだけ、delayは5/30/120秒、最大3 retry（総4試行）。
 - [x] providerは`openai | gemini`、未指定OpenAI、provider/modelの自動fallbackなし。
-- [x] sourceは最大5件、各10MiB、合計50MiB、16MP、magic/MIME/decodeを検証する。
+- [x] sourceは最大5件、各10MiB、合計50MiB、全形式1,048,576 pixels、PNG 8-bit、PNG/WebP非透過、magic/MIME/decodeを検証する。
 - [x] illustration入力は正規化前に両辺64px以上を検査し、縦横比を維持して最大辺1024px以下のmetadataなしPNGへ正規化する。縮小後の短辺には64px最小を再適用しない。
 - [x]同一owner・batch・conceptのR1/W1は1 illustrationを共有しpairを原子的に確定する。
 - [x] source/orphanは通常経路で即時削除し、残存物は作成24時間到達後の最初のscheduled cleanupで回収する。
@@ -254,11 +254,11 @@ interface IllustrationProvider {
 
 `ILLUSTRATION_PROVIDER`はtrim後の厳密値だけを受理し、未設定は`openai`。選択providerのkey/model欠落は`PROVIDER_CONFIG_ERROR`でretry 0。HTTP classifierはnetwork/408/429/500..599だけtransientとし、その他4xx、safety/moderation、decode/validationはpermanent。adapterを一度選択した後に別adapterを呼ばない。
 
-provider success bodyはContent-Lengthとstream累計を独立に制限し、欠落・過少申告でもresponse budget超過を全materialize前に停止する。宣言oversizeはbody read前にshared helperでbest-effort cancelし、cancel absent/sync throw/async rejectionでも元の`IMAGE_TOO_LARGE`を必ず再throwする。stream overflowも同じhelper/contractを使い、cancel error/raw bodyをlogしない。base64はlength/paddingからdecoded-sizeを`atob`前に求め、10MiB超を恒久`IMAGE_TOO_LARGE`にする。OpenAI/Geminiの双方へ同じreader/decoderを適用する。
+provider success bodyはContent-Lengthとstream累計を独立に制限し、欠落・過少申告でもresponse budget超過を全materialize前に停止する。宣言oversizeはbody read前にshared helperでbest-effort cancelし、cancel absent/sync throw/async rejectionでも元の`IMAGE_TOO_LARGE`を必ず再throwする。stream overflowも同じhelper/contractを使い、cancel error/raw bodyをlogしない。base64はlength/paddingからdecoded-sizeを`atob`前に求め、4MiB超を恒久`IMAGE_TOO_LARGE`にする。decoded文字列は固定長`Uint8Array`へindex copyし、中間配列を作らない。OpenAI/Geminiの双方へ同じreader/decoderを適用する。
 
 adapter endpoint未指定時は公式OpenAI/Gemini URLを固定defaultとする。overrideは`ILLUSTRATION_PROVIDER_ENDPOINT`と`ILLUSTRATION_PROVIDER_ENDPOINT_BINDING`のpaired HTTPS設定だけを許可し、userinfo/hash/partial bindingは`PROVIDER_CONFIG_ERROR`でprovider call前に拒否する。override adapterはbinding headerを送信し、real E2E fake control/statsは同じbindingとcall増分を必須にする。
 
-codecはversion pinした`@imagemagick/magick-wasm`をEdgeで使用し、magic PNG/JPEG/WebP、実MIME一致、10MiB、decode、16MP、illustration入力の両辺64pxを正規化前に検証する。最大辺が1024px超なら縦横比維持で縮小し、超えなければ拡大せず、PNG再encodeでmetadataを落とす。入力条件を満たす極端な縦横比では縮小後の短辺が64px未満でも受理し、永続寸法は各辺1..1024とする。16MP境界に加え、decode bombと独立truncated decode failureが各々HTTP 422 `IMAGE_DECODE_FAILED`となること、および各失敗経路のCPU/RSS/wallをdeployment gateで実測する。
+codecはversion pinした`@imagemagick/magick-wasm`をEdgeで使用し、magic PNG/JPEG/WebP、実MIME一致、upload 10MiB、decode、全形式1,048,576 pixels、PNG 8-bit、PNG/WebP非透過、illustration入力の両辺64pxを正規化前に検証する。providerはdecoded 4MiB・最大辺1024pxをWASM初期化前に検査する。最大辺が1024px超ならBox filterで縦横比維持縮小し、超えなければ拡大せず、1回のfull decode内で元寸法照合とPNG再encodeを行いmetadataを落とす。入力条件を満たす極端な縦横比では縮小後の短辺が64px未満でも受理し、永続寸法は各辺1..1024とする。dimension bombはHTTP 422 `IMAGE_DIMENSIONS_INVALID`、独立truncated decode failureは422 `IMAGE_DECODE_FAILED`とし、各失敗経路のCPU/RSS/wallをdeployment gateで実測する。
 
 ## 7. retry、障害回復、冪等性
 
@@ -314,7 +314,7 @@ illustration orphan/delete candidateは削除直前に、(1) path先頭がtracki
 | AC-02 | duplicate deliveryまたはworker中断が発生した場合、システムは300秒visibilityとcurrent claim tokenを用い、DB clock上で未失効のclaimだけに全業務副作用を許可し、reconcile/terminal failureも同じexpiryと確定message/tokenへfenceし、terminal duplicateを副作用なしでACKすること。 | sequential/parallel duplicate、clock+299/+300秒、reclaim前expired Aの全副作用/reconcile拒否、A expiry→B failure→A claim_lost、件数差0 |
 | AC-03 | networkまたはHTTP 408/429/5xxが発生した場合、システムは5/30/120秒で最大3回だけretryし、それ以外の恒久エラーはretryせずconcept itemsをfailedにすること。 | delayed message/attempt/quota snapshot |
 | AC-04 | provider設定を読むとき、システムは未指定を公式OpenAI、明示値を該当adapterへ限定し、不正値/key欠落/失敗時も別providerを呼ばないこと。overrideはpaired HTTPS endpoint/bindingだけとしserved gateでbindingを照合すること。 | adapter spy call count、fake stats binding |
-| AC-05 | source/illustrationを受け取ったとき、システムはmagic/MIME、10MiB、decode、16MPを検証し、source最大5件、正規化前illustration入力の両辺64pxを満たさないものを副作用前に拒否すること。source/provider/conflict readは宣言値とstream累計をmaterialize前に制限すること。 | boundary fixtures、owner隔離、missing/lying Content-Length |
+| AC-05 | source/illustrationを受け取ったとき、システムはmagic/MIME、10MiB、decode、全形式1,048,576 pixels、PNG 8-bit、PNG/WebP非透過を検証し、source最大5件、正規化前illustration入力の両辺64pxを満たさないものを副作用前に拒否すること。providerは4MiB/1024px、source/provider/conflict readは宣言値とstream累計をmaterialize前に制限すること。 | boundary fixtures、owner隔離、missing/lying Content-Length |
 | AC-06 | illustration保存時、システムは最大辺1024px以下のmetadataなしPNGへ縦横比維持で変換し、入力64px条件を満たす極端な縦横比を縮小後短辺だけで拒否せず、同一owner・conceptのR1/W1に同じtracked managed objectを割り当て、owner mutationを拒否し、最後のcard参照が消えるまで削除しないこと。legacy owner pathとservice worker操作は維持すること。 | portrait/landscape実codec、decoded output、shared key、owner A/B/anon mutation denial、service/legacy sequence |
 | AC-07 | source処理終了またはorphanが検出されたとき、システムはsource write intentをStorage前に永続化し、DB-confirmed orphan後だけ即時削除を試み、残存物を作成24時間到達後の最初のscheduled cleanupで回収し、参照中/期限前/他owner objectを削除しないこと。entity limit後にdue pathを展開し、complete leaseを再検査し、deleted illustrationを非attachableにする。 | ambiguous source write、limit=1 source/raw pair、4:59 verify→6:00 complete拒否、authenticated reattach拒否、fixed clock cleanup |
 | AC-08 | concept画像処理が失敗した場合、システムはそのR1/W1を同一transactionでfailedにしcardを0件とし、別conceptをterminalまで継続すること。 | pair rollback + sibling success |
@@ -327,7 +327,7 @@ illustration orphan/delete candidateは削除直前に、(1) path先頭がtracki
 | # | 観点 | 主な期待 |
 |---:|---|---|
 | 1-4 | PNG/JPEG/WebP magic一致、MIME不一致 | 3形式accept、不一致reject |
-| 5-8 | 10MiB、16MP、64px、1024px PNG | 境界accept/超過reject、metadata除去 |
+| 5-8 | 10MiB、形式別pixel上限、64px、1024px PNG | 境界accept/超過reject、metadata除去 |
 | 9-11 | provider default/explicit/invalid/fallback禁止 | 選択adapterだけ1回 |
 | 12-13 | transient/permanent分類 | network/408/429/5xxだけtransient |
 | 14 | backoff | `[5,30,120]`、4回目なし |
@@ -351,7 +351,7 @@ illustration orphan/delete candidateは削除直前に、(1) path先頭がtracki
 | 14 | cleanup保護 | referenced/young/other-owner保持 |
 | 15 | 全経路ログ秘匿 | forbidden token scan 0 |
 
-DB integrationはS-10 testkitを拡張し、fresh migrationとS-10→S-11 upgradeの両方で実行する。provider/Storageはlocal fake serverでHTTP statusとnetwork abortを制御し、実secretを用いない。16MP WASM resource試験はCIまたはdeployment gateとして別タグにする。
+DB integrationはS-10 testkitを拡張し、fresh migrationとS-10→S-11 upgradeの両方で実行する。provider/Storageはlocal fake serverでHTTP statusとnetwork abortを制御し、実secretを用いない。形式別最大fixtureのWASM resource試験はdeployment hard gateとして別実行する。
 
 ### フェーズ別E2E確認
 
@@ -369,11 +369,11 @@ DB integrationはS-10 testkitを拡張し、fresh migrationとS-10→S-11 upgrad
 4. workerとcommit/status/upload adapter
 5. cleanup scheduleと参照削除trigger
 6. worker deploy・service認証疎通後に5秒以下poll schedule、cleanup deploy後に15分scheduleを有効化
-7. integration/E2E、16MP resource計測、運用runbook
+7. integration/E2E、形式別最大fixture resource計測、運用runbook
 
-deploy前にpgmq availability、Edge secret、WASM bundle/load、Cron/Vault呼出、Queue権限非公開をstagingで確認する。Hosted Edgeの2026-07-15公式上限（memory 256MB、CPU 2秒/request、wall clock Free 150秒/paid 400秒、idle 150秒、bundle 20MB）に対し、resource functionを外部URLへ委譲せず、self-containedにbuildした同一artifactとpin済みWASM fileをgate自身がlocal Deno processとして直接serveする。gateは起動前に両fileを独立hash/size計測し、spawnした同一PIDのCPU時間・外部peak RSSとcodec内peak RSSを測るため、endpointがcaller指定hashをechoするartifact同一性判定は禁止する。PNG/JPEG/WebPそれぞれの10MiBかつ16MP fixture、decode bomb、正常PNGから導出した独立truncated decode failureに加え、actual OpenAI adapterからの10MiB/16MP最大応答と110秒abortをlocal HTTP fake provider経由で同じserved codec/WASM pathへ通す。failureは各々HTTP 422 `IMAGE_DECODE_FAILED`以外を拒否する。hard gateはpeak memory `<= 204MiB`、CPU `<= 1.6秒`、artifact+WASM `<= 16MB`、wall clock `<= 120秒`（provider timeoutを含む）とし、上限到達時はgate parentがrequestをabortしてspawn processをkillする。1ケースでも超過、resource-limit、OOM、timeoutならscheduleを有効化せずdeploy失敗とし、処理分割またはcodecのADR再決定へ戻す。provider abort deadlineは110秒、claim budgetは300秒未満とする。
+deploy前にpgmq availability、Edge secret、WASM bundle/load、Cron/Vault呼出、Queue権限非公開をstagingで確認する。Hosted Edgeの2026-07-17公式上限（memory 256MB、CPU 2秒/request、wall clock Free 150秒/paid 400秒、idle 150秒、bundle 20MB）に対し、resource functionを外部URLへ委譲せず、self-containedにbuildした同一artifactとpin済みWASM fileをgate自身がlocal Deno processとして直接serveする。gateは起動前に両fileを独立hash/size計測し、各caseをfresh Deno processで起動してruntime baseline後のrequest増分peak RSS、PID CPU時間、codec内peak RSSを測る。PNG/JPEG/WebP各10MiB・1,048,576 pixels（PNGは8-bit RGB）、dimension bomb、正常PNGから導出した独立truncated decode failureに加え、actual OpenAI adapterからの4MiB/1024px最大応答と110秒abortを同じserved codec/WASM pathへ通す。dimension超過は422 `IMAGE_DIMENSIONS_INVALID`、破損decodeは422 `IMAGE_DECODE_FAILED`以外を拒否する。hard gateはrequest増分peak memory `<= 248MiB`、CPU `<= 1.6秒`、artifact+WASM `<= 16MB`、wall clock `<= 120秒`とし、上限到達時はgate parentがrequestをabortしてspawn processをkillする。248MiBは公式256MiBに対して8MiBを残し、実測したWASM固定メモリ床を反映する。1ケースでも超過、resource-limit、OOM、timeoutならscheduleを有効化せずdeploy失敗とする。provider abort deadlineは110秒、claim budgetは300秒未満とする。
 
-resource outputはbundle/WASMそれぞれのbytes/SHA-256を報告し、WASMを`artifact-manifest.json`と`package-lock.json`のversion/integrityへ照合する。provider served casesへ10MiB+1 base64、Content-Length欠落、宣言response超過を追加する。configured real E2Eはsuccess/retry/permanent failure/cleanupのserved runtime logsをcollectorから取得し、取得完全性と禁止値0件をhard gateにする。
+resource outputはbundle/WASMそれぞれのbytes/SHA-256とruntime baselineを報告し、WASMを`artifact-manifest.json`と`package-lock.json`のversion/integrityへ照合する。provider served casesへ4MiB+1 base64、Content-Length欠落、宣言response超過を追加する。configured real E2Eはsuccess/retry/permanent failure/cleanupのserved runtime logsをcollectorから取得し、取得完全性と禁止値0件をhard gateにする。
 
 ## 13. リスクと軽減
 
@@ -382,7 +382,7 @@ resource outputはbundle/WASMそれぞれのbytes/SHA-256を報告し、WASMを`
 | stale architecture steering | 実コード/ADRを正本として本書に乖離を記録。別保守タスク候補 |
 | DBとStorage非原子 | stable path、tracking、補償、24h cleanup |
 | 旧worker競合 | tokenを全副作用RPCで検証 |
-| Edge memory/time | 1 invocation 1 concept、version pin、16MP gate |
+| Edge memory/time | 1 invocation 1 concept、version pin、fresh-process形式別resource gate |
 | Queue retry二重化 | replacement send+state+旧archiveを1 DB transaction |
 | S-10状態語の意味衝突 | API viewで明示mappingし物理`completed`を直接公開しない |
 

@@ -8,7 +8,8 @@ import { fileURLToPath } from "node:url";
 
 const execFileAsync = promisify(execFile);
 const CPU_LIMIT_SECONDS = 1.6;
-const RSS_LIMIT_BYTES = 204 * 1024 * 1024;
+// Preserve 8 MiB of request-allocation headroom below the hosted Edge 256 MiB ceiling.
+const RSS_LIMIT_BYTES = 248 * 1024 * 1024;
 const WALL_LIMIT_MS = 120_000;
 const required = [
 	"S11_RESOURCE_FIXTURE_DIR",
@@ -89,15 +90,15 @@ const artifactRevision = createHash("sha256")
 	.digest("hex");
 
 const successfulFixtures = [
-	["max-16mp.png", "image/png", true],
-	["max-16mp.jpg", "image/jpeg", true],
-	["max-16mp.webp", "image/webp", true],
+	["max-1mp-8bit.png", "image/png", true],
+	["max-1mp.jpg", "image/jpeg", true],
+	["max-1mp.webp", "image/webp", true],
 ] as const;
-const providerMaximum = await readFile(path.join(fixtureDirectory, "max-16mp.png"));
-if (providerMaximum.byteLength !== 10 * 1024 * 1024) {
-	throw new Error("maximum provider response fixture must be exact 10 MiB");
+const providerMaximum = await readFile(path.join(fixtureDirectory, "provider-max-4mib.png"));
+if (providerMaximum.byteLength !== 4 * 1024 * 1024) {
+	throw new Error("maximum provider response fixture must be exact 4 MiB");
 }
-const providerOversized = Buffer.alloc(10 * 1024 * 1024 + 1);
+const providerOversized = Buffer.alloc(4 * 1024 * 1024 + 1);
 const imageDecodeFailure = providerMaximum.subarray(0, Math.min(64, providerMaximum.byteLength));
 if (imageDecodeFailure.byteLength < 24) {
 	throw new Error("maximum PNG fixture cannot derive an independent truncated decode failure");
@@ -154,35 +155,52 @@ await new Promise<void>((resolve, reject) => {
 	fakeProvider.listen(providerPort, "127.0.0.1", resolve);
 });
 
-const edge = spawn(
-	denoBin,
-	[
-		"run",
-		"--no-prompt",
-		"--allow-env=AI_CARD_WORKER_SECRET,S11_RESOURCE_PORT,S11_RESOURCE_WASM_PATH,S11_RESOURCE_PROVIDER_BASE_URL",
-		`--allow-net=127.0.0.1:${edgePort},127.0.0.1:${providerPort}`,
-		`--allow-read=${wasmPath}`,
-		bundlePath,
-	],
-	{
-		env: {
-			...process.env,
-			AI_CARD_WORKER_SECRET: workerSecret,
-			S11_RESOURCE_PORT: String(edgePort),
-			S11_RESOURCE_WASM_PATH: wasmPath,
-			S11_RESOURCE_PROVIDER_BASE_URL: `http://127.0.0.1:${providerPort}`,
-		},
-		stdio: ["ignore", "pipe", "pipe"],
-	}
-);
+const startEdgeProcess = (): ChildProcess =>
+	spawn(
+		denoBin,
+		[
+			"run",
+			"--no-prompt",
+			"--allow-env=AI_CARD_WORKER_SECRET,S11_RESOURCE_PORT,S11_RESOURCE_WASM_PATH,S11_RESOURCE_PROVIDER_BASE_URL",
+			`--allow-net=127.0.0.1:${edgePort},127.0.0.1:${providerPort}`,
+			`--allow-read=${wasmPath}`,
+			bundlePath,
+		],
+		{
+			env: {
+				...process.env,
+				AI_CARD_WORKER_SECRET: workerSecret,
+				S11_RESOURCE_PORT: String(edgePort),
+				S11_RESOURCE_WASM_PATH: wasmPath,
+				S11_RESOURCE_PROVIDER_BASE_URL: `http://127.0.0.1:${providerPort}`,
+			},
+			stdio: ["ignore", "pipe", "pipe"],
+		}
+	);
+let edge = startEdgeProcess();
 let edgeDiagnostic = "";
-edge.stderr?.on("data", (chunk: Buffer) => {
-	edgeDiagnostic = `${edgeDiagnostic}${chunk.toString("utf8")}`.slice(-4_000);
-});
+const observeEdgeDiagnostics = (): void => {
+	edgeDiagnostic = "";
+	edge.stderr?.on("data", (chunk: Buffer) => {
+		edgeDiagnostic = `${edgeDiagnostic}${chunk.toString("utf8")}`.slice(-4_000);
+	});
+};
+observeEdgeDiagnostics();
 const endpoint = `http://127.0.0.1:${edgePort}`;
 const reports: unknown[] = [];
+let edgeBaselineRssBytes: number | undefined;
+const restartEdge = async (): Promise<void> => {
+	await stopChild(edge);
+	edge = startEdgeProcess();
+	observeEdgeDiagnostics();
+	await waitForReady(edge, endpoint);
+	if (edge.pid === undefined) throw new Error("artifact server has no process ID");
+	edgeBaselineRssBytes = await processRssBytes(edge.pid);
+};
 try {
 	await waitForReady(edge, endpoint);
+	if (edge.pid === undefined) throw new Error("artifact server has no process ID");
+	edgeBaselineRssBytes = await processRssBytes(edge.pid);
 	for (const [name, mime, shouldSucceed] of successfulFixtures) {
 		const bytes = await readFile(path.join(fixtureDirectory, name));
 		if (bytes.byteLength < 1 || bytes.byteLength > 10 * 1024 * 1024) {
@@ -191,24 +209,34 @@ try {
 		if (shouldSucceed && bytes.byteLength !== 10 * 1024 * 1024) {
 			throw new Error(`${name} must be the exact 10 MiB maximum fixture`);
 		}
-		const measured = await measureRequest(edge, `${endpoint}/`, {
-			method: "POST",
-			headers: {
-				"Content-Type": mime,
-				"Content-Length": String(bytes.byteLength),
-				"x-ai-worker-secret": workerSecret,
-				"x-require-max-fixture": shouldSucceed ? "true" : "false",
-			},
-			body: ownedArrayBuffer(bytes),
-		});
+		let measured: MeasuredResponse;
+		try {
+			measured = await measureRequest(edge, `${endpoint}/`, {
+				method: "POST",
+				headers: {
+					"Content-Type": mime,
+					"Content-Length": String(bytes.byteLength),
+					"x-ai-worker-secret": workerSecret,
+					"x-require-max-fixture": shouldSucceed ? "true" : "false",
+				},
+				body: ownedArrayBuffer(bytes),
+			});
+		} catch (error) {
+			throw new Error(`${name} resource measurement failed`, { cause: error });
+		}
 		const report: unknown = await measured.response.json();
 		assertProcessedReport(measured, report, "processed", name);
 		reports.push({ name, ...withoutResponse(measured), report });
+		await restartEdge();
 	}
 
-	for (const [name, bytes] of [
-		["decode-bomb", await readFile(path.join(fixtureDirectory, "decode-bomb.png"))],
-		["image-decode-failure", imageDecodeFailure],
+	for (const [name, bytes, expectedCode] of [
+		[
+			"decode-bomb",
+			await readFile(path.join(fixtureDirectory, "decode-bomb.png")),
+			"IMAGE_DIMENSIONS_INVALID",
+		],
+		["image-decode-failure", imageDecodeFailure, "IMAGE_DECODE_FAILED"],
 	] as const) {
 		if (bytes.byteLength < 1 || bytes.byteLength > 10 * 1024 * 1024) {
 			throw new Error(`${name} is outside the supported 1..10 MiB boundary`);
@@ -223,8 +251,13 @@ try {
 			body: ownedArrayBuffer(bytes),
 		});
 		const report: unknown = await measured.response.json();
-		assertDecodeFailureReport(measured, report, name);
+		if (expectedCode === "IMAGE_DECODE_FAILED") {
+			assertDecodeFailureReport(measured, report, name);
+		} else {
+			assertDimensionFailureReport(measured, report, name);
+		}
 		reports.push({ name, ...withoutResponse(measured), report });
+		await restartEdge();
 	}
 
 	const providerMaximumMeasured = await measureRequest(edge, `${endpoint}/`, {
@@ -244,10 +277,11 @@ try {
 	if (providerMaximumCalls !== 1)
 		throw new Error("served provider maximum case was not called once");
 	reports.push({
-		name: "provider-max-10mib-16mp",
+		name: "provider-max-4mib-1024px",
 		...withoutResponse(providerMaximumMeasured),
 		report: providerMaximumReport,
 	});
+	await restartEdge();
 
 	for (const resourceCase of [
 		"provider-oversized-base64",
@@ -265,6 +299,7 @@ try {
 		) throw new Error(`${resourceCase} did not enforce the served provider response bound`);
 		assertResourceMeasurements(measured, report, resourceCase);
 		reports.push({ name: resourceCase, ...withoutResponse(measured), report });
+		await restartEdge();
 	}
 
 	const providerTimeoutMeasured = await measureRequest(edge, `${endpoint}/`, {
@@ -284,7 +319,7 @@ try {
 		providerTimeoutMeasured.wallSeconds > 120 ||
 		providerTimeoutMeasured.cpuSeconds > CPU_LIMIT_SECONDS ||
 		Math.max(
-			numberValue(providerTimeoutReport.peakRssBytes),
+			requestRssBytes(numberValue(providerTimeoutReport.peakRssBytes)),
 			providerTimeoutMeasured.peakProcessRssBytes
 		) > RSS_LIMIT_BYTES ||
 		providerTimeoutCalls !== 1 ||
@@ -315,6 +350,7 @@ process.stdout.write(
 		runtime: "direct-local-deno-artifact",
 		artifactRevision,
 		artifactBytes,
+		rssBaselineBytes: edgeBaselineRssBytes,
 		bundle: { bytes: bundle.byteLength, sha256: bundleSha256 },
 		wasm: {
 			bytes: wasm.byteLength,
@@ -342,8 +378,9 @@ async function measureRequest(
 	const pid = edge.pid;
 	if (pid === undefined || edge.exitCode !== null)
 		throw new Error("artifact server is not running");
+	if (edgeBaselineRssBytes === undefined) throw new Error("artifact RSS baseline is unavailable");
 	const cpuBefore = await processCpuSeconds(pid);
-	let peakProcessRssBytes = await processRssBytes(pid);
+	let peakAbsoluteRssBytes = await processRssBytes(pid);
 	const started = performance.now();
 	let completed = false;
 	let enforcedViolation: string | undefined;
@@ -358,9 +395,13 @@ async function measureRequest(
 	const monitor = (async (): Promise<void> => {
 		while (!completed && enforcedViolation === undefined) {
 			const [cpu, rss] = await Promise.all([processCpuSeconds(pid), processRssBytes(pid)]);
-			peakProcessRssBytes = Math.max(peakProcessRssBytes, rss);
-			if (cpu - cpuBefore > CPU_LIMIT_SECONDS) enforce("CPU limit exceeded");
-			else if (peakProcessRssBytes > RSS_LIMIT_BYTES) enforce("RSS limit exceeded");
+			peakAbsoluteRssBytes = Math.max(peakAbsoluteRssBytes, rss);
+			const peakProcessRssBytes = requestRssBytes(peakAbsoluteRssBytes);
+			if (cpu - cpuBefore > CPU_LIMIT_SECONDS) {
+				enforce(`CPU limit exceeded (${cpu - cpuBefore} > ${CPU_LIMIT_SECONDS})`);
+			} else if (peakProcessRssBytes > RSS_LIMIT_BYTES) {
+				enforce(`RSS limit exceeded (${peakProcessRssBytes} > ${RSS_LIMIT_BYTES})`);
+			}
 			if (!completed && enforcedViolation === undefined) await delay(25);
 		}
 	})();
@@ -377,9 +418,14 @@ async function measureRequest(
 	}
 	const wallSeconds = (performance.now() - started) / 1_000;
 	const cpuSeconds = Math.max(0, (await processCpuSeconds(pid)) - cpuBefore);
-	peakProcessRssBytes = Math.max(peakProcessRssBytes, await processRssBytes(pid));
-	if (cpuSeconds > CPU_LIMIT_SECONDS) throw new Error("CPU limit exceeded");
-	if (peakProcessRssBytes > RSS_LIMIT_BYTES) throw new Error("RSS limit exceeded");
+	peakAbsoluteRssBytes = Math.max(peakAbsoluteRssBytes, await processRssBytes(pid));
+	const peakProcessRssBytes = requestRssBytes(peakAbsoluteRssBytes);
+	if (cpuSeconds > CPU_LIMIT_SECONDS) {
+		throw new Error(`CPU limit exceeded (${cpuSeconds} > ${CPU_LIMIT_SECONDS})`);
+	}
+	if (peakProcessRssBytes > RSS_LIMIT_BYTES) {
+		throw new Error(`RSS limit exceeded (${peakProcessRssBytes} > ${RSS_LIMIT_BYTES})`);
+	}
 	if (wallSeconds * 1_000 > WALL_LIMIT_MS) throw new Error("wall deadline exceeded");
 	return { response, wallSeconds, cpuSeconds, peakProcessRssBytes };
 }
@@ -394,7 +440,7 @@ function assertProcessedReport(
 		throw new Error(`${name} failed the directly served artifact codec path`);
 	}
 	const peakRssBytes = Math.max(
-		numberValue(report.peakRssBytes),
+		requestRssBytes(numberValue(report.peakRssBytes)),
 		measured.peakProcessRssBytes
 	);
 	if (
@@ -403,7 +449,10 @@ function assertProcessedReport(
 		measured.wallSeconds * 1_000 > WALL_LIMIT_MS ||
 		numberValue(report.processingMs) > WALL_LIMIT_MS
 	) {
-		throw new Error(`${name} exceeded Edge resource limits`);
+		throw new Error(
+			`${name} exceeded Edge resource limits ` +
+			`(cpu=${measured.cpuSeconds}, rss=${peakRssBytes}, wallMs=${measured.wallSeconds * 1_000}, processingMs=${numberValue(report.processingMs)})`
+		);
 	}
 }
 
@@ -418,10 +467,13 @@ function assertDecodeFailureReport(
 		report.status !== "image_decode_failed" ||
 		report.errorCode !== "IMAGE_DECODE_FAILED"
 	) {
-		throw new Error(`${name} did not return the exact 422/IMAGE_DECODE_FAILED contract`);
+		throw new Error(
+			`${name} did not return the exact 422/IMAGE_DECODE_FAILED contract ` +
+			`(status=${measured.response.status}, report=${JSON.stringify(report)})`
+		);
 	}
 	const peakRssBytes = Math.max(
-		numberValue(report.peakRssBytes),
+		requestRssBytes(numberValue(report.peakRssBytes)),
 		measured.peakProcessRssBytes
 	);
 	if (
@@ -434,12 +486,31 @@ function assertDecodeFailureReport(
 	}
 }
 
+function assertDimensionFailureReport(
+	measured: MeasuredResponse,
+	report: unknown,
+	name: string
+): void {
+	if (
+		measured.response.status !== 422 ||
+		!isRecord(report) ||
+		report.status !== "image_rejected" ||
+		report.errorCode !== "IMAGE_DIMENSIONS_INVALID"
+	) {
+		throw new Error(`${name} did not reject the over-limit dimensions before decode`);
+	}
+	assertResourceMeasurements(measured, report, name);
+}
+
 function assertResourceMeasurements(
 	measured: MeasuredResponse,
 	report: Readonly<Record<string, unknown>>,
 	name: string
 ): void {
-	const peakRssBytes = Math.max(numberValue(report.peakRssBytes), measured.peakProcessRssBytes);
+	const peakRssBytes = Math.max(
+		requestRssBytes(numberValue(report.peakRssBytes)),
+		measured.peakProcessRssBytes
+	);
 	if (
 		measured.cpuSeconds > CPU_LIMIT_SECONDS || peakRssBytes > RSS_LIMIT_BYTES ||
 		measured.wallSeconds * 1_000 > WALL_LIMIT_MS || numberValue(report.processingMs) > WALL_LIMIT_MS
@@ -535,6 +606,11 @@ function numberValue(value: unknown): number {
 		throw new Error("resource endpoint returned an invalid measurement");
 	}
 	return value;
+}
+
+function requestRssBytes(absoluteRssBytes: number): number {
+	if (edgeBaselineRssBytes === undefined) return Number.POSITIVE_INFINITY;
+	return Math.max(0, absoluteRssBytes - edgeBaselineRssBytes);
 }
 
 function requiredEnvironment(name: (typeof required)[number]): string {

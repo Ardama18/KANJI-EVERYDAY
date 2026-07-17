@@ -170,7 +170,7 @@ flowchart TD
   - 実装: S-10 testkitを継承する`tests/helpers/s11-db-testkit.ts`/`s11-db-jobs.ts`、fake HTTP/Edge helper、PNG/JPEG/WebPと境界fixture、`frontend/package.json`の`test:s11:{unit,integration,e2e,fresh,upgrade,failure,resource}`、Vitest/tsconfig includeを追加する。`S11_FRESH_DATABASE_URL`、`S11_UPGRADE_DATABASE_URL`、`S11_FAILURE_DATABASE_URL`は別DBを必須とし、未設定/同一DBはfail-fastする。
   - 完了条件: 実装=25 Integration/10 E2E骨格と新Unitファイルが検出される、品質=helperに`any`や実secretがない、統合=fresh/upgrade/failure jobがS-10→S-11の独立経路を選択できる。
 - [x] **T0-02: Unit 15件をRedテストとして作成する**
-  - テスト: `ai-card-async-processing.test.ts`へmagic/MIME 4件、10MiB/16MP/64px/1024px PNG 4件、provider default/explicit-invalid/fallback禁止 3件、transient/permanent 2件、backoff 1件、log allowlist/redaction 1件を実装し、未実装contractに対する期待失敗を記録する。
+  - テスト: `ai-card-async-processing.test.ts`へmagic/MIME 4件、10MiB/形式別pixel上限/64px/1024px PNG、provider default/explicit-invalid/fallback禁止、transient/permanent、backoff、log allowlist/redactionを実装し、未実装contractに対する期待失敗を記録する。
   - 完了条件: 実装=15件が`it.todo`でなく実assertion、品質=各テスト1責務・固定clock/typed spy、統合=Phase 2の予定import pathと契約が一致し、失敗理由が「未実装」だけである。
 
 ### フェーズ完了条件
@@ -231,7 +231,7 @@ npm --prefix frontend run test:s11:integration -- -t "IT-02|IT-07|IT-09"
 ### タスク
 
 - [x] **T2-01: image validatorとversion pinしたWASM codecを実装する**
-  - 実装: `image-validation.ts`と`image-codec.ts`でPNG/JPEG/WebP magic+declared MIME、1..10MiB、decode、16MP、正規化前illustration入力の両辺64pxを検査し、最大辺1024px以下のmetadataなしPNGへ再encodeする。小画像は拡大せず、入力条件を満たす極端な縦横比では縮小後短辺が64px未満でも受理する。
+  - 実装: `image-validation.ts`と`image-codec.ts`でPNG/JPEG/WebP magic+declared MIME、1..10MiB、decode、全形式1,048,576 pixels、PNG 8-bit、PNG/WebP非透過、正規化前illustration入力の両辺64pxを検査し、1回のfull decodeで最大辺1024px以下のmetadataなしPNGへ再encodeする。providerは4MiB/1024pxをWASM初期化前に検査する。小画像は拡大せず、入力条件を満たす極端な縦横比では縮小後短辺が64px未満でも受理する。
   - テスト: Unit #1-8をGreenにする。
   - 完了条件: 実装=3形式と全境界、品質=full decode前のcheap check・入力bytesをlogしない、統合=Node/Vitest fixtureとDeno/WASM出力digest・寸法が一致。
 - [x] **T2-02: provider factory/adapters、failure classifier、backoffを実装する**
@@ -323,8 +323,8 @@ npx supabase functions serve ai-card-import-worker --env-file supabase/.env.s11.
   - テスト: IT-18、IT-20〜22、IT-25を実装する。
   - 完了条件: 実装=即時補償失敗を24時間到達後の最初のscheduled cleanupで削除、品質=23:59:59/referenced/other-ownerを保持し24:00:00をeligible化・再実行冪等、統合=success/retry/failure/cleanupログの禁止marker 0件。
 - [x] **T5-02: Edge設定、resource benchmark、運用/rollback手順を実装する**
-  - 実装: `supabase/config.toml`、Deno import pin、secret一覧、fake最大provider応答、PNG/JPEG/WebP各10MiBかつ16MP、decode bombの`edge-resource-gate.ts`、`operations.md`を作る。1 invocation 1 concept、画像並列度1、provider abortを測定対象にする。
-  - 完了条件: 実装=測定値と環境を機械可読出力、品質=peak memory `<=204 MiB`、CPU `<=1.6秒`、bundle `<=16 MiB`、wall clock `<=120秒`の全ケース合格、統合=1件でも超過/OOM/resource-limit/timeoutならdeploy/schedule activationをhard failしてADR再決定へ戻す。
+  - 実装: `supabase/config.toml`、Deno import pin、secret一覧、fake最大provider応答、PNG/JPEG/WebP各10MiB・1,048,576 pixels（PNGは8-bit RGB）、dimension bomb/独立decode failureの`edge-resource-gate.ts`、`operations.md`を作る。各caseはfresh Deno processで実行し、1 invocation 1 concept、画像並列度1、provider abortを測定対象にする。
+  - 完了条件: 実装=測定値と環境を機械可読出力、品質=runtime baseline後のrequest増分peak RSS `<=248 MiB`、CPU `<=1.6秒`、bundle+WASM `<=16 MiB`、wall clock `<=120秒`の全ケース合格、統合=1件でも超過/OOM/resource-limit/timeoutならdeploy/schedule activationをhard failしてADR再決定へ戻す。
 - [x] **T5-03: worker/cleanupを先にdeploy・疎通し、その後だけscheduleを有効化する**
   - 実装: schedule control migrationは`pg_cron`/`pg_net`/Vaultを設定するactivate/deactivate関数だけを作り、初期状態inactiveとする。hard gate後にworker、次にcleanupをdeployし、内部認証・Queue権限・手動1 message・cleanup dry-runを確認してからworker `5 seconds`、cleanup `*/15 * * * *`をactivateする。
   - 完了条件: 実装=worker deploy前のcron job数0、品質=service secretをSQL/logへ平文出力せずQueue schema非公開、統合=activation後の重複invocationがvisibility/claimで無害かつdue超過alertを取得可能。
@@ -408,7 +408,7 @@ cycle 16のR20-F3はhosted内部snapshot/pathのservice-role限定、adapter強�
 
 | リスク | Hard stop / 対策 |
 |---|---|
-| Edgeで10MiB・16MPがresource上限超過 | T5-02の204MiB/1.6秒/16MiB/120秒のいずれか不合格ならscheduleを有効化せずADR再決定 |
+| Edge画像処理がresource上限超過 | T5-02のfresh-process request増分RSS 248MiB/CPU 1.6秒/artifact+WASM 16MiB/wall 120秒のいずれか不合格ならscheduleを有効化せずADR再決定 |
 | DB↔Queueまたはretryの欠落 | 同一Postgres transaction、fresh/upgrade/failure injection、message ID uniqueで検証 |
 | 旧workerが遅延確定 | 全副作用RPCでcurrent tokenを検証し`CLAIM_LOST`、stable pathをcleanupへ収束 |
 | StorageとDBの非原子性 | tracking先行、`upsert:false`、digest再検証、即時補償、24時間cleanup |
@@ -454,7 +454,7 @@ cycle 16のR20-F3はhosted内部snapshot/pathのservice-role限定、adapter強�
 
 ## GitHub issue #12 remediation correction run
 
-- [x] CR-06: worker実header、real pgmq/RPC-RLS/private Storage/served Edge境界を整合し、resource gateをexact Edge WASM・16MP最大fixture・decode bomb・bundle/resource上限のfail-closed gateにする。
+- [x] CR-06: worker実header、real pgmq/RPC-RLS/private Storage/served Edge境界を整合し、resource gateをexact Edge WASM・形式別最大fixture・dimension/decode failure・bundle/resource上限のfail-closed gateにする。
 - [x] HI-09: cleanup初回stateをstale lease再claimで上書きせず、claim後停止→lease超過→再claim→完了を回帰試験する。
 - [x] HI-12: upload/object bucketを永続化し、S-10 rowを`illustrations`へbackfillしてobject移動なしでworker/cleanupが記録bucketを使う。
 - [x] NR-17: ImageMagickを実package signatureどおりWASM bytesで一度だけ初期化し、served Deno Edgeの同一pathでdecode/normalizeする。
@@ -471,11 +471,11 @@ cycle 16のR20-F3はhosted内部snapshot/pathのservice-role限定、adapter強�
 
 - [x] CR-06: real password loginで`@supabase/ssr`が生成したcookieをexplicit jarへ保持し、Next routeはCookieだけ、PostgRESTはaccess-token Authorizationだけでowner A/B境界を検証する。
 - [x] CR-06: resource gate自身がself-contained bundleとpin済みWASMを同一local Deno processとして直接serveし、両artifactの独立digest/sizeとspawn PID CPU、codec内peak RSSを測定する。endpointによるcaller-controlled digest echoを廃止する。
-- [x] CR-06: actual OpenAI adapterをlocal HTTP fake providerへ接続し、10MiB/16MP最大responseのdecode/normalizeと110秒abortを同じserved artifact/codec/WASM pathで測定する。
+- [x] CR-06: actual OpenAI adapterをlocal HTTP fake providerへ接続し、4MiB/1024px最大responseのdecode/normalizeと110秒abortを同じserved artifact/codec/WASM pathで測定する。
 
 ## Fresh remediation attempt 0
 
-- [x] CR-06: decode bombと独立したimage decode failureの失敗応答を厳密なHTTP status/safe error contractへ固定し、各経路でspawn PID CPU、codec peak RSS、wall deadline/resource limitを強制・計測する。
+- [x] CR-06: dimension bombと独立したimage decode failureの失敗応答を厳密なHTTP status/safe error contractへ固定し、各経路でspawn PID CPU、baseline-adjusted/codec peak RSS、wall deadline/resource limitを強制・計測する。
 - [x] CR-06: real E2Eの全拒否シナリオを正確なHTTP status/error codeへ固定し、任意non-2xxを成功扱いするassertionを除去する。
 - [x] MD-22: commit routeのQueue/RPC infrastructure/availability failureを必ずHTTP 503 `SERVICE_UNAVAILABLE`へ写像し、validation/auth/authorization/conflict/internal contractを維持するfocused regressionを追加する。
 - [x] 回帰保護: bucket compatibility、cleanup lease、compensation cleanup、pre-materialization 10MiB、ImageMagick WASM一回初期化、shared-source consumer lifecycleと既存real SSR-cookie/RLS/artifact/provider-timeout境界を再実行可能なsuiteで確認する。
@@ -484,7 +484,7 @@ cycle 16のR20-F3はhosted内部snapshot/pathのservice-role限定、adapter強�
 ## Fresh remediation attempt 1 of maximum 3
 
 - [x] F-01: real/resource/fresh/upgrade/failure/Denoをfallbackなしの`not_run`/exit 2 gateに統一し、local Greenと実行未了を別記する。
-- [x] F-02: OpenAI/Gemini responseをContent-Length+streamで有界化し、10MiB+1 base64を`atob`前に拒否し、served resource casesを追加する。
+- [x] F-02: OpenAI/Gemini responseをContent-Length+streamで有界化し、4MiB+1 base64を`atob`前に拒否し、served resource casesを追加する。
 - [x] F-03/F-04/F-05: commit/status allowlist DTO、malformed JSON 400、PreviewTokenError 401、cleanup malformed RPC fail-closedをfocused regressionで固定する。
 - [x] F-06/F-08/F-12: real DB gateへexpired reclaim fencing、pair failure+sibling success、23:59:59/24:00/reference/owner-path cleanupを追加する。
 - [x] F-07/F-09/F-11: real E2Eへlive source owner isolation、cross-owner commit denial、strict reconnect/duplicate snapshot、shared reference delete lifecycleを追加する。
@@ -675,7 +675,7 @@ any post-cycle-8 remediation or any hosted gate.
 
 - [x] R19-F1 Red/Green: owner-readable S-11 tablesをcolumn allowlistへ限定し、claim/cleanup token、raw/source path、digest等をData API ownerから隠す。service roleは完全SELECTを維持する。
 - [x] R19-F1: fresh/upgrade/true-autocommit recoveryへforward hardening migrationを適用し、owner safe projection、other-owner RLS拒否、token projection SQLSTATE 42501、service-role許可を実DBで検証する。
-- [x] R19-F2 Red/Green: source/provider双方のPNG encode出力をmagic/MIME/dimensions/16MP/10MiBで再検証し、oversizeを永続失敗としてretry・destination Storage副作用ゼロにする。
+- [x] R19-F2 Red/Green: source/provider双方のPNG encode出力をmagic/MIME/dimensions/1,048,576 pixels/8-bit非透過/10MiBで再検証し、oversizeを永続失敗としてretry・destination Storage副作用ゼロにする。
 - [x] R19-F3 Red/Green: queued all-undone、processing/undone、terminal/undone混在をstatus routeで502へfail closedし、到達可能な6状態を維持する。
 - [x] meta/plan/traceability/operations/tasksをv2.0.13 / cycle 15 / `hosted 7 not_run; merge blocked`へ同期する。
 - [x] DB safety 31/31、real lifecycle harness、full isolated root quality、external 7件structured `not_run`/exit 2、index clean、strict-prefix residue 0を確認する。

@@ -1,6 +1,5 @@
-import { MAX_IMAGE_BYTES } from "./image-validation.ts";
-
-const MAX_BASE64_BYTES = Math.ceil(MAX_IMAGE_BYTES / 3) * 4;
+export const MAX_PROVIDER_IMAGE_BYTES = 4 * 1024 * 1024;
+const MAX_BASE64_BYTES = Math.ceil(MAX_PROVIDER_IMAGE_BYTES / 3) * 4;
 export const MAX_PROVIDER_RESPONSE_BYTES = MAX_BASE64_BYTES + 64 * 1024;
 const BASE64_PATTERN = /^[A-Za-z0-9+/]*={0,2}$/u;
 
@@ -101,7 +100,7 @@ export async function readBoundedJsonResponse(
 
 export function decodeBase64WithinLimit(
 	encoded: string,
-	maxDecodedBytes = MAX_IMAGE_BYTES
+	maxDecodedBytes = MAX_PROVIDER_IMAGE_BYTES
 ): Uint8Array {
 	if (encoded.length === 0 || encoded.length % 4 !== 0) {
 		throw new Error("PROVIDER_RESPONSE_INVALID");
@@ -114,5 +113,9 @@ export function decodeBase64WithinLimit(
 	}
 	const binary = atob(encoded);
 	if (binary.length !== decodedBytes) throw new Error("PROVIDER_RESPONSE_INVALID");
-	return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+	const decoded = new Uint8Array(decodedBytes);
+	for (let index = 0; index < decodedBytes; index += 1) {
+		decoded[index] = binary.charCodeAt(index);
+	}
+	return decoded;
 }

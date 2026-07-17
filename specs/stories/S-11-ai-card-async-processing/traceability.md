@@ -4,7 +4,7 @@ feature: ai-card-async-processing
 type: traceability
 version: 2.0.17
 created: 2026-07-15
-updated: 2026-07-16
+updated: 2026-07-17
 status: rc1_remediation
 requirements: specs/stories/S-11-ai-card-async-processing/requirements.md@2.0.5
 adr: specs/adr/ADR-008-ai-card-async-queue-image-processing.md@2.0.5
@@ -26,7 +26,7 @@ plan: specs/stories/S-11-ai-card-async-processing/plan.md@2.0.17
 | AC-08 concept failure isolation | concept message and pair fail transaction | - | F-08 fail-closed PostgreSQL pair-failure/sibling-success | E2E-04 (local) |
 | AC-09 secret-safe logging | worker/cleanup auth/config handlers, allowlist logger, confirmed correlated poison/duplicate events, strict claim-bound terminal `worker_failure` taxonomy | #15/P3-01 | R4-F1/F2/F4, attempt-2 F1/F2/F3/F4, prior reconciliation | E2E-10 served correlated probe |
 
-Integration includes authenticated routes, service-role RPC, provider HTTP, private Storage, recorded legacy/fresh buckets, shared-source ordering, cleanup lease recovery, pinned ImageMagick decode/re-encode, and finalize/failure reconciliation. `test:s11:real-integration`, `test:s11:real-e2e`, and `test:s11:resource` are fail-closed gates: missing real environment/fixtures produce `not_run` and exit 2, never a mock pass. Configured real E2E obtains owner A/B through Supabase password login, sends package-generated SSR cookies to Next routes, and uses access-token Authorization only for PostgREST RPC/RLS; rejection scenarios require the exact Next 404/`NOT_FOUND`, service-only PostgREST anon 401 or authenticated 403 with code `42501`, or Storage 400/`404`/`not_found` contract. The resource gate directly serves the exact self-contained local bundle plus pinned WASM, independently hashes/sizes both, measures spawned PID CPU/external RSS and codec peak RSS, enforces request abort/process kill at CPU/RSS/120-second limits, and exercises direct 16MP/decode-bomb/independent decode-failure plus OpenAI-adapter maximum response/110-second timeout cases.
+Integration includes authenticated routes, service-role RPC, provider HTTP, private Storage, recorded legacy/fresh buckets, shared-source ordering, cleanup lease recovery, pinned ImageMagick one-pass transcode, and finalize/failure reconciliation. `test:s11:real-integration`, `test:s11:real-e2e`, and `test:s11:resource` are fail-closed gates: missing real environment/fixtures produce `not_run` and exit 2, never a mock pass. Configured real E2E obtains owner A/B through Supabase password login, sends package-generated SSR cookies to Next routes, and uses access-token Authorization only for PostgREST RPC/RLS; rejection scenarios require the exact Next 404/`NOT_FOUND`, service-only PostgREST anon 401 or authenticated 403 with code `42501`, or Storage 400/`404`/`not_found` contract. The resource gate directly serves the exact self-contained local bundle plus pinned WASM, independently hashes/sizes both, runs each case in a fresh Deno process, measures spawned PID CPU/runtime-baseline-adjusted RSS and codec peak RSS, enforces request abort/process kill at 1.6 CPU seconds/248MiB request RSS/120 seconds, and exercises PNG/JPEG/WebP 10MiB・1,048,576 pixels（PNG 8-bit RGB）、dimension rejection, independent decode failure, OpenAI-adapter 4MiB/1024px maximum response, and 110-second timeout cases.
 
 Fresh/upgrade/failure database jobs are also fail-closed when invoked directly: absent or non-distinct database URLs emit structured `not_run` and exit 2. The repository quality runner now provisions three distinct disposable databases and executes local core fresh/upgrade/failure plus the real two-session completion/cleanup race. Current inventory is Unit 27/27, Integration 223/223, E2E 10/10. Hosted `pg_cron`, real integration/E2E, resource artifact, and Deno gates remain explicit `not_run`/exit 2 until their target prerequisites exist; no local result promotes them to pass.
 
@@ -47,7 +47,7 @@ Fresh remediation cycle 3 adds P3-01/P3-02 focused evidence: `worker_failure` is
 | Fresh remediation finding | Production/executable resolution | Current evidence |
 |---|---|---|
 | F-01 | real integration/E2E/resource, three DB jobs, and Deno wrapper all fail closed with structured `not_run`/exit 2 | local gate invocation record in operations; no real pass claimed |
-| F-02 | shared bounded provider reader + decoded-size preflight; OpenAI/Gemini and served resource cases | focused Integration Content-Length/missing/underreported/10MiB+1 Green; resource execution not_run |
+| F-02 | shared bounded provider reader + decoded-size preflight; OpenAI/Gemini and served resource cases | focused Integration Content-Length/missing/underreported/4MiB+1 Green; configured resource gate Green |
 | F-03 | strict commit/status parsers construct allowlist DTOs | malformed/extra enum/count/item/card/error/URL regressions Green |
 | F-04 | malformed JSON=400, PreviewTokenError=401; MD-22 availability=503 unchanged | focused route regressions Green |
 | F-05 | non-array/invalid cleanup claim RPC throws contract error | null/object/invalid-row regressions Green |
@@ -84,7 +84,7 @@ Fresh remediation cycle 3 adds P3-01/P3-02 focused evidence: `worker_failure` is
 | CR-01/HI-07 | migration owner grants and service-only status RPC | IT-01–03, DB contract smoke |
 | CR-02/CR-03/MD-14 | concept failure/finalize transaction | CR-02 adapter safe-code matrix, IT-23, E2E-04/06 |
 | CR-04/CR-05/HI-19 | terminal source cleanup, finalize reconciliation, durable orphan-before-compensation | CR-04/05 and HI-19 cleanup-convergence regressions, E2E-05/08 |
-| CR-06 | SSR-cookie upload+AI route, token-scoped RPC/RLS, pgmq/provider/Edge codec/Storage/cleanup; directly served artifact+WASM failure resource enforcement | fail-closed `test:s11:real-integration`, `test:s11:real-e2e`, `test:s11:resource`, including exact denial contracts, decode-bomb/decode-failure 422, PID CPU/RSS/deadline, provider 10MiB/16MP + 110s abort |
+| CR-06 | SSR-cookie upload+AI route, token-scoped RPC/RLS, pgmq/provider/Edge codec/Storage/cleanup; directly served artifact+WASM failure resource enforcement | fail-closed `test:s11:real-integration`, `test:s11:real-e2e`, `test:s11:resource`, including exact denial contracts, dimension/decode failure 422, PID CPU/baseline-adjusted RSS/deadline, provider 4MiB/1024px + 110s abort |
 | HI-08 | source sanitizer and pinned WASM codec | PNG/JPEG/WebP/truncated/EXIF and real WASM tests |
 | HI-09/HI-10 | global cleanup candidates and per-path completion | cleanup boundary plus DB contract jobs |
 | HI-11 | typed provider/Storage failures | network, 408/429/5xx, 4xx, malformed-response matrix |
@@ -142,7 +142,7 @@ Fresh remediation cycle 3 adds P3-01/P3-02 focused evidence: `worker_failure` is
 | R18-F2 | complete diff surfaces | quality phases run committed `base...HEAD`, staged `--cached`, and unstaged whitespace checks in order, propagating the first nonzero exit and skipping later surfaces |
 | R18-F3 | cycle-14 readiness SSOT | v2.0.12/cycle 14 retains hosted 7 not_run/exit 2 and merge blocked; all earlier review approvals remain historical |
 | R19-F1 | owner-safe S-11 reads | authenticated receives only safe column projections under owner RLS; claim/cleanup/raw/source/storage tokens and paths fail with SQLSTATE 42501, other owner sees no row, and service role retains full SELECT across fresh/upgrade/recovery |
-| R19-F2 | normalized PNG output boundary | uploaded-source and provider encode outputs are re-inspected for PNG identity, exact dimensions, 16MP, and 10MiB before destination write; oversize is permanent `IMAGE_TOO_LARGE` with retry/write/finalize zero |
+| R19-F2 | normalized PNG output boundary | uploaded-source and provider encode outputs are re-inspected for PNG identity, exact dimensions, 1,048,576 pixels, 8-bit non-alpha, and 10MiB before destination write; oversize is permanent `IMAGE_TOO_LARGE` with retry/write/finalize zero |
 | R19-F3 | strict status matrix | all-undone is only `undone`; undone mixed with active or terminal states and every declared/computed contradiction fail closed as 502 while six reachable status families remain valid |
 | R19-F4 | cycle-15 readiness SSOT | v2.0.13/cycle 15 retains hosted 7 not_run/exit 2 and merge blocked; all earlier review approvals remain historical |
 | R20-F1 | owner-safe Storage tracking lookup | fixed-search-path SECURITY DEFINER returns one managed bit only for the authenticated JWT owner's illustrations path; PUBLIC/anon/service direct execute is denied and raw path/token SELECT remains 42501 |

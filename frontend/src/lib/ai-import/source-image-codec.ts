@@ -27,7 +27,33 @@ export function createSourceImageCodecFactory(
 
 export const createSourceImageCodec = createSourceImageCodecFactory(initialize);
 
-function createCodec({ ImageMagick, MagickFormat }: MagickModule): ImageCodec {
+function createCodec({ FilterType, ImageMagick, MagickFormat }: MagickModule): ImageCodec {
+	const transcodePng: NonNullable<ImageCodec["transcodePng"]> = async ({
+		bytes,
+		width,
+		height,
+	}) => {
+		return await new Promise((resolve, reject) => {
+			try {
+				ImageMagick.read(bytes, (image) => {
+					const sourceWidth = image.width;
+					const sourceHeight = image.height;
+					image.strip();
+					image.filterType = FilterType.Box;
+					if (image.width !== width || image.height !== height) image.resize(width, height);
+					image.write(MagickFormat.Png, (encoded) =>
+						resolve({
+							bytes: new Uint8Array(encoded),
+							sourceWidth,
+							sourceHeight,
+						})
+					);
+				});
+			} catch (error) {
+				reject(error);
+			}
+		});
+	};
 	return {
 		async decode(bytes) {
 			return await new Promise((resolve, reject) => {
@@ -40,19 +66,10 @@ function createCodec({ ImageMagick, MagickFormat }: MagickModule): ImageCodec {
 				}
 			});
 		},
-		async encodePng({ bytes, width, height }) {
-			return await new Promise((resolve, reject) => {
-				try {
-					ImageMagick.read(bytes, (image) => {
-						image.strip();
-						if (image.width !== width || image.height !== height) image.resize(width, height);
-						image.write(MagickFormat.Png, (encoded) => resolve(new Uint8Array(encoded)));
-					});
-				} catch (error) {
-					reject(error);
-				}
-			});
+		async encodePng(input) {
+			return (await transcodePng(input)).bytes;
 		},
+		transcodePng,
 	};
 }
 

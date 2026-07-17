@@ -11,6 +11,8 @@ import {
 } from "../../../../supabase/functions/_shared/ai-card-import/image-codec.ts";
 import {
 	MAX_IMAGE_BYTES,
+	MAX_JPEG_PIXELS,
+	MAX_WEBP_PIXELS,
 	inspectImage,
 } from "../../../../supabase/functions/_shared/ai-card-import/image-validation.ts";
 import { createSafeLogger } from "../../../../supabase/functions/_shared/ai-card-import/logger.ts";
@@ -112,8 +114,55 @@ describe("S-11 image validation", () => {
 		});
 	});
 
-	it("#6 rejects decoded dimensions above 16 megapixels", () => {
-		expect(inspectImage(png(4001, 4000), "image/png")).toEqual({
+	it("#6 rejects decoded dimensions above 1024 squared pixels", () => {
+		expect(inspectImage(png(1025, 1024), "image/png")).toEqual({
+			ok: false,
+			code: "IMAGE_DIMENSIONS_INVALID",
+		});
+	});
+
+	it("#6a rejects 16-bit PNG before full decode", () => {
+		const bytes = png(1024, 1024, 26);
+		bytes[24] = 16;
+		bytes[25] = 6;
+		expect(inspectImage(bytes, "image/png")).toEqual({
+			ok: false,
+			code: "IMAGE_FORMAT_INVALID",
+		});
+	});
+
+	it("#6a2 rejects alpha-channel PNG before full decode", () => {
+		const bytes = png(1024, 1024, 26);
+		bytes[24] = 8;
+		bytes[25] = 6;
+		expect(inspectImage(bytes, "image/png")).toEqual({
+			ok: false,
+			code: "IMAGE_FORMAT_INVALID",
+		});
+	});
+
+	it("#6a3 rejects alpha-channel WebP before full decode", () => {
+		const bytes = webp(1024, 1024);
+		bytes[20] = 0x10;
+		expect(inspectImage(bytes, "image/webp")).toEqual({
+			ok: false,
+			code: "IMAGE_FORMAT_INVALID",
+		});
+	});
+
+	it("#6b enforces the measured JPEG 1024-squared boundary", () => {
+		expect(MAX_JPEG_PIXELS).toBe(1024 * 1024);
+		expect(inspectImage(jpeg(1024, 1024), "image/jpeg")).toMatchObject({ ok: true });
+		expect(inspectImage(jpeg(1025, 1024), "image/jpeg")).toEqual({
+			ok: false,
+			code: "IMAGE_DIMENSIONS_INVALID",
+		});
+	});
+
+	it("#6c enforces the measured WebP 1024-squared pixel boundary", () => {
+		expect(MAX_WEBP_PIXELS).toBe(1024 * 1024);
+		expect(inspectImage(webp(1024, 1024), "image/webp")).toMatchObject({ ok: true });
+		expect(inspectImage(webp(1025, 1024), "image/webp")).toEqual({
 			ok: false,
 			code: "IMAGE_DIMENSIONS_INVALID",
 		});
@@ -127,21 +176,21 @@ describe("S-11 image validation", () => {
 	});
 
 	it("#8 normalizes to a metadata-free PNG no larger than 1024 pixels", async () => {
-		const encoded = png(1024, 512);
+		const encoded = png(1024, 256);
 		const codec: ImageCodec = {
-			decode: vi.fn(async () => ({ width: 2048, height: 1024 })),
+			decode: vi.fn(async () => ({ width: 2048, height: 512 })),
 			encodePng: vi.fn(async ({ width, height }) => {
-				expect({ width, height }).toEqual({ width: 1024, height: 512 });
+				expect({ width, height }).toEqual({ width: 1024, height: 256 });
 				return encoded;
 			}),
 		};
 		expect(
-			await normalizeIllustration({ bytes: png(2048, 1024), declaredMime: "image/png" }, codec)
+			await normalizeIllustration({ bytes: png(2048, 512), declaredMime: "image/png" }, codec)
 		).toEqual({
 			bytes: encoded,
 			mime: "image/png",
 			width: 1024,
-			height: 512,
+			height: 256,
 		});
 	});
 
@@ -193,10 +242,29 @@ describe("S-11 image validation", () => {
 		).rejects.toThrow("IMAGE_FORMAT_INVALID");
 	});
 
+	it("#8d2 uses one-pass transcode and rejects a decoded source-dimension mismatch", async () => {
+		const decode = vi.fn(async () => ({ width: 128, height: 128 }));
+		const encodePng = vi.fn(async () => png(128, 128));
+		const transcodePng = vi.fn(async () => ({
+			bytes: png(128, 128),
+			sourceWidth: 127,
+			sourceHeight: 128,
+		}));
+		await expect(
+			sanitizeSourceImage(
+				{ bytes: png(128, 128), declaredMime: "image/png" },
+				{ decode, encodePng, transcodePng }
+			)
+		).rejects.toThrow("IMAGE_DECODE_FAILED");
+		expect(transcodePng).toHaveBeenCalledTimes(1);
+		expect(decode).not.toHaveBeenCalled();
+		expect(encodePng).not.toHaveBeenCalled();
+	});
+
 	it.each([
 		["oversized PNG", "oversized", "IMAGE_TOO_LARGE"],
 		["non-PNG bytes", "jpeg", "IMAGE_FORMAT_INVALID"],
-		["over-16MP PNG", "dimensions", "IMAGE_DIMENSIONS_INVALID"],
+		["over-1024-squared PNG", "dimensions", "IMAGE_DIMENSIONS_INVALID"],
 		["dimension mismatch", "mismatch", "IMAGE_DECODE_FAILED"],
 	] as const)("#8e rejects a %s after source and provider encoding", async (_name, fixture, code) => {
 		const encoded =
@@ -205,7 +273,7 @@ describe("S-11 image validation", () => {
 				: fixture === "jpeg"
 					? jpeg(128, 128)
 					: fixture === "dimensions"
-						? png(4001, 4000)
+						? png(1025, 1024)
 						: png(127, 128);
 		const codec = {
 			decode: async () => ({ width: 128, height: 128 }),

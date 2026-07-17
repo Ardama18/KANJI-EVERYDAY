@@ -1,7 +1,9 @@
 import type { ImageMime, SafeImportErrorCode } from "./contracts.ts";
 
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
-export const MAX_IMAGE_PIXELS = 16_000_000;
+export const MAX_IMAGE_PIXELS = 1_024 * 1_024;
+export const MAX_JPEG_PIXELS = MAX_IMAGE_PIXELS;
+export const MAX_WEBP_PIXELS = MAX_IMAGE_PIXELS;
 export const MIN_ILLUSTRATION_EDGE = 64;
 export const MAX_ILLUSTRATION_EDGE = 1024;
 
@@ -26,19 +28,52 @@ export function inspectImage(
 	if (detectedMime === undefined || detectedMime !== declaredMime) {
 		return { ok: false, code: "IMAGE_FORMAT_INVALID" };
 	}
+	if (detectedMime === "image/png" && !isSupportedPngHeader(bytes)) {
+		return { ok: false, code: "IMAGE_FORMAT_INVALID" };
+	}
+	if (detectedMime === "image/webp" && hasWebpAlpha(bytes)) {
+		return { ok: false, code: "IMAGE_FORMAT_INVALID" };
+	}
 	const dimensions = readImageDimensions(bytes, detectedMime);
 	if (dimensions === undefined) return { ok: false, code: "IMAGE_DECODE_FAILED" };
 	const { width, height } = dimensions;
 	if (
 		width < 1 ||
 		height < 1 ||
-		width * height > MAX_IMAGE_PIXELS ||
+		width * height > maximumPixels(detectedMime) ||
 		(options.illustration === true &&
 			(width < MIN_ILLUSTRATION_EDGE || height < MIN_ILLUSTRATION_EDGE))
 	) {
 		return { ok: false, code: "IMAGE_DIMENSIONS_INVALID" };
 	}
 	return { ok: true, mime: detectedMime, width, height };
+}
+
+function hasWebpAlpha(bytes: Uint8Array): boolean {
+	const chunk = ascii(bytes, 12, 16);
+	if (chunk === "VP8X") return ((bytes[20] ?? 0) & 0x10) !== 0;
+	if (chunk === "VP8L" && bytes.byteLength >= 25 && bytes[20] === 0x2f) {
+		return ((bytes[24] ?? 0) & 0x10) !== 0;
+	}
+	return false;
+}
+
+function isSupportedPngHeader(bytes: Uint8Array): boolean {
+	// A complete PNG IHDR always includes bit depth and color type. The short-header
+	// path remains for structural unit fixtures and will still require a real codec decode.
+	if (bytes.byteLength < 26) return true;
+	const bitDepth = bytes[24] ?? 0;
+	const colorType = bytes[25] ?? 255;
+	if (bitDepth < 1 || bitDepth > 8) return false;
+	if (colorType === 0) return bitDepth === 1 || bitDepth === 2 || bitDepth === 4 || bitDepth === 8;
+	if (colorType === 2) return bitDepth === 8;
+	return colorType === 3 && (bitDepth === 1 || bitDepth === 2 || bitDepth === 4 || bitDepth === 8);
+}
+
+function maximumPixels(mime: ImageMime): number {
+	if (mime === "image/jpeg") return MAX_JPEG_PIXELS;
+	if (mime === "image/webp") return MAX_WEBP_PIXELS;
+	return MAX_IMAGE_PIXELS;
 }
 
 export function detectImageMime(bytes: Uint8Array): ImageMime | undefined {

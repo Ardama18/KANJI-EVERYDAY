@@ -12,6 +12,15 @@ export interface ImageCodec {
 		readonly width: number;
 		readonly height: number;
 	}): Promise<Uint8Array>;
+	transcodePng?(input: {
+		readonly bytes: Uint8Array;
+		readonly width: number;
+		readonly height: number;
+	}): Promise<{
+		readonly bytes: Uint8Array;
+		readonly sourceWidth: number;
+		readonly sourceHeight: number;
+	}>;
 }
 
 export interface NormalizedImage {
@@ -27,27 +36,18 @@ export async function sanitizeSourceImage(
 ): Promise<NormalizedImage> {
 	const inspected = inspectImage(input.bytes, input.declaredMime);
 	if (!inspected.ok) throw new Error(inspected.code);
-	let decoded: DecodedImage;
-	try {
-		decoded = await codec.decode(input.bytes);
-	} catch {
-		throw new Error("IMAGE_DECODE_FAILED");
-	}
-	if (decoded.width !== inspected.width || decoded.height !== inspected.height) {
-		throw new Error("IMAGE_DECODE_FAILED");
-	}
 	let bytes: Uint8Array;
 	try {
-		bytes = await codec.encodePng({
-			bytes: input.bytes,
-			width: decoded.width,
-			height: decoded.height,
-		});
+		bytes = await encodeVerifiedPng(
+			codec,
+			{ bytes: input.bytes, width: inspected.width, height: inspected.height },
+			inspected
+		);
 	} catch {
 		throw new Error("IMAGE_DECODE_FAILED");
 	}
-	assertNormalizedPng(bytes, decoded.width, decoded.height);
-	return { bytes, mime: "image/png", width: decoded.width, height: decoded.height };
+	assertNormalizedPng(bytes, inspected.width, inspected.height);
+	return { bytes, mime: "image/png", width: inspected.width, height: inspected.height };
 }
 
 export async function normalizeIllustration(
@@ -56,24 +56,19 @@ export async function normalizeIllustration(
 ): Promise<NormalizedImage> {
 	const inspected = inspectImage(input.bytes, input.declaredMime, { illustration: true });
 	if (!inspected.ok) throw new Error(inspected.code);
-	let decoded: DecodedImage;
-	try {
-		decoded = await codec.decode(input.bytes);
-	} catch {
-		throw new Error("IMAGE_DECODE_FAILED");
-	}
-	if (decoded.width !== inspected.width || decoded.height !== inspected.height) {
-		throw new Error("IMAGE_DECODE_FAILED");
-	}
-	const scale = Math.min(1, MAX_ILLUSTRATION_EDGE / Math.max(decoded.width, decoded.height));
-	const width = Math.max(1, Math.round(decoded.width * scale));
-	const height = Math.max(1, Math.round(decoded.height * scale));
+	const scale = Math.min(1, MAX_ILLUSTRATION_EDGE / Math.max(inspected.width, inspected.height));
+	const width = Math.max(1, Math.round(inspected.width * scale));
+	const height = Math.max(1, Math.round(inspected.height * scale));
 	if (width < 1 || height < 1 || width > MAX_ILLUSTRATION_EDGE || height > MAX_ILLUSTRATION_EDGE) {
 		throw new Error("IMAGE_DIMENSIONS_INVALID");
 	}
 	let bytes: Uint8Array;
 	try {
-		bytes = await codec.encodePng({ bytes: input.bytes, width, height });
+		bytes = await encodeVerifiedPng(
+			codec,
+			{ bytes: input.bytes, width, height },
+			inspected
+		);
 	} catch {
 		throw new Error("IMAGE_DECODE_FAILED");
 	}
@@ -81,6 +76,26 @@ export async function normalizeIllustration(
 	// may legitimately make the normalized short edge smaller than 64px.
 	assertNormalizedPng(bytes, width, height, MAX_ILLUSTRATION_EDGE);
 	return { bytes, mime: "image/png", width, height };
+}
+
+async function encodeVerifiedPng(
+	codec: ImageCodec,
+	input: { readonly bytes: Uint8Array; readonly width: number; readonly height: number },
+	expectedSource: DecodedImage
+): Promise<Uint8Array> {
+	if (codec.transcodePng !== undefined) {
+		const encoded = await codec.transcodePng(input);
+		if (
+			encoded.sourceWidth !== expectedSource.width ||
+			encoded.sourceHeight !== expectedSource.height
+		) throw new Error("IMAGE_DECODE_FAILED");
+		return encoded.bytes;
+	}
+	const decoded = await codec.decode(input.bytes);
+	if (decoded.width !== expectedSource.width || decoded.height !== expectedSource.height) {
+		throw new Error("IMAGE_DECODE_FAILED");
+	}
+	return await codec.encodePng(input);
 }
 
 function assertNormalizedPng(

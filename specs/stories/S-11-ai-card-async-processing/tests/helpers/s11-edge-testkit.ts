@@ -75,6 +75,7 @@ export function createWorkerHarness(
 		readonly decodeError?: boolean;
 		readonly encodeError?: boolean;
 		readonly decodedDimensions?: { readonly width: number; readonly height: number };
+		readonly sourceBytes?: Uint8Array;
 		readonly sourceDeleteThrows?: boolean;
 		readonly illustrationReadThrows?: boolean;
 		readonly sourceBucket?: "ai-card-sources" | "illustrations";
@@ -294,7 +295,7 @@ export function createWorkerHarness(
 	function assertToken(token: string): void {
 		if (state.claimToken !== token) throw new Error("CLAIM_LOST");
 	}
-	const png = pngFixture(128, 128);
+	const png = options.sourceBytes ?? pngFixture(128, 128);
 	const storage: IllustrationStorage = {
 		async readSource(bucket): Promise<Uint8Array> {
 			state.sourceReadBuckets.push(bucket);

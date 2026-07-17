@@ -29,7 +29,7 @@ S-10は`commit_import`、`reserve_provider_usage`、`finalize_import_item`、`ma
 4. conceptのR1/W1を一体で成功/失敗させ、card/quota/illustration/objectを重複させない方法
 5. OpenAI/Geminiの選択とEdge runtime内の画像検証・PNG正規化
 
-Supabase QueuesはPostgres上の`pgmq`を利用し、messageは明示的にarchive/deleteされるまで保持される。`read`はvisibility timeoutを取り、`send`は秒単位delayを持つため、同じPostgres transaction内のenqueueと永続retryに利用できる。Edge FunctionsはDeno TypeScript/WASMをサポートし、Supabase公式の画像操作例はnative依存のSharpではなく`magick-wasm`を使用している。一方、Hosted Edge Functionsにはmemory/CPU/wall-clock上限があり、同じ公式例も5MB超の複雑な画像処理はresource limitになり得ると警告している。したがって10MiB・16MPを許容する本件は、WASMを採用しただけでは実現可能性が確定せず、最悪入力でのdeployment gateを必要とする。
+Supabase QueuesはPostgres上の`pgmq`を利用し、messageは明示的にarchive/deleteされるまで保持される。`read`はvisibility timeoutを取り、`send`は秒単位delayを持つため、同じPostgres transaction内のenqueueと永続retryに利用できる。Edge FunctionsはDeno TypeScript/WASMをサポートし、Supabase公式の画像操作例はnative依存のSharpではなく`magick-wasm`を使用している。一方、Hosted Edge Functionsにはmemory/CPU/wall-clock上限があり、同じ公式例も大容量の複雑な画像処理はresource limitになり得ると警告している。したがって形式別に最大10MiBの入力を許容する本件は、WASMを採用しただけでは実現可能性が確定せず、最悪入力でのdeployment gateを必要とする。
 
 ## 決定事項
 
@@ -68,16 +68,16 @@ Supabase QueuesはPostgres上の`pgmq`を利用し、messageは明示的にarchi
 - OpenAI/Geminiを同じ`IllustrationProvider` interfaceへadapter化し、返値を`success | transient | permanent`へ正規化する。HTTPはDeno標準`fetch`を用い、S-08とS-11は同じpure prompt-safety moduleを直接呼ぶ。Node `Buffer`依存とS-08の状態更新責務はworkerへ持ち込まない。
 - 選択providerが失敗しても他provider adapterを呼ばない。modelの自動fallbackも行わない。
 - provider request/response body、base64、prompt、API key、Authorization headerはlog/model_infoへ保存しない。
-- adapterは成功HTTP bodyを`response.json()`で無制限にmaterializeしない。Content-Lengthとstream累計を固定response budgetで制限し、base64 decoded-sizeを`atob`前に算出して10MiB超を恒久`IMAGE_TOO_LARGE`にする。欠落・過少Content-Lengthもstream側でfail closedとする。宣言oversizeはbody read前にbest-effort cancelし、cancelの欠落・同期throw・非同期rejectは元のsize classificationを置換しない。OpenAI/Geminiは同じbounded reader/cancel helperを使用し、cancel error/raw bodyをlogしない。
+- adapterは成功HTTP bodyを`response.json()`で無制限にmaterializeしない。Content-Lengthとstream累計を固定response budgetで制限し、base64 decoded-sizeを`atob`前に算出して4MiB超を恒久`IMAGE_TOO_LARGE`にする。decoded文字列は固定長bufferへindex copyする。欠落・過少Content-Lengthもstream側でfail closedとする。宣言oversizeはbody read前にbest-effort cancelし、cancelの欠落・同期throw・非同期rejectは元のsize classificationを置換しない。OpenAI/Geminiは同じbounded reader/cancel helperを使用し、cancel error/raw bodyをlogしない。
 - production defaultはadapter内の公式OpenAI/Gemini endpointとする。test/real E2E overrideはHTTPS endpointと非機密binding IDのpaired設定だけを許可し、partial/HTTP/userinfo URLをclaim前にfail closedで拒否する。override requestへbinding headerを付け、control/stats側のlast bindingとcall増分をgateで照合するため、fake-provider controlとserved workerの誤接続をpassにしない。
 
 ### 5. 画像はWASMで検証・正規化し、決定的objectと参照再確認で収束させる
 
-- S-11新規sourceはprivate `ai-card-sources` bucketの`{ownerUserId}/{uploadId}/source`へ置き、upload rowにbucket/pathを永続化する。S-10のready/consumed sourceは既存`illustrations` bucketを記録してその場で利用し、upgradeでobjectを移動・複製しない。prepare時に1 request最大5件、各10MiB、合計50MiBを検査し、complete時に実bytesのPNG/JPEG/WebP magic、宣言MIME一致、decode、16MP以下を検証する。workerのStorage readerも宣言`Content-Length`とstream累計の両方を10MiBで打ち切り、欠落/過少申告で全bytesをmaterializeしない。providerへ渡す前にmetadataを除去したsanitized bytesへ再encodeし、元sourceのEXIF等を外部providerへ送らない。
+- S-11新規sourceはprivate `ai-card-sources` bucketの`{ownerUserId}/{uploadId}/source`へ置き、upload rowにbucket/pathを永続化する。S-10のready/consumed sourceは既存`illustrations` bucketを記録してその場で利用し、upgradeでobjectを移動・複製しない。prepare時に1 request最大5件、各10MiB、合計50MiBを検査し、complete時に実bytesのPNG/JPEG/WebP magic、宣言MIME一致、decode、1,048,576 pixels以下、PNG 8-bit、PNG/WebP非透過を検証する。workerのStorage readerも宣言`Content-Length`とstream累計の両方を10MiBで打ち切り、欠落/過少申告で全bytesをmaterializeしない。providerへ渡す前にmetadataを除去したsanitized bytesへ再encodeし、元sourceのEXIF等を外部providerへ送らない。
 - `ai_upload_consumers(upload_id,job_id)`をdurable associationとし、job stateをreference lifecycleの正本にする。同一uploadの全consumer jobがterminalになったtransactionだけがsourceをcleanup pendingへ遷移し、記録済みbucket/pathを一度だけ即時削除へ渡す。parallel/out-of-order terminal化でも非terminal/retry consumerが1件でもあれば保持する。
-- illustration入力にも10MiB、16MPを適用し、正規化前の幅・高さとも64px以上を要求する。保存前に最大辺1024pxへ縦横比維持で縮小し、PNGへ再encodeしてmetadataを除去する。小さい画像を拡大せず、入力条件を満たす極端な縦横比では正規化後の短辺が64px未満でも受理して各辺1..1024を永続化する。
-- Edge runtime公式例に合わせ、version pinした`@imagemagick/magick-wasm`を用いる。native `sharp`は使わない。magic/dimensionをfull decode前に検査し、1 invocation 1 concept、画像処理並列度1を基本とする。PNG/JPEG/WebPそれぞれの10MiB・16MP境界、decode bomb、provider最大応答、PNG再encodeをHosted Edge相当環境で測り、memory/CPU/wall-clockの全上限内に安全余裕を持って収まることをdeployment hard gateにする。満たさない場合は本ADRをAccepted/本番deployせず、Edge worker要件を維持した処理分割または別codec案を再決定する。
-- decode bombと独立truncated image decode failureは各々HTTP 422 `IMAGE_DECODE_FAILED`を必須とする。gate parentは失敗応答でもspawn PID CPU/RSSを継続sampleし、codec報告peak RSSと照合する。CPU 1.6秒、RSS 204MiB、wall 120秒の上限到達時はrequest abortとlocal Deno process killを行い、任意non-2xxを合格扱いしない。
+- illustration入力にも10MiB・1,048,576 pixels上限を適用し、PNGは8-bit、PNG/WebPは非透過、正規化前の幅・高さとも64px以上を要求する。provider出力はdecoded 4MiB・最大辺1024pxをWASM初期化前に要求する。保存前に最大辺1024pxへ縦横比維持でBox縮小し、1回のfull decodeで元寸法照合とPNG再encodeを行ってmetadataを除去する。小さい画像を拡大せず、入力条件を満たす極端な縦横比では正規化後の短辺が64px未満でも受理して各辺1..1024を永続化する。
+- Edge runtime公式例に合わせ、version pinした`@imagemagick/magick-wasm`を用いる。native `sharp`は使わない。magic/dimension/PNG bit depth/color typeをfull decode前に検査し、1 invocation 1 concept、画像処理並列度1を基本とする。PNG/JPEG/WebP各10MiB・1,048,576 pixels（PNGは8-bit RGB）、provider 4MiB/1024px、dimension bomb、独立truncated decode failureをfresh Deno processで測り、memory/CPU/wall-clockの全上限内に収まることをdeployment hard gateにする。満たさない場合は本ADRをAccepted/本番deployせず、Edge worker要件を維持した処理分割または別codec案を再決定する。
+- dimension bombはHTTP 422 `IMAGE_DIMENSIONS_INVALID`、独立truncated image decode failureはHTTP 422 `IMAGE_DECODE_FAILED`を必須とする。gate parentは失敗応答でもspawn PID CPU/RSSを継続sampleし、runtime baseline後のrequest増分RSSとcodec報告peak RSSを照合する。CPU 1.6秒、RSS 248MiB、wall 120秒の上限到達時はrequest abortとlocal Deno process killを行い、任意non-2xxを合格扱いしない。248MiBはHosted 256MiBに対して8MiBを残し、ImageMagick/WASMの実測固定メモリ床を反映する。
 - `(owner,batch,concept)`でillustration rowを一意化し、R1/W1は同じillustration ID/keyを参照する。pair card確定は1 transactionで行い、片側だけを作らない。
 - object pathは`{ownerUserId}/s11-managed/{illustrationId}.png`、uploadは`upsert:false`とする。pathをclaimごとに変えないため、旧worker/duplicate deliveryでも論理objectは最大1個である。uploadのAsset Already Existsはbounded readとtracking/digest一致時だけ冪等成功とする。DB finalizeが`DUPLICATE_EXISTING`を返すかclaim-bound reconciliationが`terminal_duplicate`を確認した場合、workerはbusiness duplicateとしてfailure logから分離し、DB transactionが作ったdurable orphanを確認した後だけ即時best-effort削除する。削除失敗は同じorphan cleanupへ残す。未確定・claim-lost時に先行削除しない。
 - forward Storage policyはdurable `ai_illustration_objects` trackingに一致するobjectのauthenticated owner INSERT/UPDATE/DELETEを拒否する。path prefixだけで拒否しないため、pre-S-11のuntracked legacy owner objectは同じ第二segmentを含んでも従来操作でき、service roleはworker upload/cleanupを継続できる。SELECT/private owner境界とsource signed-upload flowは変更しない。
@@ -152,7 +152,7 @@ Supabase QueuesはPostgres上の`pgmq`を利用し、messageは明示的にarchi
 ### ネガティブ
 
 - `pgmq`、Cron、Edge secrets、WASM bundle/resource limitが新しい運用対象になる。
-- 公式例が警告する5MB超の画像処理に対し、本件は10MiB・16MPを要求する。deployment gateに不合格なら性能調整ではなくarchitecture decisionの再検討が必要になる。
+- 公式例が警告する大容量画像処理に対し、本件はsource最大10MiB、provider 4MiB/1024pxを要求する。fresh-process deployment gateに不合格なら性能調整ではなくarchitecture decisionの再検討が必要になる。
 - S-10のitem単位finalizeはconcept pair atomicityに不足するため、新しいconcept RPCとforward-compatible state mappingが必要になる。
 - StorageとDBは原子的でないため、補償とcleanupなしには完了できない。
 - claim tokenはDB書込みをfenceできるが、既に開始されたprovider/Storage I/O自体は取り消せない。stable path、existing-object検証、claim前後確認、orphan cleanupで収束させる必要がある。

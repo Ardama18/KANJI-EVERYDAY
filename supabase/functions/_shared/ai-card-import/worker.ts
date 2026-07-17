@@ -2,6 +2,7 @@ import type { IllustrationProvider, ProviderName, SafeImportErrorCode } from "./
 import { parseQueueMessage } from "./contracts.ts";
 import type { ImageCodec } from "./image-codec.ts";
 import { normalizeIllustration } from "./image-codec.ts";
+import { inspectImage, MAX_ILLUSTRATION_EDGE } from "./image-validation.ts";
 import type { SafeLogEvent } from "./logger.ts";
 import type { ProviderEnvironment } from "./provider.ts";
 import { ILLUSTRATION_PROVIDER_TIMEOUT_MS, selectProvider } from "./provider.ts";
@@ -221,6 +222,14 @@ export async function processOneConcept(dependencies: WorkerDependencies): Promi
 				startedAt
 			);
 			return outcome;
+		}
+		if (claim.imageMode === "ai") {
+			const inspected = inspectImage(source.bytes, source.declaredMime, { illustration: true });
+			if (!inspected.ok) throw new Error(inspected.code);
+			if (
+				inspected.width > MAX_ILLUSTRATION_EDGE ||
+				inspected.height > MAX_ILLUSTRATION_EDGE
+			) throw new Error("IMAGE_DIMENSIONS_INVALID");
 		}
 		const normalized = await normalizeIllustration(
 			{ bytes: source.bytes, declaredMime: source.declaredMime },

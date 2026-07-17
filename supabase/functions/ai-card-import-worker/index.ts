@@ -1,5 +1,5 @@
 import { createSafeLogger } from "../_shared/ai-card-import/logger.ts";
-import { createMagickCodec } from "../_shared/ai-card-import/magick-codec.ts";
+import { createLazyMagickCodec } from "../_shared/ai-card-import/magick-codec.ts";
 import { createGeminiProvider } from "../_shared/ai-card-import/providers/gemini.ts";
 import { createOpenAiProvider } from "../_shared/ai-card-import/providers/openai.ts";
 import { createStorageClient } from "../_shared/ai-card-import/storage.ts";
@@ -25,7 +25,7 @@ Deno.serve(async (request) => {
 			const outcome = await processOneConcept({
 				database,
 				storage,
-				codec: await createMagickCodec(),
+				codec: createLazyMagickCodec(),
 				providerEnvironment: {
 					ILLUSTRATION_PROVIDER: Deno.env.get("ILLUSTRATION_PROVIDER"),
 					ILLUSTRATION_PROVIDER_ENDPOINT: providerEndpoint,

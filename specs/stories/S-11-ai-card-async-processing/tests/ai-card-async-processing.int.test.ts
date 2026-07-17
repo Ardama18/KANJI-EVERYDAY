@@ -19,6 +19,7 @@ import {
 } from "../../../../supabase/functions/_shared/ai-card-import/image-codec.ts";
 import { MAX_IMAGE_BYTES } from "../../../../supabase/functions/_shared/ai-card-import/image-validation.ts";
 import { resolveProviderName } from "../../../../supabase/functions/_shared/ai-card-import/provider.ts";
+import { decodeBase64WithinLimit } from "../../../../supabase/functions/_shared/ai-card-import/provider-response.ts";
 import {
 	createSafeLogger,
 	type SafeLogEvent,
@@ -784,12 +785,7 @@ describe("S-11 commit and queue integration", () => {
 		const canonicalId = uploadId.toLowerCase();
 		const rawPath = `${OWNER_ID}/${canonicalId}/raw`;
 		const sourcePath = `${OWNER_ID}/${canonicalId}/source`;
-		const png = Uint8Array.from(
-			Buffer.from(
-				"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-				"base64"
-			)
-		);
+		const png = realPngFixture(1, 1);
 		const query = {
 			select: vi.fn(),
 			eq: vi.fn(),
@@ -822,7 +818,9 @@ describe("S-11 commit and queue integration", () => {
 		vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "http://127.0.0.1:54321");
 		vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "uppercase-test-anon");
 		vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "uppercase-test-service");
-		const fetchMock = vi.fn(async () => new Response(png, { status: 200 }));
+		const fetchMock = vi.fn(
+			async () => new Response(ownedArrayBuffer(png), { status: 200 }),
+		);
 		vi.stubGlobal("fetch", fetchMock);
 		try {
 			const { POST } = await import("../../../../frontend/app/api/ai/imports/sources/complete/route");
@@ -937,12 +935,7 @@ describe("S-11 commit and queue integration", () => {
 			const uploadId = crypto.randomUUID();
 			const rawPath = `${OWNER_ID}/${uploadId}/raw`;
 			const sourcePath = `${OWNER_ID}/${uploadId}/source`;
-			const png = Uint8Array.from(
-				Buffer.from(
-					"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-					"base64"
-				)
-			);
+		const png = realPngFixture(1, 1);
 			await db.execute(`
 				INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
 				VALUES('${OWNER_ID}','00000000-0000-0000-0000-000000000000','authenticated','authenticated','r13-route@example.local','not-for-login',now(),'{}','{}',now(),now())
@@ -1000,7 +993,10 @@ describe("S-11 commit and queue integration", () => {
 			vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "http://127.0.0.1:54321");
 			vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "r13-test-anon-key");
 			vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "r13-test-service-key");
-			vi.stubGlobal("fetch", async () => new Response(png, { status: 200 }));
+			vi.stubGlobal(
+				"fetch",
+				async () => new Response(ownedArrayBuffer(png), { status: 200 }),
+			);
 			try {
 				const { POST } = await import(
 					"../../../../frontend/app/api/ai/imports/sources/complete/route"
@@ -2447,12 +2443,8 @@ describe("S-11 retry, provider, and storage integration", () => {
 		"P3-02 worker accepts a valid extreme-aspect %s input and persists its normalized dimensions",
 		async (_orientation, inputWidth, inputHeight, outputWidth, outputHeight) => {
 			const harness = createWorkerHarness({
-				imageMode: "ai",
-				providerResult: {
-					kind: "success",
-					bytes: pngFixture(inputWidth, inputHeight),
-					declaredMime: "image/png",
-				},
+				imageMode: "upload",
+				sourceBytes: pngFixture(inputWidth, inputHeight),
 				decodedDimensions: { width: inputWidth, height: inputHeight },
 			});
 			expect(await processOneConcept(harness.dependencies)).toBe("succeeded");
@@ -2552,6 +2544,43 @@ describe("S-11 cleanup, pair atomicity, and logging integration", () => {
 });
 
 describe("S-11 reviewer regression boundaries", () => {
+	it("R25-F1 decodes provider base64 into the exact bounded byte sequence", () => {
+		const expected = Uint8Array.from([0, 1, 2, 127, 128, 254, 255]);
+		const encoded = Buffer.from(expected).toString("base64");
+		expect(decodeBase64WithinLimit(encoded)).toEqual(expected);
+	});
+
+	it("R25-F1 rejects provider images above 1024px before codec initialization", async () => {
+		const harness = createWorkerHarness({
+			imageMode: "ai",
+			providerResult: {
+				kind: "success",
+				bytes: pngFixture(1025, 1024),
+				declaredMime: "image/png",
+			},
+		});
+		const decode = vi.spyOn(harness.dependencies.codec, "decode");
+		const encodePng = vi.spyOn(harness.dependencies.codec, "encodePng");
+		expect(await processOneConcept(harness.dependencies)).toBe("failed");
+		expect(harness.state.failureCodes).toEqual(["IMAGE_DIMENSIONS_INVALID"]);
+		expect(decode).not.toHaveBeenCalled();
+		expect(encodePng).not.toHaveBeenCalled();
+		expect(harness.state.objectWrites).toBe(0);
+	});
+
+	it("R25-F1 keeps the resource gate bound to fresh-process baseline-adjusted limits", async () => {
+		const gate = await readFile(
+			new URL("./edge-resource-gate.ts", import.meta.url),
+			"utf8"
+		);
+		expect(gate).toContain("const RSS_LIMIT_BYTES = 248 * 1024 * 1024");
+		expect(gate).toContain("rssBaselineBytes");
+		expect(gate).toContain("await restartEdge()");
+		expect(gate).toContain('name: "provider-max-4mib-1024px"');
+		expect(gate).toContain('["max-1mp.jpg", "image/jpeg", true]');
+		expect(gate).toContain('["max-1mp.webp", "image/webp", true]');
+	});
+
 	it("F-15 binds the configured endpoint to the selected provider request", async () => {
 		const endpoint = "https://fake-provider.example.test/v1/images";
 		const binding = "s11-binding-fixture";
@@ -2590,9 +2619,9 @@ describe("S-11 reviewer regression boundaries", () => {
 	);
 
 	it.each(["openai", "gemini"] as const)(
-		"F-02 rejects a %s base64 image whose decoded size is 10 MiB + 1 before atob",
+		"F-02 rejects a %s base64 image whose decoded size is 4 MiB + 1 before atob",
 		async (providerName) => {
-			const oversizedBase64 = "A".repeat(Math.ceil((10 * 1024 * 1024 + 1) / 3) * 4);
+			const oversizedBase64 = "A".repeat(Math.ceil((4 * 1024 * 1024 + 1) / 3) * 4);
 			const body =
 				providerName === "openai"
 					? { data: [{ b64_json: oversizedBase64 }] }
@@ -3564,10 +3593,7 @@ describe("S-11 reviewer regression boundaries", () => {
 		const uploadId = "22000000-0000-4000-8000-000000000024";
 		const rawPath = `${OWNER_ID}/${uploadId}/raw`;
 		const sourcePath = `${OWNER_ID}/${uploadId}/source`;
-		const png = Uint8Array.from(Buffer.from(
-			"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-			"base64"
-		));
+		const png = realPngFixture(1, 1);
 		const query = { select: vi.fn(), eq: vi.fn(), maybeSingle: vi.fn() };
 		query.select.mockReturnValue(query);
 		query.eq.mockReturnValue(query);
@@ -3589,7 +3615,10 @@ describe("S-11 reviewer regression boundaries", () => {
 		vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "http://127.0.0.1:54321");
 		vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "codec-retry-test-anon");
 		vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "codec-retry-test-service");
-		vi.stubGlobal("fetch", async () => new Response(png, { status: 200 }));
+		vi.stubGlobal(
+			"fetch",
+			async () => new Response(ownedArrayBuffer(png), { status: 200 }),
+		);
 		const initializeCodec = vi.fn()
 			.mockRejectedValueOnce(new TypeError("unsafe initialization detail"))
 			.mockResolvedValue({
@@ -3718,12 +3747,7 @@ describe("S-11 reviewer regression boundaries", () => {
 	});
 
 	it("HI-08 pinned ImageMagick WASM performs a real full decode and metadata-stripping encode", async () => {
-		const bytes = Uint8Array.from(
-			Buffer.from(
-				"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-				"base64"
-			)
-		);
+		const bytes = realPngFixture(1, 1);
 		const codec = await createSourceImageCodec();
 		expect(await codec.decode(bytes)).toEqual({ width: 1, height: 1 });
 		const encoded = await codec.encodePng({ bytes, width: 1, height: 1 });
@@ -4218,22 +4242,28 @@ function sourceFixture(mime: "image/png" | "image/jpeg" | "image/webp", exif = f
 }
 
 function realPngFixture(width: number, height: number): Uint8Array {
-	const raw = new Uint8Array(height * (1 + width * 4));
+	const raw = new Uint8Array(height * (1 + width * 3));
 	for (let y = 0; y < height; y += 1) {
-		const row = y * (1 + width * 4);
+		const row = y * (1 + width * 3);
 		raw[row] = 0;
-		for (let x = 0; x < width; x += 1) raw[row + 1 + x * 4 + 3] = 255;
+		for (let x = 0; x < width; x += 1) raw[row + 1 + x * 3] = 255;
 	}
 	const ihdr = new Uint8Array(13);
 	writeU32(ihdr, 0, width);
 	writeU32(ihdr, 4, height);
-	ihdr.set([8, 6, 0, 0, 0], 8);
+	ihdr.set([8, 2, 0, 0, 0], 8);
 	return concatBytes(
 		new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]),
 		pngChunk("IHDR", ihdr),
 		pngChunk("IDAT", new Uint8Array(deflateSync(raw))),
 		pngChunk("IEND", new Uint8Array())
 	);
+}
+
+function ownedArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+	const copy = new Uint8Array(bytes.byteLength);
+	copy.set(bytes);
+	return copy.buffer;
 }
 
 function pngChunk(type: string, data: Uint8Array): Uint8Array {

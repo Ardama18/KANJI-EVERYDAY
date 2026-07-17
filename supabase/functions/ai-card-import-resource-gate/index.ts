@@ -1,10 +1,17 @@
 import { normalizeIllustration } from "../_shared/ai-card-import/image-codec.ts";
+import {
+	inspectImage,
+	MAX_IMAGE_BYTES,
+	MAX_IMAGE_PIXELS,
+	MAX_ILLUSTRATION_EDGE,
+	MAX_JPEG_PIXELS,
+	MAX_WEBP_PIXELS,
+} from "../_shared/ai-card-import/image-validation.ts";
 import { createMagickCodec } from "../_shared/ai-card-import/magick-codec.ts";
 import { ILLUSTRATION_PROVIDER_TIMEOUT_MS } from "../_shared/ai-card-import/provider.ts";
+import { MAX_PROVIDER_IMAGE_BYTES } from "../_shared/ai-card-import/provider-response.ts";
 import { createOpenAiProvider } from "../_shared/ai-card-import/providers/openai.ts";
 
-const MAX_BYTES = 10 * 1024 * 1024;
-const MAX_PIXELS = 16_000_000;
 const configuredPort = Number(Deno.env.get("S11_RESOURCE_PORT") ?? "8000");
 
 Deno.serve({ hostname: "127.0.0.1", port: configuredPort }, async (request) => {
@@ -17,7 +24,7 @@ Deno.serve({ hostname: "127.0.0.1", port: configuredPort }, async (request) => {
 	if (
 		secret === undefined ||
 		secret.trim().length === 0 ||
-		presentedSecret === undefined ||
+		presentedSecret === null ||
 		presentedSecret.trim().length === 0 ||
 		presentedSecret !== secret
 	) {
@@ -30,11 +37,6 @@ Deno.serve({ hostname: "127.0.0.1", port: configuredPort }, async (request) => {
 	};
 	const sampler = setInterval(observeResource, 10);
 	try {
-		const wasmPath = requiredEnvironment("S11_RESOURCE_WASM_PATH");
-		const codec = await createMagickCodec({
-			wasmBytes: await Deno.readFile(wasmPath),
-			observeResource,
-		});
 		const resourceCase = request.headers.get("x-resource-case") ?? "codec";
 		if (resourceCase.startsWith("provider-")) {
 			const providerBaseUrl = requiredEnvironment("S11_RESOURCE_PROVIDER_BASE_URL");
@@ -79,14 +81,14 @@ Deno.serve({ hostname: "127.0.0.1", port: configuredPort }, async (request) => {
 						peakRssBytes,
 					}, { status: 422 });
 				}
-				if (result.kind !== "success" || result.bytes.byteLength !== MAX_BYTES) {
+				if (result.kind !== "success" || result.bytes.byteLength !== MAX_PROVIDER_IMAGE_BYTES) {
 					return Response.json({ errorCode: "PROVIDER_MAX_RESPONSE_INVALID" }, { status: 502 });
 				}
 				return await processImage({
 					bytes: result.bytes,
 					declaredMime: result.declaredMime,
-					requireMaximumPixels: true,
-					codec,
+					requireMaximumPixels: false,
+					enforceProviderDimensions: true,
 					started,
 					peakRssBytes: () => peakRssBytes,
 					observeResource,
@@ -101,18 +103,17 @@ Deno.serve({ hostname: "127.0.0.1", port: configuredPort }, async (request) => {
 		}
 		const declaredMime = request.headers.get("content-type")?.split(";", 1)[0] ?? "";
 		const contentLength = Number(request.headers.get("content-length"));
-		if (!Number.isSafeInteger(contentLength) || contentLength < 1 || contentLength > MAX_BYTES) {
+		if (!Number.isSafeInteger(contentLength) || contentLength < 1 || contentLength > MAX_IMAGE_BYTES) {
 			return Response.json({ errorCode: "IMAGE_TOO_LARGE" }, { status: 413 });
 		}
 		const bytes = new Uint8Array(await request.arrayBuffer());
-		if (bytes.byteLength !== contentLength || bytes.byteLength > MAX_BYTES) {
+		if (bytes.byteLength !== contentLength || bytes.byteLength > MAX_IMAGE_BYTES) {
 			return Response.json({ errorCode: "IMAGE_TOO_LARGE" }, { status: 413 });
 		}
 		return await processImage({
 			bytes,
 			declaredMime,
 			requireMaximumPixels: request.headers.get("x-require-max-fixture") === "true",
-			codec,
 			started,
 			peakRssBytes: () => peakRssBytes,
 			observeResource,
@@ -131,6 +132,17 @@ Deno.serve({ hostname: "127.0.0.1", port: configuredPort }, async (request) => {
 				{ status: 422 }
 			);
 		}
+		if (error instanceof Error && error.message === "IMAGE_DIMENSIONS_INVALID") {
+			return Response.json(
+				{
+					status: "image_rejected",
+					errorCode: "IMAGE_DIMENSIONS_INVALID",
+					processingMs: performance.now() - started,
+					peakRssBytes,
+				},
+				{ status: 422 }
+			);
+		}
 		return Response.json({ errorCode: "RESOURCE_PROCESSING_FAILED" }, { status: 500 });
 	} finally {
 		clearInterval(sampler);
@@ -141,31 +153,40 @@ async function processImage(input: {
 	readonly bytes: Uint8Array;
 	readonly declaredMime: string;
 	readonly requireMaximumPixels: boolean;
-	readonly codec: Awaited<ReturnType<typeof createMagickCodec>>;
+	readonly enforceProviderDimensions?: boolean;
 	readonly started: number;
 	readonly peakRssBytes: () => number;
 	readonly observeResource: () => void;
 	readonly status: "processed" | "provider_processed";
 }): Promise<Response> {
-	let decoded: Awaited<ReturnType<typeof input.codec.decode>>;
-	try {
-		decoded = await input.codec.decode(input.bytes);
-	} catch {
-		throw new Error("IMAGE_DECODE_FAILED");
-	}
-	if (input.requireMaximumPixels && decoded.width * decoded.height !== MAX_PIXELS) {
+	const inspected = inspectImage(input.bytes, input.declaredMime, { illustration: true });
+	if (!inspected.ok) throw new Error(inspected.code);
+	const expectedMaximumPixels = inspected.mime === "image/jpeg"
+		? MAX_JPEG_PIXELS
+		: inspected.mime === "image/webp"
+			? MAX_WEBP_PIXELS
+			: MAX_IMAGE_PIXELS;
+	if (input.requireMaximumPixels && inspected.width * inspected.height !== expectedMaximumPixels) {
 		return Response.json({ errorCode: "RESOURCE_FIXTURE_INVALID" }, { status: 422 });
 	}
+	if (
+		input.enforceProviderDimensions === true &&
+		(inspected.width > MAX_ILLUSTRATION_EDGE || inspected.height > MAX_ILLUSTRATION_EDGE)
+	) throw new Error("IMAGE_DIMENSIONS_INVALID");
+	const codec = await createMagickCodec({
+		wasmBytes: await Deno.readFile(requiredEnvironment("S11_RESOURCE_WASM_PATH")),
+		observeResource: input.observeResource,
+	});
 	const normalized = await normalizeIllustration(
 		{ bytes: input.bytes, declaredMime: input.declaredMime },
-		input.codec
+		codec
 	);
 	input.observeResource();
 	return Response.json({
 		status: input.status,
 		inputBytes: input.bytes.byteLength,
-		inputWidth: decoded.width,
-		inputHeight: decoded.height,
+		inputWidth: inspected.width,
+		inputHeight: inspected.height,
 		outputBytes: normalized.bytes.byteLength,
 		outputWidth: normalized.width,
 		outputHeight: normalized.height,

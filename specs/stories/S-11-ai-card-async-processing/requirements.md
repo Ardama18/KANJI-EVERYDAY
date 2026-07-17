@@ -200,13 +200,13 @@ flowchart LR
 - provider設定値は起動時または処理開始前に検証し、不正値をpermanent configuration errorとして扱う。
 - provider固有の応答は共通の成功、transient failure、permanent failure契約へ分類する。
 - productionでendpoint overrideが未設定ならOpenAI/Geminiの公式endpointだけを使用する。real E2E等でoverrideする場合はHTTPS endpointと非機密binding IDを必ず対で設定し、partial、平文HTTP、userinfo付きURLをfail closedで拒否する。workerはbinding IDをoverride requestへ付与し、gateはcontrol/statsのbinding一致と実call増分でserved workerの誤接続を検出する。
-- provider応答は`Content-Length`とstream累計の両方を有界化し、欠落・過少申告でも上限超過を全body materialize前に停止する。宣言値だけで上限超過が確定した場合はbody byteを読まずbest-effortでbodyをcancelする。cancelが存在しない、同期throw、非同期rejectのいずれでも元の恒久`IMAGE_TOO_LARGE`を保持し、cancel error/raw bodyをlogしない。base64は`atob`前にdecoded-sizeを算出して同じcodeで拒否する。
+- provider応答はdecoded画像4MiB、最大辺1024pxを上限とし、`Content-Length`とstream累計の両方を有界化する。欠落・過少申告でも上限超過を全body materialize前に停止し、宣言値だけで超過が確定した場合はbody byteを読まずbest-effortでcancelする。cancelが存在しない、同期throw、非同期rejectのいずれでも元の恒久`IMAGE_TOO_LARGE`を保持し、cancel error/raw bodyをlogしない。base64は`atob`前にdecoded-sizeを算出し、固定長bufferへindex copyして中間配列を作らない。
 
 ### FR-6 source画像の受付と一時保存
 - 1回のrequestでsource画像は最大5枚、各10MB以下、合計50MB以下とする。
 - Storageからworkerへ読むsourceは、`Content-Length`が欠落または実体より小さい場合もstream中に10MiBを超えた時点で中止し、全体をmemoryへmaterializeする前に恒久`IMAGE_TOO_LARGE`とする。
 - 許可形式はPNG、JPEG、WebPのみとし、宣言MIMEとmagic bytesの両方を検査して一致を必須とする。
-- 拡張子を信頼せず、実際にdecode可能であること、幅×高さが16MP以下であることを検証する。
+- 拡張子を信頼せず、実際にdecode可能であることを検証する。codecの固定メモリ床と反復実測に基づき、PNG/JPEG/WebPはいずれも1,048,576 pixels以下とする。PNGは8-bit・非透過（grayscale/RGB/palette）だけを受理し、PNG 16-bitとPNG/WebP alpha channelはfull decode前に拒否する。
 - 検証済みsourceは専用の一時bucketへ`{ownerUserId}/...`のowner pathで保存し、他ownerから参照できないようにする。
 - S-10で既にready/consumedのuploadは`illustrations` bucketに存在するため、uploadごとにbucketとpathを永続化し、S-11新規uploadだけを`ai-card-sources`へ保存する。upgrade時に既存objectを移動・複製しない。
 - 同じuploadを複数conceptが参照できる。concept-jobとのdurable associationを保持し、retry待機を含む全参照conceptがterminalになるまでsourceを削除しない。
@@ -215,7 +215,7 @@ flowchart LR
 - source画像を外部URLから取得しない。
 
 ### FR-7 illustration画像の検証と正規化
-- uploadまたはprovider出力のillustrationもPNG/JPEG/WebPのmagic bytes、10MB、decode可否、16MP上限を検証する。
+- upload illustrationはPNG/JPEG/WebPのmagic bytes、10MiB、decode可否、1,048,576 pixels上限を検証し、PNGは8-bit、PNG/WebPは非透過だけとする。provider出力は同じ形式検証に加えてdecoded 4MiB・最大辺1024pxをWASM初期化前に必須とする。
 - illustration入力は正規化前の幅・高さとも64px以上を必須とする。この入力条件を満たす画像は、縦横比を維持した縮小により保存PNGの短辺が64px未満になっても拒否しない。
 - 保存前に縦横比を維持し、最大辺1024px以下へ縮小し、PNGへ変換する。1024px以下の画像を拡大する必要はない。
 - stable path競合で既存illustrationを照合するreadも、source readと同じく宣言`Content-Length`とstream累計を10MiBで制限し、欠落・過少申告でもmaterialize前に中止する。
@@ -298,7 +298,7 @@ flowchart LR
 | AC-02 Queue claim・重複耐性 | 5分visibility、条件付き`queued -> processing`、失効claimの条件付き再取得、terminal重複ACKを守り、at-least-once deliveryを業務上1回の結果へ収束させる | 逐次・並行duplicate deliveryでもDB clock上で未失効のmessage/token claimだけがretry/upload/orphan/fail/finalize副作用を開始し、reconcileも未確定claimをownedと返す。worker中断後は5分経過後の再配信が処理を再取得でき、旧workerの遅延書き込みは再claim前でも拒否される。terminal failure reconciliationは確定message/tokenと一致するclaimだけに`terminal_failed`を返す。terminal itemは副作用なしでACKされ、card、quota予約・消費、illustration行、Storage objectの増分は各論理結果につき1件以下である |
 | AC-03 retry分類 | 一時障害だけを指定回数・間隔で再試行し、恒久障害を即時item failureにする | ネットワーク例外とHTTP 408/429/5xxだけが初回後5秒、30秒、120秒の最大3回retry対象となる。その他4xx、validation/decode、moderation/safety、認証・認可、設定不正はretry 0回でsafe error付きfailedとなり、retryでもquotaを再予約・再消費しない |
 | AC-04 provider選択 | `ILLUSTRATION_PROVIDER=openai|gemini`だけを許可し、未指定はOpenAIとする | OpenAI/Geminiの明示値が対応providerだけを呼び、未指定は公式OpenAI endpointだけを呼ぶ。不正値・選択providerのkey欠落・呼出失敗でも他provider呼出回数は0回である。overrideはpaired HTTPS endpoint/bindingだけを許可し、served gateはfake-provider callとbindingの一致を確認する |
-| AC-05 source/入力画像検証 | sourceを最大5枚までowner pathのprivate一時bucketへ置き、実内容とresource上限を検証する | PNG/JPEG/WebPのmagic bytes、宣言MIME一致、各10MB以下、decode可能、16MP以下だけを受理し、illustration入力は正規化前の幅・高さとも64px以上を必須とする。provider response、source read、既存illustration conflict readはContent-Length/stream/base64 decoded-sizeをmaterialize前に制限する。不正画像はprovider/カード確定前に拒否され、anonymous/他ownerからlive sourceを取得・commit参照できない |
+| AC-05 source/入力画像検証 | sourceを最大5枚までowner pathのprivate一時bucketへ置き、実内容とresource上限を検証する | PNG/JPEG/WebPのmagic bytes、宣言MIME一致、各10MiB以下、decode可能、全形式1,048,576 pixels以下、PNG 8-bit、PNG/WebP非透過だけを受理し、illustration入力は正規化前の幅・高さとも64px以上を必須とする。providerはdecoded 4MiB・最大辺1024px、source/conflict readは10MiBをContent-Length/stream/base64 decoded-sizeでmaterialize前に制限する。不正画像はprovider/カード確定前に拒否され、anonymous/他ownerからlive sourceを取得・commit参照できない |
 | AC-06 illustration正規化・共有・参照削除 | illustrationを最大1024pxのPNGへ正規化し、同一owner・conceptのR1/W1で共有する | 保存objectは縦横比を維持した最大辺1024px以下のPNGで不要metadataを含まない。正規化前の64px入力条件を満たす縦長・横長画像は、縮小後の短辺が64px未満でも受理される。R1/W1は同一tracked `s11-managed` objectを参照し、owner mutationは拒否、service worker/cleanupとuntracked legacy owner pathは維持される。一方のcard削除ではobjectが`ready`のまま残って第三cardの既存S-10 attachが成功し、同一ownerの最後の参照card消失時だけ`delete_pending`になる。未claim pendingの再参照とcleanup claimは同一lockで競合解決し、`cleaning/deleted/orphan`およびcleanup-completed objectはattachできない |
 | AC-07 source/orphan cleanup | 処理済みsourceと、未確定uploadまたはDB参照を持たないorphanを期限内に回収する | source write前にexact durable intentを登録し、成功時だけreadyへ昇格、応答喪失は404-safe cleanupへ収束する。通常処理後のsourceは全参照conceptがterminalになった後だけ、記録済みbucket/pathから削除される。post-upload duplicate/terminal Storage failureはDB-confirmed orphan後だけ即時削除を試み、失敗時はcleanupへ残る。age cleanupは23:59:59を保護し24:00:00でeligible、stale lease後にUUID identity付きで再claimできる。verify/completeはexact claim identityとDB-clock 5分leaseを要求しstale complete=`CLAIM_LOST`、Storage delete直前にowner/reference/fenceを再確認する。limitはentity単位で、選択uploadのdue source/rawを同runへ展開する。`delete_pending`失敗はintentを保持してage待ちなしで即時retryする。削除済みillustrationは同一transactionで非attachableになる。参照中object、24時間未満のobject、他owner pathは削除されず、cleanup再実行は冪等である |
 | AC-08 concept失敗分離 | conceptのillustration取得・処理が失敗した場合、同conceptのR1/W1を一体で失敗させ、他conceptを継続する | 対象conceptのR1/W1はともに`failed`となりcard作成は0件、片側だけの成功状態は生じない。同一batchの別conceptは独立してterminal結果まで処理される |
@@ -313,7 +313,7 @@ flowchart LR
 3. WebP magic bytesと宣言MIME一致。
 4. magic bytes/MIME不一致拒否。
 5. 10MB超過拒否。
-6. 16MP超過拒否。
+6. 全形式1,048,576 pixels超過、PNG 16-bit、PNG/WebP alpha拒否。
 7. illustrationの64px未満拒否。
 8. 最大1024px PNG正規化。
 9. provider未指定時OpenAI。
@@ -324,9 +324,9 @@ flowchart LR
 14. 5秒・30秒・120秒backoffと最大3retry。
 15. ログredaction。
 
-deployment resource gateは、decode bombと正常PNGから導出した独立truncated decode failureを同じserved artifact/WASM codecへ通し、各ケースがHTTP 422 `IMAGE_DECODE_FAILED`となることを検証する。各失敗ケースでもspawn PID CPU、外部PID peak RSS、codec内peak RSS、wall timeを測定し、CPU 1.6秒、RSS 204MiB、wall 120秒のいずれかを超えた時点でrequestとprocessを強制停止してgateを失敗させる。
+deployment resource gateは、header段階で判定できるdimension bombと正常PNGから導出した独立truncated decode failureを同じserved artifact/WASM codecへ通し、前者がHTTP 422 `IMAGE_DIMENSIONS_INVALID`、後者がHTTP 422 `IMAGE_DECODE_FAILED`となることを検証する。各失敗ケースでもspawn PID CPU、runtime baseline後のrequest増分peak RSS、codec内peak RSS、wall timeを測定し、CPU 1.6秒、RSS 248MiB、wall 120秒のいずれかを超えた時点でrequestとprocessを強制停止してgateを失敗させる。各fixtureはfresh Deno processで実行する。
 
-resource gateはbundleとWASMのsize/SHA-256を独立報告し、WASMをrepository内artifact manifestのbyte size/SHA-256および`package-lock.json`のpackage version/integrityと照合する。combined revisionは補助証跡に限る。provider served pathでは10MiB+1 base64、Content-Length欠落、宣言body超過も同じ上限契約へ通す。
+resource gateはbundleとWASMのsize/SHA-256を独立報告し、WASMをrepository内artifact manifestのbyte size/SHA-256および`package-lock.json`のpackage version/integrityと照合する。combined revisionは補助証跡に限る。provider served pathでは4MiB/1024px最大応答、4MiB+1 base64、Content-Length欠落、宣言body超過も同じ上限契約へ通す。
 
 ### Integration tests（10件以上）
 最低限、次の独立観点を含める。
@@ -367,7 +367,7 @@ resource gateはbundleとWASMのsize/SHA-256を独立報告し、WASMをreposito
 
 1. ローカルstory IDは、AI Cards 1/6のS-10に続く機能順としてS-11を使用する。GitHub issue番号とは一致させない。
 2. 「最大3回retry」は初回を含めず、5秒・30秒・120秒の3回を意味するため、総試行回数は最大4回とする。
-3. 10MBと16MPはsourceおよびillustration入力の各画像へ適用し、64px最小はカード用illustrationだけへ適用する。
+3. uploadの10MiB、全形式1,048,576 pixels、PNG 8-bit、PNG/WebP非透過制約はsourceおよびillustrationへ適用する。providerは4MiB/1024px、64px最小はカード用illustrationだけへ適用する。
 4. Epicの上位制約を継承し、画像は1request合計50MB以下、外部URL fetch禁止、metadata除去を含める。
 5. S-10の`committed`/`finalized`は既存内部契約である。S-11の外部`queued`/`succeeded`を正とし、forward migrationまたは明示mappingのどちらでも、条件付き`queued -> processing`とterminal判定が単一の永続状態を参照することを必須とする。
 6. source画像は後続の本文生成UIでは利用されるが、本storyでは安全なupload、検証、一時保存、削除、cleanupの基盤までを対象とする。
@@ -380,7 +380,7 @@ resource gateはbundleとWASMのsize/SHA-256を独立報告し、WASMをreposito
 | DB transactionとpgmq enqueueの整合性が崩れる | 高 | 中 | 同一Postgres transactionまたは回復可能outbox相当を比較しADRで決定する |
 | StorageとDBを原子的に確定できない | 高 | 中 | 決定的path、冪等upload、補償削除、24時間cleanupを組み合わせる |
 | 5分visibility中に画像処理が完了しない | 高 | 中 | claim lease、再配信判定、安定した冪等キーを設計しduplicate delivery試験を行う |
-| Edge runtimeの画像変換互換性・memoryが不足する | 高 | 中 | runtime対応手段とresource上限をADRで比較し、10MB・16MP境界試験を必須にする |
+| Edge runtimeの画像変換互換性・memoryが不足する | 高 | 中 | 10MiB・1,048,576 pixels（PNGは8-bit RGB）とprovider 4MiB/1024pxをfresh-isolate resource gateで反復測定し、248MiB上限を必須にする |
 | OpenAI/Geminiのエラー形式差によりretry分類を誤る | 中 | 中 | provider adapterごとの分類表と契約テストを作る |
 | cleanupが参照中または他ownerのobjectを誤削除する | 高 | 低 | owner・DB参照・ageの全条件を満たす場合だけ削除し、保護試験を必須にする |
 
@@ -393,7 +393,7 @@ resource gateはbundleとWASMのsize/SHA-256を独立報告し、WASMをreposito
 | 5分visibility、条件付き遷移、terminal ACK、重複なし | FR-3, AC-02 |
 | retry分類、5/30/120秒、最大3回 | FR-4, AC-03 |
 | provider選択、OpenAI既定、fallbackなし | FR-5, AC-04 |
-| magic bytes、10MB、16MP、64px、最大5source | FR-6, FR-7, AC-05 |
+| magic bytes、10MB、形式別pixel上限、64px、最大5source | FR-6, FR-7, AC-05 |
 | 最大1024px PNG、concept共有、最後の参照で削除 | FR-7, FR-9, AC-06 |
 | 24時間境界後のsource/orphan cleanup | FR-6, FR-9, FR-10, AC-07 |
 | concept失敗分離 | FR-8, AC-08 |
