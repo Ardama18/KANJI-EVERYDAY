@@ -1216,6 +1216,22 @@ describe("S-11 commit and queue integration", () => {
 		);
 	});
 
+	it("R24-F2 grants only the required Hosted pgmq delegate dependencies to the migration owner", async () => {
+		const core = await readFile(
+			new URL(
+				"../../../../supabase/migrations/20260715000000_s11_ai_card_async_processing.sql",
+				import.meta.url
+			),
+			"utf8"
+		);
+		expect(core).toContain(
+			"GRANT EXECUTE ON FUNCTION pgmq.format_table_name(text,text),\n\tpgmq.send(text,jsonb,jsonb,timestamp with time zone)\n\tTO s10_migration_owner;"
+		);
+		expect(core).not.toMatch(
+			/GRANT\s+EXECUTE\s+ON\s+ALL\s+FUNCTIONS\s+IN\s+SCHEMA\s+pgmq/iu
+		);
+	});
+
 	it("R11-F1 preserves the legitimate empty Queue response as idle through the real handler path", async () => {
 		const result = await runQueueRpcThroughWorkerHandler([]);
 		expect(result.response.status).toBe(200);

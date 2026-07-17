@@ -221,6 +221,9 @@ GRANT USAGE ON SCHEMA pgmq TO s10_migration_owner;
 GRANT EXECUTE ON FUNCTION pgmq.send(text,jsonb,integer),
 	pgmq.read(text,integer,integer,jsonb), pgmq.archive(text,bigint)
 	TO s10_migration_owner;
+GRANT EXECUTE ON FUNCTION pgmq.format_table_name(text,text),
+	pgmq.send(text,jsonb,jsonb,timestamp with time zone)
+	TO s10_migration_owner;
 GRANT SELECT,INSERT,UPDATE,DELETE ON pgmq.q_ai_card_imports,pgmq.a_ai_card_imports
 	TO s10_migration_owner;
 GRANT USAGE,SELECT,UPDATE ON SEQUENCE pgmq.q_ai_card_imports_msg_id_seq
