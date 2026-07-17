@@ -1299,6 +1299,25 @@ describe("S-11 commit and queue integration", () => {
 		expect(denial).not.toContain("response.status !== 404");
 	});
 
+	it("R24-F7 statically traces the ImageMagick package and literal WASM asset", async () => {
+		const codec = await readFile(
+			new URL(
+				"../../../../frontend/src/lib/ai-import/source-image-codec.ts",
+				import.meta.url
+			),
+			"utf8"
+		);
+		expect(codec).toContain(
+			'import * as magickModule from "@imagemagick/magick-wasm";'
+		);
+		expect(codec).toContain(
+			'createRequire(import.meta.url).resolve("@imagemagick/magick-wasm/magick.wasm")'
+		);
+		expect(codec).not.toContain("webpackIgnore");
+		expect(codec).not.toMatch(/import\([^)]*magick-wasm/gu);
+		expect(codec).not.toContain("wasmSpecifier");
+	});
+
 	it("R11-F1 preserves the legitimate empty Queue response as idle through the real handler path", async () => {
 		const result = await runQueueRpcThroughWorkerHandler([]);
 		expect(result.response.status).toBe(200);

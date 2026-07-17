@@ -1,9 +1,11 @@
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 
+import * as magickModule from "@imagemagick/magick-wasm";
+
 import type { ImageCodec } from "../../../../supabase/functions/_shared/ai-card-import/image-codec";
 
-type MagickModule = typeof import("@imagemagick/magick-wasm");
+type MagickModule = typeof magickModule;
 
 export function createSourceImageCodecFactory(
 	loadModule: () => Promise<MagickModule>
@@ -55,9 +57,7 @@ function createCodec({ ImageMagick, MagickFormat }: MagickModule): ImageCodec {
 }
 
 async function initialize(): Promise<MagickModule> {
-	const magickModule = await import(/* webpackIgnore: true */ "@imagemagick/magick-wasm");
-	const wasmSpecifier = "@imagemagick/magick-wasm/magick.wasm";
-	const path = createRequire(import.meta.url).resolve(wasmSpecifier);
+	const path = createRequire(import.meta.url).resolve("@imagemagick/magick-wasm/magick.wasm");
 	await magickModule.initializeImageMagick(new Uint8Array(await readFile(path)));
 	return magickModule;
 }
