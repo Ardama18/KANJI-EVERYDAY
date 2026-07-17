@@ -4,40 +4,40 @@
   "issue": 12,
   "story": "S-11",
   "baseSha": "45969b140d1817be143fe6331159b88b647c2e29",
-  "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb",
-  "state": "pending_hosted",
+  "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae",
+  "state": "accepted",
   "localGates": [
-    { "id": "release-contract", "status": "passed", "exitCode": 0, "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb", "summary": { "result": "contract validation passed" } },
-    { "id": "quality-database-unit", "status": "passed", "exitCode": 0, "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb", "summary": { "passed": 36 } },
-    { "id": "quality-database-harness", "status": "passed", "exitCode": 0, "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb", "summary": { "result": "harness passed" } },
-    { "id": "s11-fresh", "status": "passed", "exitCode": 0, "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb", "summary": { "result": "fresh migration passed" } },
-    { "id": "s11-upgrade", "status": "passed", "exitCode": 0, "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb", "summary": { "result": "upgrade migration passed" } },
-    { "id": "s11-failure", "status": "passed", "exitCode": 0, "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb", "summary": { "result": "failure-path migration passed" } },
-    { "id": "s11-local-real-integration", "status": "passed", "exitCode": 0, "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb", "summary": { "result": "local real integration passed" } },
-    { "id": "lint", "status": "passed", "exitCode": 0, "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb", "summary": { "passed": 97 } },
-    { "id": "typecheck", "status": "passed", "exitCode": 0, "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb", "summary": { "errors": 0 } },
-    { "id": "build", "status": "passed", "exitCode": 0, "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb", "summary": { "errors": 0 } },
-    { "id": "ordinary-vitest", "status": "passed", "exitCode": 0, "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb", "summary": { "total": 722, "passed": 714, "skipped": 8 } },
-    { "id": "s11-inventory", "status": "passed", "exitCode": 0, "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb", "summary": { "completed": 268, "total": 268, "passed": 267, "conditionalSkipped": 1 } },
-    { "id": "s11-focused", "status": "passed", "exitCode": 0, "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb", "summary": { "completed": 85, "total": 85, "skipped": 146 } },
-    { "id": "diff-committed", "status": "passed", "exitCode": 0, "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb", "summary": { "result": "committed diff gate passed" } },
-    { "id": "diff-staged", "status": "passed", "exitCode": 0, "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb", "summary": { "result": "staged diff gate passed" } },
-    { "id": "diff-unstaged", "status": "passed", "exitCode": 0, "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb", "summary": { "result": "unstaged diff gate passed" } },
-    { "id": "database-residue", "status": "passed", "exitCode": 0, "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb", "summary": { "residue": 0 } },
-    { "id": "source-continuity", "status": "passed", "exitCode": 0, "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb", "summary": { "counts": [0, 0, 0, 0] } }
+    { "id": "release-contract", "status": "passed", "exitCode": 0, "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae", "summary": { "result": "contract definition preflight passed" } },
+    { "id": "quality-database-unit", "status": "passed", "exitCode": 0, "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae", "summary": { "passed": 36 } },
+    { "id": "quality-database-harness", "status": "passed", "exitCode": 0, "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae", "summary": { "result": "harness passed" } },
+    { "id": "s11-fresh", "status": "passed", "exitCode": 0, "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae", "summary": { "result": "fresh migration passed" } },
+    { "id": "s11-upgrade", "status": "passed", "exitCode": 0, "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae", "summary": { "result": "upgrade migration passed" } },
+    { "id": "s11-failure", "status": "passed", "exitCode": 0, "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae", "summary": { "result": "failure-path migration passed" } },
+    { "id": "s11-local-real-integration", "status": "passed", "exitCode": 0, "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae", "summary": { "boundaries": 2 } },
+    { "id": "lint", "status": "passed", "exitCode": 0, "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae", "summary": { "files": 97, "errors": 0 } },
+    { "id": "typecheck", "status": "passed", "exitCode": 0, "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae", "summary": { "errors": 0 } },
+    { "id": "build", "status": "passed", "exitCode": 0, "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae", "summary": { "errors": 0 } },
+    { "id": "ordinary-vitest", "status": "passed", "exitCode": 0, "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae", "summary": { "total": 754, "passed": 746, "skipped": 8, "files": 50 } },
+    { "id": "s11-inventory", "status": "passed", "exitCode": 0, "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae", "summary": { "total": 300, "passed": 300, "skipped": 0 } },
+    { "id": "s11-focused", "status": "passed", "exitCode": 0, "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae", "summary": { "selected": 85, "passed": 85, "unselected": 172 } },
+    { "id": "diff-committed", "status": "passed", "exitCode": 0, "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae", "summary": { "result": "committed diff gate passed" } },
+    { "id": "diff-staged", "status": "passed", "exitCode": 0, "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae", "summary": { "result": "staged diff gate passed" } },
+    { "id": "diff-unstaged", "status": "passed", "exitCode": 0, "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae", "summary": { "result": "unstaged diff gate passed" } },
+    { "id": "database-residue", "status": "passed", "exitCode": 0, "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae", "summary": { "residue": 0 } },
+    { "id": "source-continuity", "status": "passed", "exitCode": 0, "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae", "summary": { "counts": [0, 0, 0, 0] } }
   ],
   "hostedGates": [
-    { "id": "hosted-fresh", "status": "not_run", "exitCode": 2, "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb", "summary": { "reason": "hosted runtime prerequisite unavailable" } },
-    { "id": "hosted-upgrade", "status": "not_run", "exitCode": 2, "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb", "summary": { "reason": "hosted runtime prerequisite unavailable" } },
-    { "id": "hosted-failure", "status": "not_run", "exitCode": 2, "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb", "summary": { "reason": "hosted runtime prerequisite unavailable" } },
-    { "id": "hosted-real-integration", "status": "not_run", "exitCode": 2, "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb", "summary": { "reason": "hosted runtime prerequisite unavailable" } },
-    { "id": "hosted-real-e2e", "status": "not_run", "exitCode": 2, "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb", "summary": { "reason": "hosted runtime prerequisite unavailable" } },
-    { "id": "hosted-resource", "status": "not_run", "exitCode": 2, "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb", "summary": { "reason": "hosted runtime prerequisite unavailable" } },
-    { "id": "hosted-deno", "status": "not_run", "exitCode": 2, "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb", "summary": { "reason": "hosted runtime prerequisite unavailable" } }
+    { "id": "hosted-fresh", "status": "passed", "exitCode": 0, "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae", "summary": { "result": "isolated hosted fresh migration passed and database removed" } },
+    { "id": "hosted-upgrade", "status": "passed", "exitCode": 0, "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae", "summary": { "result": "isolated hosted upgrade migration passed and database removed" } },
+    { "id": "hosted-failure", "status": "passed", "exitCode": 0, "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae", "summary": { "result": "isolated hosted failure paths passed and database removed" } },
+    { "id": "hosted-real-integration", "status": "passed", "exitCode": 0, "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae", "summary": { "boundaries": 38, "projectRef": "wolwkdvvosfxgxoosgjw" } },
+    { "id": "hosted-real-e2e", "status": "passed", "exitCode": 0, "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae", "summary": { "boundaries": 23, "commitMs": 785.4985419999975, "workerArtifactSha256": "f7c24a40a7fc2cb9cf03f087f873db4fdd62371b9aaa1436542498a7e87861fc", "mainRecoverableArtifactMatch": true } },
+    { "id": "hosted-resource", "status": "passed", "exitCode": 0, "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae", "summary": { "artifactRevision": "93990efaf428f057622b0a3fcd10b953a01af3cf415f81df2cac3d710a9f2931", "artifactBytes": 14597839, "bundleBytes": 306380, "bundleSha256": "8f7b1af94107e212fa1df53ec45a8e40ad5c9a6d9b030519c6fef2de605f6723", "wasmBytes": 14291459, "wasmSha256": "1560619807d9e83eedd796c434f852885f6142b571132036c36ce53a9bb8286e", "maxPeakProcessRssBytes": 238419968, "rssLimitBytes": 260046848 } },
+    { "id": "hosted-deno", "status": "passed", "exitCode": 0, "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae", "summary": { "targets": 3, "denoVersion": "2.4.5" } }
   ],
   "secretScans": [
-    { "id": "gitleaks-redacted", "status": "passed", "exitCode": 0, "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb", "summary": { "commits": 21, "scannedSize": "1.18 MB", "leaks": 0, "redacted": true } },
-    { "id": "forbidden-marker-scan", "status": "not_run", "exitCode": 2, "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb", "summary": { "reason": "hosted runtime prerequisite unavailable", "finalRequired": true } }
+    { "id": "gitleaks-redacted", "status": "passed", "exitCode": 0, "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae", "summary": { "commits": 55, "scannedSize": "1.29 MB", "leaks": 0, "redacted": true } },
+    { "id": "forbidden-marker-scan", "status": "passed", "exitCode": 0, "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae", "summary": { "markers": 7, "runtimeLogScanIncludedInE2E": true } }
   ],
   "reviews": {
     "counts": {
@@ -46,16 +46,17 @@
     },
     "cumulative": {
       "status": "passed",
-      "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb",
+      "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae",
       "outcome": "composite",
-      "fullReviewCandidateSha": "3bef98f8e297d116710b4c526583374cd051e8bf",
-      "fullReviewFinding": { "id": "M1", "severity": "M", "resolvedBy": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb" },
-      "verificationCandidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb",
-      "summary": "The allowed full review found M1 on the prior candidate; M1 was remediated and the exact candidate verification passed."
+      "resolvedFindings": [
+        { "id": "H1", "severity": "H", "subject": "OpenAI image output contract", "resolvedBy": "6b889dd399015d90d947081b8a53e12452d65091" },
+        { "id": "H2", "severity": "H", "subject": "retained WASM initialization bytes", "resolvedBy": "9b95ab88239022a3e1fc03e028b8ac30b6429bae" }
+      ],
+      "summary": "The full review and candidate-bound resource verification findings were remediated; no unresolved high, medium, blocking-low, or ASK findings remain."
     },
     "verification": {
       "status": "passed",
-      "candidateSha": "57d309ef2edf50a715c6df799f2d84ff1b9e2ccb",
+      "candidateSha": "9b95ab88239022a3e1fc03e028b8ac30b6429bae",
       "scope": "prior findings, regressions, and impacted code",
       "findings": { "H": 0, "M": 0, "blockingL": 0, "ASK": 0 }
     }
