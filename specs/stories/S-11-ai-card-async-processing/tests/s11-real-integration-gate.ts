@@ -695,13 +695,13 @@ await db.execute(`
 const deleteDeleteActor = { kind: "ownerA", role: "authenticated", userId: "18000000-0000-4000-8000-00000000000a" } as const;
 const deleteDeleteDiagnostics = await Promise.all([
 	createS11DbClient(databaseUrl).settle(`
-		SET LOCAL lock_timeout='2 seconds'; SET LOCAL statement_timeout='5 seconds';
+		SET LOCAL lock_timeout='2s'; SET LOCAL statement_timeout='5s';
 		SELECT 1 FROM public.cards WHERE id='18000000-0000-4000-8000-000000000061' FOR UPDATE;
 		SELECT pg_sleep(0.25);
 		DELETE FROM public.cards WHERE id='18000000-0000-4000-8000-000000000061';
 	`, { actor: deleteDeleteActor }),
 	createS11DbClient(databaseUrl).settle(`
-		SET LOCAL lock_timeout='2 seconds'; SET LOCAL statement_timeout='5 seconds';
+		SET LOCAL lock_timeout='2s'; SET LOCAL statement_timeout='5s';
 		SELECT 1 FROM public.cards WHERE id='18000000-0000-4000-8000-000000000062' FOR UPDATE;
 		SELECT pg_sleep(0.25);
 		SELECT public.delete_private_card(
@@ -749,13 +749,13 @@ await db.execute(`
 const deleteAttachActor = { kind: "ownerA", role: "authenticated", userId: "18100000-0000-4000-8000-00000000000a" } as const;
 const deleteAttachDiagnostics = await Promise.all([
 	createS11DbClient(databaseUrl).settle(`
-		SET LOCAL lock_timeout='2 seconds'; SET LOCAL statement_timeout='5 seconds';
+		SET LOCAL lock_timeout='2s'; SET LOCAL statement_timeout='5s';
 		SELECT 1 FROM public.cards WHERE id='18100000-0000-4000-8000-000000000061' FOR UPDATE;
 		SELECT pg_sleep(0.25);
 		DELETE FROM public.cards WHERE id='18100000-0000-4000-8000-000000000061';
 	`, { actor: deleteAttachActor }),
 	createS11DbClient(databaseUrl).settle(`
-		SET LOCAL lock_timeout='2 seconds'; SET LOCAL statement_timeout='5 seconds';
+		SET LOCAL lock_timeout='2s'; SET LOCAL statement_timeout='5s';
 		SELECT 1 FROM public.cards WHERE id='18100000-0000-4000-8000-000000000062' FOR UPDATE;
 		SELECT pg_sleep(0.25);
 		SELECT public.set_card_illustration('18100000-0000-4000-8000-000000000062','18100000-0000-4000-8000-000000000031');
@@ -847,14 +847,14 @@ async function runCrossSwap(
 	const actor = { kind: "ownerA",role: "authenticated",userId: fixture.ownerId } as const;
 	const [aDiagnostic,bDiagnostic] = await Promise.all([
 		createS11DbClient(databaseUrl).settle(`
-			SET LOCAL lock_timeout='2 seconds'; SET LOCAL statement_timeout='5 seconds';
+			SET LOCAL lock_timeout='2s'; SET LOCAL statement_timeout='5s';
 			SELECT 1 FROM public.cards WHERE id='${fixture.cardAId}' FOR UPDATE;
 			SELECT pg_sleep(${first === "a" ? "0" : "0.05"});
 			SET LOCAL app.s11_cross_swap_gate='on';
 			SELECT public.set_card_illustration('${fixture.cardAId}','${fixture.illustrationBId}');
 		`, { actor }),
 		createS11DbClient(databaseUrl).settle(`
-			SET LOCAL lock_timeout='2 seconds'; SET LOCAL statement_timeout='5 seconds';
+			SET LOCAL lock_timeout='2s'; SET LOCAL statement_timeout='5s';
 			SELECT 1 FROM public.cards WHERE id='${fixture.cardBId}' FOR UPDATE;
 			SELECT pg_sleep(${first === "b" ? "0" : "0.05"});
 			SET LOCAL app.s11_cross_swap_gate='on';
@@ -970,13 +970,13 @@ async function assertCompleteAttachWinner(fixture: Awaited<ReturnType<typeof see
 const attachFirst = await seedCompleteAttachFixture("182");
 const [attachFirstDiagnostic, attachFirstCompleteDiagnostic] = await Promise.all([
 	createS11DbClient(databaseUrl).settle(`
-		SET LOCAL lock_timeout='2 seconds'; SET LOCAL statement_timeout='5 seconds';
+		SET LOCAL lock_timeout='2s'; SET LOCAL statement_timeout='5s';
 		SELECT 1 FROM public.illustrations WHERE id='${attachFirst.illustrationId}' FOR UPDATE;
 		SELECT pg_sleep(0.25);
 		SELECT public.set_card_illustration('${attachFirst.cardId}','${attachFirst.illustrationId}');
 	`, { actor: { kind: "ownerA", role: "authenticated", userId: attachFirst.ownerId } }),
 	createS11DbClient(databaseUrl).settle(`
-		SET LOCAL lock_timeout='2 seconds'; SET LOCAL statement_timeout='5 seconds';
+		SET LOCAL lock_timeout='2s'; SET LOCAL statement_timeout='5s';
 		SELECT pg_sleep(0.1);
 		SELECT public.complete_ai_import_cleanup(
 			'${attachFirst.trackingId}','illustrations','${attachFirst.path}',
@@ -996,7 +996,7 @@ await assertCompleteAttachWinner(attachFirst);
 const completeFirst = await seedCompleteAttachFixture("183");
 const [completeFirstCompleteDiagnostic, completeFirstAttachDiagnostic] = await Promise.all([
 	createS11DbClient(databaseUrl).settle(`
-		SET LOCAL lock_timeout='2 seconds'; SET LOCAL statement_timeout='5 seconds';
+		SET LOCAL lock_timeout='2s'; SET LOCAL statement_timeout='5s';
 		SELECT public.complete_ai_import_cleanup(
 			'${completeFirst.trackingId}','illustrations','${completeFirst.path}',
 			'${completeFirst.claimToken}','deleted'
@@ -1004,7 +1004,7 @@ const [completeFirstCompleteDiagnostic, completeFirstAttachDiagnostic] = await P
 		SELECT pg_sleep(0.25);
 	`, { actor: { kind: "service", role: "service_role", userId: null } }),
 	createS11DbClient(databaseUrl).settle(`
-		SET LOCAL lock_timeout='2 seconds'; SET LOCAL statement_timeout='5 seconds';
+		SET LOCAL lock_timeout='2s'; SET LOCAL statement_timeout='5s';
 		SELECT pg_sleep(0.1);
 		SELECT public.set_card_illustration('${completeFirst.cardId}','${completeFirst.illustrationId}');
 	`, { actor: { kind: "ownerA", role: "authenticated", userId: completeFirst.ownerId } }),

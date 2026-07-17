@@ -1232,6 +1232,18 @@ describe("S-11 commit and queue integration", () => {
 		);
 	});
 
+	it("R24-F3 uses PostgreSQL 17-compatible short units for Hosted concurrency timeouts", async () => {
+		const realGate = await readFile(
+			new URL("./s11-real-integration-gate.ts", import.meta.url),
+			"utf8"
+		);
+		expect(realGate).toContain("SET LOCAL lock_timeout='2s'");
+		expect(realGate).toContain("SET LOCAL statement_timeout='5s'");
+		expect(realGate).not.toMatch(
+			/SET LOCAL (?:lock_timeout|statement_timeout)='[0-9]+ seconds'/gu
+		);
+	});
+
 	it("R11-F1 preserves the legitimate empty Queue response as idle through the real handler path", async () => {
 		const result = await runQueueRpcThroughWorkerHandler([]);
 		expect(result.response.status).toBe(200);
