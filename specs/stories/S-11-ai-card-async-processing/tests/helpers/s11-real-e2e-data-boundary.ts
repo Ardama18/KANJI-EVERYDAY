@@ -37,16 +37,25 @@ export async function assertStorageMutationDeniedResponse(
 	response: Response,
 	scenario: string
 ): Promise<void> {
-	const body: unknown = await response.json();
+	const contract = `${scenario} did not return exact Storage HTTP 400/403/Unauthorized`;
+	if (response.status !== 400) {
+		throw new Error(`${contract} (status=${response.status})`);
+	}
+	let body: unknown;
+	try {
+		body = await response.json();
+	} catch {
+		throw new Error(`${contract} (status=400, code=unknown)`);
+	}
 	if (
-		response.status !== 400 ||
 		!isRecord(body) ||
 		body.statusCode !== "403" ||
 		body.error !== "Unauthorized"
 	) {
-		throw new Error(
-			`${scenario} did not return exact Storage HTTP 400/403/Unauthorized`
-		);
+		const errorCode = isRecord(body) && typeof body.statusCode === "string"
+			? body.statusCode
+			: "unknown";
+		throw new Error(`${contract} (status=400, code=${errorCode})`);
 	}
 }
 

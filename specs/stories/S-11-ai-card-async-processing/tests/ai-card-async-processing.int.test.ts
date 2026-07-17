@@ -1516,6 +1516,11 @@ describe("S-11 commit and queue integration", () => {
 			boundaryHelper.indexOf("interface OwnerProjectionBoundary", assertionStart)
 		);
 		expect(assertion).toContain("response.status !== 400");
+		expect(assertion.indexOf("response.status !== 400")).toBeLessThan(
+			assertion.indexOf("await response.json()")
+		);
+		expect(assertion).toContain("try {");
+		expect(assertion).toContain("(status=400, code=unknown)");
 		expect(assertion).toContain('body.statusCode !== "403"');
 		expect(assertion).toContain('body.error !== "Unauthorized"');
 		expect(assertion).toContain("exact Storage HTTP 400/403/Unauthorized");
@@ -1537,30 +1542,49 @@ describe("S-11 commit and queue integration", () => {
 			)
 		).resolves.toBeUndefined();
 
-		for (const status of [200, 401, 403, 404, 409, 500]) {
-			let captured: unknown;
+		const captureError = async (response: Response): Promise<Error | undefined> => {
 			try {
-				await assertStorageMutationDeniedResponse(
-					Response.json(
-						{
-							statusCode: "403",
-							error: "Unauthorized",
-							message: "unsafe-storage-rls-detail",
-						},
-						{ status }
-					),
-					"managed INSERT"
-				);
+				await assertStorageMutationDeniedResponse(response, "managed INSERT");
 			} catch (error) {
-				captured = error;
+				return error instanceof Error ? error : undefined;
 			}
-			expect(captured).toBeInstanceOf(Error);
-			if (captured instanceof Error) {
-				expect(captured.message).toBe(
-					"managed INSERT did not return exact Storage HTTP 400/403/Unauthorized"
-				);
-				expect(captured.message).not.toContain("unsafe-storage-rls-detail");
-			}
+			return undefined;
+		};
+		const binaryResponse = new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
+			status: 200,
+			headers: { "Content-Type": "image/png" },
+		});
+		const binaryError = await captureError(binaryResponse);
+		expect(binaryError?.message).toBe(
+			"managed INSERT did not return exact Storage HTTP 400/403/Unauthorized (status=200)"
+		);
+		expect(binaryResponse.bodyUsed).toBe(false);
+
+		const invalidJsonError = await captureError(
+			new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
+				status: 400,
+				headers: { "Content-Type": "application/octet-stream" },
+			})
+		);
+		expect(invalidJsonError?.message).toBe(
+			"managed INSERT did not return exact Storage HTTP 400/403/Unauthorized (status=400, code=unknown)"
+		);
+
+		for (const status of [200, 401, 403, 404, 409, 500]) {
+			const captured = await captureError(
+				Response.json(
+					{
+						statusCode: "403",
+						error: "Unauthorized",
+						message: "unsafe-storage-rls-detail",
+					},
+					{ status }
+				)
+			);
+			expect(captured?.message).toBe(
+				`managed INSERT did not return exact Storage HTTP 400/403/Unauthorized (status=${status})`
+			);
+			expect(captured?.message).not.toContain("unsafe-storage-rls-detail");
 		}
 	});
 
