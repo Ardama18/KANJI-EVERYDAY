@@ -710,10 +710,18 @@ async function assertCrossOwnerUploadCommitDenied(uploadId: string, id: string):
 		}),
 	});
 	const body: unknown = await response.json();
+	const errorCode = isRecord(body) && isRecord(body.error) &&
+		typeof body.error.code === "string"
+		? body.error.code
+		: "unknown";
 	if (
 		response.status !== 409 || !isRecord(body) || !isRecord(body.error) ||
 		body.error.code !== "CONFLICT"
-	) throw new Error("owner-B cross-owner upload commit did not return exact HTTP 409/CONFLICT");
+	) {
+		throw new Error(
+			`owner-B cross-owner upload commit did not return exact HTTP 409/CONFLICT (status=${response.status}, code=${errorCode})`
+		);
+	}
 }
 
 async function fetchStrictStatus(session: AppSession, selector: string) {

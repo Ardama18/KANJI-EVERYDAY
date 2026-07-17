@@ -1341,6 +1341,27 @@ describe("S-11 commit and queue integration", () => {
 		expect(nextConfig).not.toContain('type: "asset/resource"');
 	});
 
+	it("R24-F8 limits cross-owner Hosted diagnostics to HTTP status and safe error code", async () => {
+		const realE2eGate = await readFile(
+			new URL("./s11-real-e2e-gate.ts", import.meta.url),
+			"utf8"
+		);
+		const assertionStart = realE2eGate.indexOf(
+			"async function assertCrossOwnerUploadCommitDenied"
+		);
+		const assertion = realE2eGate.slice(
+			assertionStart,
+			realE2eGate.indexOf("async function fetchStrictStatus", assertionStart)
+		);
+		expect(assertion).toContain('typeof body.error.code === "string"');
+		expect(assertion).toContain('? body.error.code\n\t\t: "unknown";');
+		expect(assertion).toContain(
+			"(status=${response.status}, code=${errorCode})"
+		);
+		expect(assertion).not.toContain("JSON.stringify(body)");
+		expect(assertion).not.toContain("response.headers");
+	});
+
 	it("R11-F1 preserves the legitimate empty Queue response as idle through the real handler path", async () => {
 		const result = await runQueueRpcThroughWorkerHandler([]);
 		expect(result.response.status).toBe(200);
