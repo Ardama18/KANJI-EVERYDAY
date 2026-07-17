@@ -19,8 +19,10 @@ const rows = await db.query<{ queue_exists: boolean; contract_ok: boolean; acl_o
 		NOT has_function_privilege('authenticated','public.claim_ai_import_concept(uuid,bigint,uuid)','EXECUTE')
 		AND has_function_privilege('service_role','public.claim_ai_import_concept(uuid,bigint,uuid)','EXECUTE') AS acl_ok,
 		to_regprocedure('pgmq.format_table_name(text,text)') IS NOT NULL
+		AND to_regprocedure('pgmq.send(text,jsonb)') IS NOT NULL
 		AND to_regprocedure('pgmq.send(text,jsonb,jsonb,timestamp with time zone)') IS NOT NULL
 		AND has_function_privilege('s10_migration_owner','pgmq.format_table_name(text,text)','EXECUTE')
+		AND has_function_privilege('s10_migration_owner','pgmq.send(text,jsonb)','EXECUTE')
 		AND has_function_privilege('s10_migration_owner','pgmq.send(text,jsonb,jsonb,timestamp with time zone)','EXECUTE') AS pgmq_delegate_acl_ok,
 		to_regprocedure('vault._crypto_aead_det_decrypt(bytea,bytea,bigint,bytea,bytea)') IS NOT NULL
 		AND has_function_privilege('s10_migration_owner','vault._crypto_aead_det_decrypt(bytea,bytea,bigint,bytea,bytea)','EXECUTE') AS vault_decrypt_ok,

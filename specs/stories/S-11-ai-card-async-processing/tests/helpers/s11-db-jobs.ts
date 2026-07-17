@@ -350,6 +350,7 @@ async function assertS11Contracts(
 			has_table_privilege('s10_migration_owner','public.ai_illustration_objects','SELECT,INSERT,UPDATE,DELETE') AND
 			has_table_privilege('s10_migration_owner','public.illustrations','INSERT') AND
 			has_schema_privilege('s10_migration_owner','pgmq','USAGE') AND
+			has_function_privilege('s10_migration_owner','pgmq.send(text,jsonb)','EXECUTE') AND
 			has_function_privilege('s10_migration_owner','pgmq.send(text,jsonb,integer)','EXECUTE') AND
 			has_function_privilege('s10_migration_owner','pgmq.read(text,integer,integer,jsonb)','EXECUTE') AND
 			has_table_privilege('s10_migration_owner','pgmq.q_ai_card_imports','SELECT,INSERT,UPDATE,DELETE') AND
@@ -382,6 +383,16 @@ async function assertS11Contracts(
 		)::text`
 	);
 	if (!result.includes("true")) throw new Error("S-11 database contract smoke failed");
+	await runS10Psql(
+		databaseUrl,
+		`BEGIN;
+		SET LOCAL ROLE s10_migration_owner;
+		SELECT pgmq.send(
+			'ai_card_imports',
+			'{"version":1,"jobId":"00000000-0000-4000-8000-000000000001","batchId":"00000000-0000-4000-8000-000000000002"}'::jsonb
+		);
+		ROLLBACK;`
+	);
 	await assertServiceRoleClaimsMatrix(databaseUrl);
 	await assertOwnerSafeSelectMatrix(databaseUrl);
 	if (job !== "upgrade") return;

@@ -218,7 +218,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.ai_import_concept_jobs,
 	public.ai_worker_log_outbox TO s10_migration_owner;
 GRANT SELECT, INSERT, UPDATE ON public.illustrations TO s10_migration_owner;
 GRANT USAGE ON SCHEMA pgmq TO s10_migration_owner;
-GRANT EXECUTE ON FUNCTION pgmq.send(text,jsonb,integer),
+GRANT EXECUTE ON FUNCTION pgmq.send(text,jsonb),
+	pgmq.send(text,jsonb,integer),
 	pgmq.read(text,integer,integer,jsonb), pgmq.archive(text,bigint)
 	TO s10_migration_owner;
 GRANT EXECUTE ON FUNCTION pgmq.format_table_name(text,text),

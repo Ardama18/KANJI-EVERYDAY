@@ -1226,7 +1226,13 @@ describe("S-11 commit and queue integration", () => {
 			"utf8"
 		);
 		expect(core).toContain(
+			"GRANT EXECUTE ON FUNCTION pgmq.send(text,jsonb),\n\tpgmq.send(text,jsonb,integer),\n\tpgmq.read(text,integer,integer,jsonb), pgmq.archive(text,bigint)\n\tTO s10_migration_owner;"
+		);
+		expect(core).toContain(
 			"GRANT EXECUTE ON FUNCTION pgmq.format_table_name(text,text),\n\tpgmq.send(text,jsonb,jsonb,timestamp with time zone)\n\tTO s10_migration_owner;"
+		);
+		expect(core).toMatch(
+			/SELECT pgmq\.send\(\s*'ai_card_imports',\s*jsonb_build_object\([\s\S]+?\) INTO STRICT message_id;/u
 		);
 		expect(core).not.toMatch(
 			/GRANT\s+EXECUTE\s+ON\s+ALL\s+FUNCTIONS\s+IN\s+SCHEMA\s+pgmq/iu
