@@ -1244,6 +1244,20 @@ describe("S-11 commit and queue integration", () => {
 		);
 	});
 
+	it("R24-F4 initializes the SSR cookie jar before the first Hosted real E2E login", async () => {
+		const realE2eGate = await readFile(
+			new URL("./s11-real-e2e-gate.ts", import.meta.url),
+			"utf8"
+		);
+		const cookieJarDeclaration = realE2eGate.indexOf("class SsrCookieJar");
+		const firstLogin = realE2eGate.indexOf(
+			"const ownerA = await signInWithSsrCookies"
+		);
+		expect(cookieJarDeclaration).toBeGreaterThan(-1);
+		expect(cookieJarDeclaration).toBeLessThan(firstLogin);
+		expect(realE2eGate.match(/class SsrCookieJar/gu)).toHaveLength(1);
+	});
+
 	it("R11-F1 preserves the legitimate empty Queue response as idle through the real handler path", async () => {
 		const result = await runQueueRpcThroughWorkerHandler([]);
 		expect(result.response.status).toBe(200);

@@ -14,6 +14,56 @@ import {
 	fetchServiceOwnerRows,
 } from "./helpers/s11-real-e2e-data-boundary";
 
+interface PreparedSource {
+	readonly uploadId: string;
+	readonly path: string;
+	readonly token: string;
+}
+
+interface AppSession {
+	readonly accessToken: string;
+	readonly userId: string;
+	readonly cookies: SsrCookieJar;
+}
+
+class SsrCookieJar {
+	readonly #values = new Map<string, string>();
+
+	getAll(): { name: string; value: string }[] {
+		return Array.from(this.#values, ([name, value]) => ({ name, value }));
+	}
+
+	setAll(values: readonly { name: string; value: string }[]): void {
+		for (const { name, value } of values) {
+			if (value.length === 0) this.#values.delete(name);
+			else this.#values.set(name, value);
+		}
+	}
+
+	header(): string {
+		if (this.#values.size === 0) throw new Error("Supabase SSR cookie jar is empty");
+		return Array.from(this.#values, ([name, value]) => `${name}=${value}`).join("; ");
+	}
+
+	isEmpty(): boolean {
+		return this.#values.size === 0;
+	}
+
+	absorb(headers: Headers): void {
+		const getSetCookie = (headers as Headers & { getSetCookie?: () => string[] }).getSetCookie;
+		const values = getSetCookie?.call(headers) ?? splitSetCookie(headers.get("set-cookie"));
+		for (const value of values) {
+			const pair = value.split(";", 1)[0];
+			const separator = pair.indexOf("=");
+			if (separator <= 0) continue;
+			const name = pair.slice(0, separator).trim();
+			const cookieValue = pair.slice(separator + 1).trim();
+			if (cookieValue.length === 0) this.#values.delete(name);
+			else this.#values.set(name, cookieValue);
+		}
+	}
+}
+
 const required = [
 	"S11_REAL_APP_BASE_URL",
 	"S11_REAL_EDGE_BASE_URL",
@@ -1091,56 +1141,6 @@ function ownedArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 	const copy = new Uint8Array(bytes.byteLength);
 	copy.set(bytes);
 	return copy.buffer;
-}
-
-interface PreparedSource {
-	readonly uploadId: string;
-	readonly path: string;
-	readonly token: string;
-}
-
-interface AppSession {
-	readonly accessToken: string;
-	readonly userId: string;
-	readonly cookies: SsrCookieJar;
-}
-
-class SsrCookieJar {
-	readonly #values = new Map<string, string>();
-
-	getAll(): { name: string; value: string }[] {
-		return Array.from(this.#values, ([name, value]) => ({ name, value }));
-	}
-
-	setAll(values: readonly { name: string; value: string }[]): void {
-		for (const { name, value } of values) {
-			if (value.length === 0) this.#values.delete(name);
-			else this.#values.set(name, value);
-		}
-	}
-
-	header(): string {
-		if (this.#values.size === 0) throw new Error("Supabase SSR cookie jar is empty");
-		return Array.from(this.#values, ([name, value]) => `${name}=${value}`).join("; ");
-	}
-
-	isEmpty(): boolean {
-		return this.#values.size === 0;
-	}
-
-	absorb(headers: Headers): void {
-		const getSetCookie = (headers as Headers & { getSetCookie?: () => string[] }).getSetCookie;
-		const values = getSetCookie?.call(headers) ?? splitSetCookie(headers.get("set-cookie"));
-		for (const value of values) {
-			const pair = value.split(";", 1)[0];
-			const separator = pair.indexOf("=");
-			if (separator <= 0) continue;
-			const name = pair.slice(0, separator).trim();
-			const cookieValue = pair.slice(separator + 1).trim();
-			if (cookieValue.length === 0) this.#values.delete(name);
-			else this.#values.set(name, cookieValue);
-		}
-	}
 }
 
 function splitSetCookie(value: string | null): string[] {
