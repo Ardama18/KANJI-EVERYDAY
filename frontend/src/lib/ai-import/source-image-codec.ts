@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { createRequire } from "node:module";
+import { join } from "node:path";
 
 import * as magickModule from "@imagemagick/magick-wasm";
 
@@ -57,7 +57,14 @@ function createCodec({ ImageMagick, MagickFormat }: MagickModule): ImageCodec {
 }
 
 async function initialize(): Promise<MagickModule> {
-	const path = createRequire(import.meta.url).resolve("@imagemagick/magick-wasm/magick.wasm");
+	const path = join(
+		process.cwd(),
+		"node_modules",
+		"@imagemagick",
+		"magick-wasm",
+		"dist",
+		"magick.wasm"
+	);
 	await magickModule.initializeImageMagick(new Uint8Array(await readFile(path)));
 	return magickModule;
 }

@@ -1,13 +1,7 @@
 /** @type {import("next").NextConfig} */
 const nextConfig = {
-	webpack(config) {
-		config.module.rules.unshift({
-			test: /@imagemagick[\\/]magick-wasm[\\/]dist[\\/]magick\.wasm$/u,
-			type: "asset/resource",
-		});
-		return config;
-	},
 	experimental: {
+		serverComponentsExternalPackages: ["@imagemagick/magick-wasm"],
 		outputFileTracingIncludes: {
 			"/api/ai/imports/sources/complete": [
 				"./node_modules/@imagemagick/magick-wasm/dist/magick.wasm",
