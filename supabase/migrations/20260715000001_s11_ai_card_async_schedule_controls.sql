@@ -97,5 +97,7 @@ GRANT SELECT ON cron.job,vault.decrypted_secrets TO s10_migration_owner;
 GRANT EXECUTE ON FUNCTION cron.schedule(text,text,text),cron.unschedule(bigint),
   net.http_post(text,jsonb,jsonb,jsonb,integer)
   TO s10_migration_owner;
+GRANT EXECUTE ON FUNCTION vault._crypto_aead_det_decrypt(bytea, bytea, bigint, bytea, bytea)
+  TO s10_migration_owner;
 
 -- Deliberately no call to activate_ai_card_async_schedules(): deploy and smoke gates precede activation.

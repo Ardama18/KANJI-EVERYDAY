@@ -1200,6 +1200,39 @@ describe("S-11 commit and queue integration", () => {
 		expect(schedule.match(/ai_s11_validate_schedule_config/gu)).toHaveLength(2);
 	});
 
+	it("R24-F1 grants only the required Hosted Vault decrypt dependency to the schedule owner", async () => {
+		const schedule = await readFile(
+			new URL(
+				"../../../../supabase/migrations/20260715000001_s11_ai_card_async_schedule_controls.sql",
+				import.meta.url
+			),
+			"utf8"
+		);
+		expect(schedule).toContain(
+			"GRANT EXECUTE ON FUNCTION vault._crypto_aead_det_decrypt(bytea, bytea, bigint, bytea, bytea)"
+		);
+		expect(schedule).not.toMatch(
+			/GRANT\s+EXECUTE\s+ON\s+ALL\s+FUNCTIONS\s+IN\s+SCHEMA\s+vault/iu
+		);
+	});
+
+	it.skipIf(!process.env.S11_FRESH_DATABASE_URL)(
+		"R24-F1 fresh DB grants the schedule owner its Hosted Vault decrypt dependency",
+		async () => {
+			const databaseUrl = process.env.S11_FRESH_DATABASE_URL;
+			if (!databaseUrl) return;
+			const db = createS11DbClient(databaseUrl);
+			const privileges = await db.query<{ has_execute: boolean }>(`
+				SELECT has_function_privilege(
+					's10_migration_owner',
+					'vault._crypto_aead_det_decrypt(bytea,bytea,bigint,bytea,bytea)',
+					'EXECUTE'
+				) AS has_execute
+			`);
+			expect(privileges).toEqual([{ has_execute: true }]);
+		}
+	);
+
 	it("R11-F1 preserves the legitimate empty Queue response as idle through the real handler path", async () => {
 		const result = await runQueueRpcThroughWorkerHandler([]);
 		expect(result.response.status).toBe(200);
