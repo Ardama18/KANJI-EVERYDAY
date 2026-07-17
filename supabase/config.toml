@@ -1,0 +1,12 @@
+project_id = "kanji-everyday"
+
+[functions.ai-card-import-worker]
+verify_jwt = false
+
+[functions.ai-card-import-cleanup]
+verify_jwt = false
+
+[functions.ai-card-import-resource-gate]
+# Resource-only local quality gate. Hosted deployment is not part of the release,
+# and JWT verification remains enabled as defense if it is deployed accidentally.
+verify_jwt = true

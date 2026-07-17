@@ -17,7 +17,11 @@ import {
 	captureS10SeedKeySnapshot,
 	createS10DbClient,
 	ensureS10ActorFixtures,
+	runS10SettledTestScope,
 	runWithS10Connections,
+	S10_DB_LOCK_TIMEOUT_MS,
+	S10_DB_STATEMENT_TIMEOUT_MS,
+	S10_DB_TEST_TIMEOUT_MS,
 	S10_ACTORS,
 	sqlLiteral,
 } from "./helpers/s10-db-testkit";
@@ -47,7 +51,7 @@ beforeAll(async () => {
 	await ensureS10ActorFixtures(database);
 });
 
-describe("S-10 AIカード登録基盤 契約E2E", () => {
+describe("S-10 AIカード登録基盤 契約E2E", { timeout: S10_DB_TEST_TIMEOUT_MS }, () => {
 	// AC原文 (AC-01/06): 異なるownerの同内容private cardをcommit/finalizeでき、owner関連と二段階境界が一致する。
 	// 検証: Stage 1 -> preview署名/検証 -> quota予約 -> commit -> finalize -> DB readback。
 	// 期待結果/合格基準: ownerごとにcard 1件、batch/item/tag関連は整合、各段階の副作用は設計どおり。
@@ -130,7 +134,7 @@ describe("S-10 AIカード登録基盤 契約E2E", () => {
 	// @complexity: high
 	it("E2E-CONTRACT-03: app_aiの予約・preview・並行commit・finalize再送を通してbatch/card/usageを各1回分に保つ", async () => {
 		const marker = `e2e-idempotent-${randomUUID()}`;
-		try {
+		await runS10SettledTestScope(async () => {
 			const prepared = await prepareS10ContractWorkflow(database, { marker, owner: S10_ACTORS.ownerA, source: "app_ai" });
 			const sideEffectCounts = async () => await database.query<Record<string, number>>(`
 				SELECT
@@ -141,7 +145,12 @@ describe("S-10 AIカード登録基盤 契約E2E", () => {
 					(SELECT count(*)::int FROM public.tags WHERE display_name LIKE ${sqlLiteral(`%${marker.slice(-20)}%`)}) AS tags,
 					(SELECT count(*)::int FROM public.ai_quota_reservations WHERE reservation_key=${sqlLiteral(prepared.cardReservationKey)}) AS reservations,
 					(SELECT coalesce(sum(units),0)::int FROM public.ai_quota_reservations WHERE reservation_key=${sqlLiteral(prepared.cardReservationKey)}) AS "reservedUnits",
-					(SELECT coalesce(sum(generated_card_count),0)::int FROM public.ai_usage_daily WHERE owner_user_id=${sqlLiteral(prepared.owner.userId)}::uuid) AS "cardUsage"
+					(SELECT coalesce(sum(usage.generated_card_count),0)::int
+						FROM public.ai_usage_daily AS usage
+						JOIN public.ai_quota_reservations AS reservations
+							ON reservations.owner_user_id=usage.owner_user_id
+							AND reservations.usage_date=usage.usage_date
+						WHERE reservations.reservation_key=${sqlLiteral(prepared.cardReservationKey)}) AS "cardUsage"
 			`);
 			const beforeTamper = await sideEffectCounts();
 			await expect(
@@ -191,9 +200,9 @@ describe("S-10 AIカード登録基盤 契約E2E", () => {
 				reservationImportHash: prepared.importRequestHash,
 				reservationBatchId: batchId,
 			}]);
-		} finally {
+		}, async () => {
 			await cleanupS10ContractMarker(database, marker);
-		}
+		});
 	});
 
 	// @category: e2e
@@ -201,16 +210,16 @@ describe("S-10 AIカード登録基盤 契約E2E", () => {
 	// @complexity: high
 	it("E2E-CONTRACT-04: remote_mcp生成済みcardをexempt予約からcommit/finalizeしcard生成quotaを消費しない", async () => {
 		const marker = `e2e-mcp-${randomUUID()}`;
-		try {
+		await runS10SettledTestScope(async () => {
 			const result = await runS10ContractWorkflow(database, { marker, owner: S10_ACTORS.ownerA, source: "remote_mcp" });
 			expect(result.snapshot.cards).toHaveLength(2);
 			expect(result.snapshot.reservations).toEqual([
 				expect.objectContaining({ status: "exempt", units: 0, source: "remote_mcp" }),
 			]);
 			expect(result.snapshot.usage.reduce((sum, row) => sum + row.generatedCardCount, 0)).toBe(0);
-		} finally {
+		}, async () => {
 			await cleanupS10ContractMarker(database, marker);
-		}
+		});
 	});
 
 	// @category: e2e
@@ -482,7 +491,7 @@ describe("S-10 AIカード登録基盤 契約E2E", () => {
 	it("E2E-CONTRACT-10: commit/finalize/undo/session/direct DML/relation RPCを並行交差しdeadlock 0と最終不変条件を確認する", async () => {
 		const marker = `e2e-lock-${randomUUID()}`;
 		const sessionId = randomUUID();
-		const lockSettings = "SET LOCAL lock_timeout='10s';";
+		const lockSettings = `SET LOCAL lock_timeout='${S10_DB_LOCK_TIMEOUT_MS}ms'; SET LOCAL statement_timeout='${S10_DB_STATEMENT_TIMEOUT_MS}ms';`;
 		try {
 			const prepared = await prepareS10ContractWorkflow(database, { marker, owner: S10_ACTORS.ownerA, source: "app_ai" });
 			const commits = await runWithS10Connections(3, (client) => commitS10ContractWorkflow(client, prepared));

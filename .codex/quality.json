@@ -1,0 +1,4 @@
+{
+  "ecosystem": "node",
+  "check": "node scripts/quality/run-quality-with-database.mjs"
+}

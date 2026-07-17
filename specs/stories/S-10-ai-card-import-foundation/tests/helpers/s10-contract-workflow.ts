@@ -343,7 +343,19 @@ export async function captureS10ContractSnapshot(
 		client.query<Record<string, unknown>>(`SELECT DISTINCT tags.id::text,tags.owner_user_id::text AS "ownerUserId",tags.display_name AS "displayName",tags.normalized_name AS "normalizedName" FROM public.tags AS tags JOIN public.ai_import_item_tags AS links ON links.tag_id=tags.id JOIN public.ai_import_items AS items ON items.id=links.item_id WHERE items.batch_id=${batchFilter} ORDER BY tags.id::text`),
 		client.query<Record<string, unknown>>(`SELECT DISTINCT illustrations.id::text,illustrations.owner_user_id::text AS "ownerUserId",illustrations.illustration_key AS "illustrationKey",illustrations.status FROM public.illustrations AS illustrations JOIN public.cards AS cards ON cards.illustration_key=illustrations.illustration_key JOIN public.ai_import_items AS items ON items.result_card_id=cards.id WHERE items.batch_id=${batchFilter} ORDER BY illustrations.id::text`),
 		client.query<{ kind: string; source: string; units: number; status: string }>(`SELECT kind,source,units,status FROM public.ai_quota_reservations WHERE batch_id=${batchFilter} ORDER BY kind,item_id NULLS FIRST`),
-		client.query<{ generatedCardCount: number; generatedImageCount: number }>(`SELECT usage.generated_card_count AS "generatedCardCount",usage.generated_image_count AS "generatedImageCount" FROM public.ai_usage_daily AS usage JOIN public.ai_import_batches AS batches ON batches.owner_user_id=usage.owner_user_id WHERE batches.id=${batchFilter} ORDER BY usage.usage_date`),
+		client.query<{ generatedCardCount: number; generatedImageCount: number }>(`
+			SELECT usage.generated_card_count AS "generatedCardCount",
+				usage.generated_image_count AS "generatedImageCount"
+			FROM public.ai_usage_daily AS usage
+			JOIN (
+				SELECT DISTINCT reservations.owner_user_id, reservations.usage_date
+				FROM public.ai_quota_reservations AS reservations
+				WHERE reservations.batch_id=${batchFilter}
+			) AS marker_usage
+				ON marker_usage.owner_user_id=usage.owner_user_id
+				AND marker_usage.usage_date=usage.usage_date
+			ORDER BY usage.usage_date
+		`),
 		client.query<{ id: string; status: string }>(`SELECT uploads.id::text,uploads.status FROM public.ai_uploads AS uploads JOIN public.ai_import_items AS items ON items.upload_id=uploads.id WHERE items.batch_id=${batchFilter} ORDER BY uploads.id`),
 	]);
 	return { batches, decks, items, cards, deckCards, cardTags, itemTags, tags, illustrations, reservations, usage, uploads };
@@ -421,6 +433,7 @@ export async function cleanupS10ContractMarker(
 ): Promise<void> {
 	const likeMarker = sqlLiteral(`%${marker}%`);
 	await client.execute(`
+		SELECT pg_advisory_xact_lock(hashtextextended(${sqlLiteral(`s10-cleanup:${marker}`)}, 0));
 		CREATE TEMP TABLE s10_cleanup_usage_delta ON COMMIT DROP AS
 		SELECT
 			owner_user_id,

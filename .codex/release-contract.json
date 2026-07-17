@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": "S11-RC1-1.0.5",
+  "issue": 12,
+  "story": "S-11",
+  "baseSha": "45969b140d1817be143fe6331159b88b647c2e29",
+  "scope": {
+    "acceptanceCriteria": [
+      "AC-01-async-commit-under-two-seconds",
+      "AC-02-reconnectable-owner-status",
+      "AC-03-idempotent-queue-worker-retry",
+      "AC-04-explicit-provider-no-fallback",
+      "AC-05-validated-bounded-image-processing",
+      "AC-06-concept-shared-illustration-lifecycle",
+      "AC-07-twenty-four-hour-source-orphan-cleanup",
+      "AC-08-concept-failure-isolation",
+      "AC-09-safe-logging"
+    ],
+    "outOfScope": [
+      "card-body-generation-ui",
+      "oauth-and-remote-mcp-transport",
+      "card-list-edit-delete-and-batch-undo-ui",
+      "automatic-provider-fallback",
+      "external-image-url-fetching"
+    ]
+  },
+  "localGates": [
+    { "id": "release-contract", "phase": "pre-provision", "context": "source", "command": ["node", "scripts/quality/preflight-release-contract.mjs"], "expected": { "status": "passed", "exitCode": 0 } },
+    { "id": "quality-database-unit", "phase": "pre-provision", "context": "source", "command": ["node", "--test", "scripts/quality/quality-database.test.mjs"], "expected": { "status": "passed", "exitCode": 0 } },
+    { "id": "quality-database-harness", "phase": "pre-provision", "context": "source", "command": ["node", "scripts/quality/quality-database-harness.mjs"], "expected": { "status": "passed", "exitCode": 0 } },
+    { "id": "s11-fresh", "phase": "disposable", "context": "disposable", "command": ["npm", "--prefix", "frontend", "run", "test:s11:fresh"], "expected": { "status": "passed", "exitCode": 0 } },
+    { "id": "s11-upgrade", "phase": "disposable", "context": "disposable", "command": ["npm", "--prefix", "frontend", "run", "test:s11:upgrade"], "expected": { "status": "passed", "exitCode": 0 } },
+    { "id": "s11-failure", "phase": "disposable", "context": "disposable", "command": ["npm", "--prefix", "frontend", "run", "test:s11:failure"], "expected": { "status": "passed", "exitCode": 0 } },
+    { "id": "s11-local-real-integration", "phase": "disposable", "context": "disposable", "command": ["npm", "--prefix", "frontend", "run", "test:s11:local-real-integration"], "expected": { "status": "passed", "exitCode": 0 } },
+    { "id": "lint", "phase": "disposable", "context": "disposable", "command": ["npm", "--prefix", "frontend", "run", "lint"], "expected": { "status": "passed", "exitCode": 0 } },
+    { "id": "typecheck", "phase": "disposable", "context": "disposable", "command": ["npm", "--prefix", "frontend", "run", "typecheck"], "expected": { "status": "passed", "exitCode": 0 } },
+    { "id": "build", "phase": "disposable", "context": "build", "command": ["npm", "--prefix", "frontend", "run", "build"], "expected": { "status": "passed", "exitCode": 0 } },
+    { "id": "ordinary-vitest", "phase": "disposable", "context": "disposable", "command": ["npm", "--prefix", "frontend", "run", "test"], "expected": { "status": "passed", "exitCode": 0 } },
+    { "id": "s11-inventory", "phase": "disposable", "context": "disposable", "command": ["npm", "--prefix", "frontend", "run", "test:s11:inventory"], "expected": { "status": "passed", "exitCode": 0 } },
+    { "id": "s11-focused", "phase": "disposable", "context": "disposable", "command": ["npm", "--prefix", "frontend", "run", "test:s11:integration", "--", "-t", "R[789]-F|R10-(R[12]-)?F|R11-(R2-)?F[12]|R12-F|R13-F|R14-F|R15-F|R19-F|R20-F|R21-F|R22-F|R23-F|F-(18|19)"], "expected": { "status": "passed", "exitCode": 0 } },
+    { "id": "diff-committed", "phase": "disposable", "context": "disposable", "command": ["git", "diff", "--check", "BASE...HEAD"], "expected": { "status": "passed", "exitCode": 0 } },
+    { "id": "diff-staged", "phase": "disposable", "context": "disposable", "command": ["git", "diff", "--cached", "--check"], "expected": { "status": "passed", "exitCode": 0 } },
+    { "id": "diff-unstaged", "phase": "disposable", "context": "disposable", "command": ["git", "diff", "--check"], "expected": { "status": "passed", "exitCode": 0 } },
+    { "id": "database-residue", "phase": "post-cleanup", "context": "source", "command": ["node", "scripts/quality/verify-s10-residue.mjs"], "expected": { "status": "passed", "exitCode": 0 } },
+    { "id": "source-continuity", "phase": "post-cleanup", "context": "source", "command": ["node", "scripts/quality/verify-s10-source-continuity.mjs"], "expected": { "status": "passed", "exitCode": 0 } }
+  ],
+  "hostedGates": [
+    { "id": "hosted-fresh", "command": ["npm", "--prefix", "frontend", "run", "test:s11:fresh"], "expected": { "status": "passed", "exitCode": 0 } },
+    { "id": "hosted-upgrade", "command": ["npm", "--prefix", "frontend", "run", "test:s11:upgrade"], "expected": { "status": "passed", "exitCode": 0 } },
+    { "id": "hosted-failure", "command": ["npm", "--prefix", "frontend", "run", "test:s11:failure"], "expected": { "status": "passed", "exitCode": 0 } },
+    { "id": "hosted-real-integration", "command": ["npm", "--prefix", "frontend", "run", "test:s11:real-integration"], "expected": { "status": "passed", "exitCode": 0 } },
+    { "id": "hosted-real-e2e", "command": ["npm", "--prefix", "frontend", "run", "test:s11:real-e2e"], "expected": { "status": "passed", "exitCode": 0 } },
+    { "id": "hosted-resource", "command": ["npm", "--prefix", "frontend", "run", "test:s11:resource"], "expected": { "status": "passed", "exitCode": 0 } },
+    { "id": "hosted-deno", "command": ["npm", "--prefix", "frontend", "run", "test:s11:deno"], "expected": { "status": "passed", "exitCode": 0 } }
+  ],
+  "secretScans": [
+    { "id": "gitleaks-redacted", "executionContext": "candidate-local", "prerequisites": [], "command": ["gitleaks", "git", "--redact", "--no-banner", "--log-opts", "BASE..HEAD", "."], "expected": { "status": "passed", "exitCode": 0 } },
+    { "id": "forbidden-marker-scan", "executionContext": "hosted-runtime", "prerequisites": ["S11_FORBIDDEN_MARKERS"], "command": ["node", "scripts/quality/scan-s11-forbidden-markers.mjs"], "expected": { "status": "passed", "exitCode": 0 } }
+  ],
+  "reviewPolicy": {
+    "cumulativeReviews": 1,
+    "verificationReviews": 1,
+    "verificationScope": "prior-findings-plus-regressions-and-impact",
+    "lateExpansionAllowedOnlyFor": ["high-security", "medium-security", "high-data-loss-corruption", "medium-data-loss-corruption", "explicit-acceptance-criterion-failure"],
+    "blockingSeverities": ["H", "M"],
+    "lowSeverityBlocksOnlyWhen": ["demonstrated-acceptance-criterion-failure", "demonstrated-security-failure", "demonstrated-data-integrity-failure"],
+    "askAllowedOnlyFor": "frozen-contract-ambiguity"
+  },
+  "evidenceBinding": {
+    "mode": "post-candidate-evidence-chain",
+    "candidateShaFormat": "^[0-9a-f]{40}$",
+    "allGateRunsMustUseCandidateSha": true,
+    "candidateMustBeAncestorOfHead": true,
+    "postCandidateCommitsMayChangeOnly": [
+      ".codex/release-contract.json",
+      ".codex/release-evidence.json",
+      "scripts/quality/release-contract.mjs",
+      "scripts/quality/release-contract.test.mjs",
+      "specs/stories/S-11-ai-card-async-processing/tasks/remediation-cycle-19.md"
+    ]
+  },
+  "mergePolicy": { "hostedSevenRequired": true, "unresolvedStatusBlocksMerge": true }
+}

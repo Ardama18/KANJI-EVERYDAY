@@ -30,6 +30,23 @@ import {
 } from "@/lib/ai-import/schema";
 import canonicalFixture from "../fixtures/canonical-requests.json";
 import unicodeFixture from "../fixtures/unicode-card-key.json";
+import { cleanupS10ContractMarker } from "./helpers/s10-contract-workflow";
+import {
+	buildS10DatabaseCommandEnvironment,
+	createS10DbClient,
+	runS10Psql,
+	runS10PsqlAutocommitScript,
+	runS10PsqlFile,
+	runS10SettledTestScope,
+	S10DatabaseCommandError,
+	type S10ProcessRuntime,
+	S10_DB_LOCK_TIMEOUT_MS,
+	S10_DB_PROCESS_TIMEOUT_MS,
+	S10_DB_SCOPE_CLEANUP_TIMEOUT_MS,
+	S10_DB_SCOPE_OPERATION_TIMEOUT_MS,
+	S10_DB_STATEMENT_TIMEOUT_MS,
+	S10_DB_TEST_TIMEOUT_MS,
+} from "./helpers/s10-db-testkit";
 
 function requireFixtureById<T extends { id: string }>(values: readonly T[], id: string): T {
 	const value = values.find((candidate) => candidate.id === id);
@@ -107,7 +124,223 @@ async function expectSafePreviewFailure(
 	}
 }
 
+function createReadyStubbornRuntime(events: string[], startupDelayMs = 0) {
+	const deadline = new AbortController();
+	let ready = false;
+	let output = "";
+	let pid: number | undefined;
+	let terminationSignal: NodeJS.Signals | null = null;
+	const runtime: S10ProcessRuntime = {
+		executable: process.execPath,
+		arguments: [
+			"-e",
+			`setTimeout(()=>{process.on('SIGTERM',()=>{});process.stdout.write('READY\\n')},${startupDelayMs});setInterval(()=>{},1000)`,
+		],
+		timeoutMs: 2_000,
+		killGraceMs: 25,
+		signal: deadline.signal,
+		onSpawn(child) {
+			pid = child.pid;
+			child.stdout?.on("data", (chunk) => {
+				output += String(chunk);
+				if (!ready && output.includes("READY\n")) {
+					ready = true;
+					events.push("ready");
+					deadline.abort();
+				}
+			});
+			child.once("exit", (_code, signal) => {
+				terminationSignal = signal;
+				events.push("exit");
+			});
+		},
+	};
+	return {
+		runtime,
+		get pid() { return pid; },
+		get ready() { return ready; },
+		get terminationSignal() { return terminationSignal; },
+	};
+}
+
 describe("S-10 AIカード登録基盤 Unit契約", () => {
+	describe("DB test settlement contract", () => {
+		it("UT-DB-01: test timeout相当のraceはunderlying Promiseをcancelせず後から完了し得る", async () => {
+			let release: (() => void) | undefined;
+			let operationCompleted = false;
+			const operation = new Promise<void>((resolve) => {
+				release = () => {
+					operationCompleted = true;
+					resolve();
+				};
+			});
+			const winner = await Promise.race([
+				operation.then(() => "operation" as const),
+				Promise.resolve("vitest-timeout" as const),
+			]);
+			expect(winner).toBe("vitest-timeout");
+			expect(operationCompleted).toBe(false);
+			release?.();
+			await operation;
+			expect(operationCompleted).toBe(true);
+		});
+
+		it("UT-DB-02: failure相当のoperationをsettleしてcleanup完了後だけ次snapshotを公開する", async () => {
+			let release: (() => void) | undefined;
+			let markerPresent = true;
+			let cleanupCalls = 0;
+			const gate = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			const scope = runS10SettledTestScope(async () => {
+				await gate;
+				throw new Error("intentional operation failure");
+			}, async () => {
+				markerPresent = false;
+				cleanupCalls += 1;
+			});
+			let scopeSettled = false;
+			void scope.catch(() => undefined).then(() => {
+				scopeSettled = true;
+			});
+			await Promise.resolve();
+			expect(scopeSettled).toBe(false);
+			expect(markerPresent).toBe(true);
+			release?.();
+			await expect(scope).rejects.toThrow("intentional operation failure");
+			expect(markerPresent).toBe(false);
+			expect(cleanupCalls).toBe(1);
+
+			await runS10SettledTestScope(async () => undefined, async () => {
+				markerPresent = false;
+				cleanupCalls += 1;
+			});
+			expect(markerPresent).toBe(false);
+			expect(cleanupCalls).toBe(2);
+		});
+
+		it("UT-DB-03: DB/process/test timeoutとmarker cleanupは有限・strict・marker scopedである", () => {
+			expect(S10_DB_LOCK_TIMEOUT_MS).toBe(5_000);
+			expect(S10_DB_STATEMENT_TIMEOUT_MS).toBe(10_000);
+			expect(S10_DB_PROCESS_TIMEOUT_MS).toBe(12_000);
+			expect(S10_DB_SCOPE_OPERATION_TIMEOUT_MS).toBe(20_000);
+			expect(S10_DB_SCOPE_CLEANUP_TIMEOUT_MS).toBe(6_000);
+			expect(S10_DB_TEST_TIMEOUT_MS).toBe(30_000);
+			expect(S10_DB_LOCK_TIMEOUT_MS).toBeLessThan(S10_DB_STATEMENT_TIMEOUT_MS);
+			expect(S10_DB_PROCESS_TIMEOUT_MS).toBeLessThan(S10_DB_TEST_TIMEOUT_MS);
+			const environment = buildS10DatabaseCommandEnvironment("contract-test", {
+				PGOPTIONS: "-c application_name=inherited",
+			});
+			expect(environment.PGAPPNAME).toBe("contract-test");
+			expect(environment.PGOPTIONS).toBe(
+				"-c application_name=inherited -c statement_timeout=10000 -c lock_timeout=5000"
+			);
+			const cleanupSource = cleanupS10ContractMarker.toString();
+			expect(cleanupSource).toContain("pg_advisory_xact_lock");
+			expect(cleanupSource).toContain("reservation_key LIKE");
+			expect(cleanupSource).not.toContain("sum(generated_card_count)");
+		});
+
+		it("UT-DB-04: resistant real childはTERM後KILLで全psql境界をsettleしてrejectする", async () => {
+			for (const api of ["run", "capture", "settle", "autocommit", "file"] as const) {
+				const events: string[] = [];
+				const stubborn = createReadyStubbornRuntime(events);
+				const { runtime } = stubborn;
+				const client = createS10DbClient("postgresql://unused.invalid/test", runtime);
+				const operation = api === "run"
+					? runS10Psql("postgresql://unused.invalid/test", "SELECT 1", runtime)
+					: api === "capture"
+						? client.captureError("SELECT 1")
+						: api === "settle"
+							? client.settle("SELECT 1")
+							: api === "autocommit"
+								? runS10PsqlAutocommitScript("postgresql://unused.invalid/test", "SELECT 1", runtime)
+								: runS10PsqlFile("postgresql://unused.invalid/test", "unused.sql", runtime);
+				const observedOperation = operation.catch((error: unknown) => {
+					events.push("rejected");
+					throw error;
+				});
+				await expect(observedOperation).rejects.toBeInstanceOf(S10DatabaseCommandError);
+				expect(stubborn.ready).toBe(true);
+				expect(stubborn.terminationSignal).toBe("SIGKILL");
+				events.push("next-snapshot");
+				expect(events).toEqual(["ready", "exit", "rejected", "next-snapshot"]);
+				if (stubborn.pid !== undefined) expect(() => process.kill(stubborn.pid as number, 0)).toThrow();
+			}
+		});
+
+		it("UT-DB-04b: delayed startup waits for explicit readiness before TERM-to-KILL assertion", async () => {
+			const events: string[] = [];
+			const stubborn = createReadyStubbornRuntime(events, 300);
+			await expect(
+				runS10Psql("postgresql://unused.invalid/test", "SELECT 1", stubborn.runtime)
+			).rejects.toBeInstanceOf(S10DatabaseCommandError);
+			expect(stubborn.ready).toBe(true);
+			expect(stubborn.terminationSignal).toBe("SIGKILL");
+			events.push("next-snapshot");
+			expect(events).toEqual(["ready", "exit", "next-snapshot"]);
+			if (stubborn.pid !== undefined) expect(() => process.kill(stubborn.pid as number, 0)).toThrow();
+		});
+
+		it("UT-DB-05: aggregate deadline aborts and settles a resistant child before cleanup and next scope", async () => {
+			const events: string[] = [];
+			let childPid: number | undefined;
+			const runtime: S10ProcessRuntime = {
+				executable: process.execPath,
+				arguments: ["-e", "process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"],
+				timeoutMs: 2_000,
+				killGraceMs: 20,
+				onSpawn(child) {
+					childPid = child.pid;
+					child.once("exit", () => events.push("child-exit"));
+				},
+			};
+			await expect(runS10SettledTestScope(
+				async () => await runS10Psql("postgresql://unused.invalid/test", "SELECT 1", runtime),
+				async () => { events.push("cleanup"); },
+				{ operationTimeoutMs: 80, cleanupTimeoutMs: 80 }
+			)).rejects.toBeInstanceOf(S10DatabaseCommandError);
+			expect(events).toEqual(["child-exit", "cleanup"]);
+				if (childPid !== undefined) {
+					const settledPid = childPid;
+					expect(() => process.kill(settledPid, 0)).toThrow();
+				}
+			await runS10SettledTestScope(
+				async () => { events.push("next-operation"); },
+				async () => { events.push("next-cleanup"); },
+				{ operationTimeoutMs: 80, cleanupTimeoutMs: 80 }
+			);
+			expect(events.slice(-2)).toEqual(["next-operation", "next-cleanup"]);
+		});
+
+		it("UT-DB-06: sequential slow children share one aggregate budget and leave no overlap", async () => {
+			const exitedPids: number[] = [];
+			let spawnCount = 0;
+			const runtime = (script: string): S10ProcessRuntime => ({
+				executable: process.execPath,
+				arguments: ["-e", script],
+				timeoutMs: 2_000,
+				killGraceMs: 20,
+				onSpawn(child) {
+					spawnCount += 1;
+					child.once("exit", () => { if (child.pid !== undefined) exitedPids.push(child.pid); });
+				},
+			});
+			let cleanupCalls = 0;
+			await expect(runS10SettledTestScope(async () => {
+				await runS10Psql("postgresql://unused.invalid/test", "SELECT 1", runtime("setTimeout(()=>{},40)"));
+				await runS10Psql("postgresql://unused.invalid/test", "SELECT 2", runtime("process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"));
+			}, async () => { cleanupCalls += 1; }, {
+				operationTimeoutMs: 300,
+				cleanupTimeoutMs: 80,
+			})).rejects.toBeInstanceOf(S10DatabaseCommandError);
+			expect(spawnCount).toBe(2);
+			expect(cleanupCalls).toBe(1);
+			expect(exitedPids).toHaveLength(2);
+			for (const pid of exitedPids) expect(() => process.kill(pid, 0)).toThrow();
+		});
+	});
+
 	describe("Stage 1 schema", () => {
 		// AC原文 (AC-06/06a): Stage 1対象条件を不正にしたとき永続化を行わず、1〜50枚、clientItemId、tag境界を個別に拒否する。
 		// 検証/期待結果/合格基準: unknown入力を全件検査し、field path付きissueを返し、成功時だけbranded normalized typeを返す。

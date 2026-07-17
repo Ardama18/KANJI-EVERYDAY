@@ -1,0 +1,238 @@
+const UUID_PATTERN =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const POSTGREST_RESOURCE_PATTERN = /^[a-z][a-z0-9_]{0,62}$/u;
+
+const OWNER_SAFE_OBJECT_COLUMNS = [
+	"id",
+	"owner_user_id",
+	"illustration_id",
+	"state",
+	"reference_count",
+	"error_code",
+	"width",
+	"height",
+	"created_at",
+	"updated_at",
+	"deleted_at",
+].join(",");
+
+const OWNER_SENSITIVE_OBJECT_COLUMNS = [
+	"job_id",
+	"storage_bucket",
+	"storage_path",
+	"digest",
+	"delete_due_at",
+	"cleanup_claimed_at",
+	"cleanup_claim_token",
+	"cleanup_previous_state",
+].join(",");
+
+export interface S11PostgrestBoundary {
+	readonly fetch: typeof fetch;
+	readonly supabaseBase: string;
+	readonly anonKey: string;
+}
+
+export async function assertStorageMutationDeniedResponse(
+	response: Response,
+	scenario: string
+): Promise<void> {
+	const contract = `${scenario} did not return exact Storage HTTP 400/403/Unauthorized`;
+	if (response.status !== 400) {
+		throw new Error(`${contract} (status=${response.status})`);
+	}
+	let body: unknown;
+	try {
+		body = await response.json();
+	} catch {
+		throw new Error(`${contract} (status=400, code=unknown)`);
+	}
+	if (
+		!isRecord(body) ||
+		body.statusCode !== "403" ||
+		body.error !== "Unauthorized"
+	) {
+		const errorCode = isRecord(body) && typeof body.statusCode === "string"
+			? body.statusCode
+			: "unknown";
+		throw new Error(`${contract} (status=400, code=${errorCode})`);
+	}
+}
+
+export async function assertStorageObjectNotFoundResponse(
+	response: Response,
+	scenario: string
+): Promise<void> {
+	const contract = `${scenario} did not return exact Storage HTTP 400/404/not_found contract`;
+	if (response.status !== 400) {
+		throw new Error(`${contract} (status=${response.status})`);
+	}
+	let body: unknown;
+	try {
+		body = await response.json();
+	} catch {
+		throw new Error(`${contract} (status=400, code=unknown)`);
+	}
+	if (
+		!isRecord(body) ||
+		body.statusCode !== "404" ||
+		body.error !== "not_found"
+	) {
+		const errorCode = isRecord(body) && typeof body.statusCode === "string"
+			? body.statusCode
+			: "unknown";
+		throw new Error(`${contract} (status=400, code=${errorCode})`);
+	}
+}
+
+const STORAGE_DELETE_MAX_ATTEMPTS = 12;
+const STORAGE_DELETE_RETRY_DELAY_MS = 250;
+
+export async function waitForStorageObjectNotFound(
+	fetchObject: (attempt: number) => Promise<Response>,
+	scenario: string,
+	options: Readonly<{
+		beforeAttempt?: () => Promise<void>;
+		wait?: (delayMs: number) => Promise<void>;
+	}> = {}
+): Promise<void> {
+	const wait = options.wait ?? (async (delayMs: number) => {
+		await new Promise((resolve) => setTimeout(resolve, delayMs));
+	});
+	for (let attempt = 0; attempt < STORAGE_DELETE_MAX_ATTEMPTS; attempt += 1) {
+		await options.beforeAttempt?.();
+		const response = await fetchObject(attempt);
+		if (response.status === 400) {
+			await assertStorageObjectNotFoundResponse(response, scenario);
+			return;
+		}
+		if (response.status !== 200) {
+			throw new Error(
+				`${scenario} Storage deletion poll failed (status=${response.status})`
+			);
+		}
+		await response.body?.cancel();
+		if (attempt === STORAGE_DELETE_MAX_ATTEMPTS - 1) {
+			throw new Error(
+				`${scenario} Storage deletion poll exhausted (status=200, attempts=${STORAGE_DELETE_MAX_ATTEMPTS})`
+			);
+		}
+		await wait(STORAGE_DELETE_RETRY_DELAY_MS);
+	}
+}
+
+interface OwnerProjectionBoundary extends S11PostgrestBoundary {
+	readonly ownerHeaders: Readonly<Record<string, string>>;
+	readonly otherOwnerHeaders: Readonly<Record<string, string>>;
+}
+
+export async function fetchServiceOwnerRows(
+	boundary: S11PostgrestBoundary,
+	serviceHeaders: Readonly<Record<string, string>>,
+	ownerId: string,
+	resourceAndQuery: string
+): Promise<Record<string, unknown>[]> {
+	assertCanonicalUuid(ownerId, "service owner filter");
+	const authorization = headerValue(serviceHeaders, "authorization");
+	const apiKey = headerValue(serviceHeaders, "apikey");
+	if (apiKey === undefined || authorization !== `Bearer ${apiKey}`) {
+		throw new Error("service owner snapshot requires the service-role bearer/apikey pair");
+	}
+	if (/(?:\?|&)owner_user_id=/u.test(resourceAndQuery)) {
+		throw new Error("service owner filter must be added by the boundary adapter");
+	}
+	const resourceName = resourceAndQuery.split("?", 1)[0] ?? "";
+	if (!POSTGREST_RESOURCE_PATTERN.test(resourceName)) {
+		throw new Error("service owner snapshot resource must be a safe identifier");
+	}
+	const separator = resourceAndQuery.includes("?") ? "&" : "?";
+	return await fetchRows(
+		boundary,
+		`${resourceAndQuery}${separator}owner_user_id=eq.${encodeURIComponent(ownerId)}`,
+		serviceHeaders,
+		`service-role owner-scoped ${resourceName} snapshot`
+	);
+}
+
+export async function assertOwnerProjectionBoundary(
+	boundary: OwnerProjectionBoundary,
+	objectId: string
+): Promise<void> {
+	assertCanonicalUuid(objectId, "owner projection object");
+	const objectFilter = `id=eq.${encodeURIComponent(objectId)}`;
+	const safeQuery =
+		`ai_illustration_objects?select=${OWNER_SAFE_OBJECT_COLUMNS}&${objectFilter}`;
+	const ownerRows = await fetchRows(
+		boundary,
+		safeQuery,
+		boundary.ownerHeaders,
+		"owner-safe illustration projection"
+	);
+	if (ownerRows.length !== 1 || ownerRows[0]?.id !== objectId) {
+		throw new Error("owner-safe illustration projection did not return the owned row");
+	}
+	const otherRows = await fetchRows(
+		boundary,
+		safeQuery,
+		boundary.otherOwnerHeaders,
+		"cross-owner safe illustration projection"
+	);
+	if (otherRows.length !== 0) {
+		throw new Error("cross-owner safe illustration projection exposed an owned row");
+	}
+
+	const sensitiveResponse = await boundary.fetch(
+		`${boundary.supabaseBase}/rest/v1/ai_illustration_objects?select=${OWNER_SENSITIVE_OBJECT_COLUMNS}&${objectFilter}`,
+		{ headers: { ...boundary.ownerHeaders, apikey: boundary.anonKey } }
+	);
+	const body: unknown = await sensitiveResponse.json();
+	if (
+		sensitiveResponse.status !== 403 ||
+		!isRecord(body) ||
+		body.code !== "42501"
+	) {
+		throw new Error(
+			`owner-sensitive illustration projection was not denied with 403/42501: ${sensitiveResponse.status}`
+		);
+	}
+}
+
+async function fetchRows(
+	boundary: S11PostgrestBoundary,
+	resourceAndQuery: string,
+	headers: Readonly<Record<string, string>>,
+	label: string
+): Promise<Record<string, unknown>[]> {
+	const requestHeaders = new Headers(headers);
+	if (!requestHeaders.has("apikey")) {
+		requestHeaders.set("apikey", boundary.anonKey);
+	}
+	const response = await boundary.fetch(
+		`${boundary.supabaseBase}/rest/v1/${resourceAndQuery}`,
+		{ headers: requestHeaders }
+	);
+	const body: unknown = await response.json();
+	if (response.status !== 200 || !Array.isArray(body) || !body.every(isRecord)) {
+		const errorCode = isRecord(body) && typeof body.code === "string"
+			? body.code
+			: "unknown";
+		throw new Error(`${label} failed: status=${response.status}, code=${errorCode}`);
+	}
+	return body;
+}
+
+function assertCanonicalUuid(value: string, label: string): void {
+	if (!UUID_PATTERN.test(value)) throw new Error(`${label} must be a canonical UUID`);
+}
+
+function headerValue(
+	headers: Readonly<Record<string, string>>,
+	name: string
+): string | undefined {
+	const entry = Object.entries(headers).find(([key]) => key.toLowerCase() === name);
+	return entry?.[1];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
