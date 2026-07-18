@@ -24,6 +24,9 @@ export default function DraftCardList({
 	function update(index: number, patch: Partial<ClientImportItemInput>): void {
 		onChange(items.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)));
 	}
+	function updateText(index: number, field: "front" | "back", value: string): void {
+		onChange(updateConceptPairText(items, index, field, value));
+	}
 	function move(index: number, offset: -1 | 1): void {
 		const target = index + offset;
 		if (target < 0 || target >= items.length) return;
@@ -62,7 +65,7 @@ export default function DraftCardList({
 							<input
 								value={item.front}
 								disabled={disabled}
-								onChange={(event) => update(index, { front: event.target.value })}
+								onChange={(event) => updateText(index, "front", event.target.value)}
 								className="mt-1 min-h-11 w-full min-w-0 rounded-lg border border-slate-300 px-3"
 							/>
 						</label>
@@ -71,7 +74,7 @@ export default function DraftCardList({
 							<input
 								value={item.back}
 								disabled={disabled}
-								onChange={(event) => update(index, { back: event.target.value })}
+								onChange={(event) => updateText(index, "back", event.target.value)}
 								className="mt-1 min-h-11 w-full min-w-0 rounded-lg border border-slate-300 px-3"
 							/>
 						</label>
@@ -135,4 +138,22 @@ export default function DraftCardList({
 			</div>
 		</section>
 	);
+}
+
+export function updateConceptPairText(
+	items: readonly ClientImportItemInput[],
+	index: number,
+	field: "front" | "back",
+	value: string
+): ClientImportItemInput[] {
+	const edited = items[index];
+	if (edited === undefined) return [...items];
+	const pairedPattern = edited.pattern === "R1" ? "W1" : "R1";
+	const pairedField = field === "front" ? "back" : "front";
+	return items.map((item, itemIndex) => {
+		if (itemIndex === index) return { ...item, [field]: value };
+		if (item.conceptId === edited.conceptId && item.pattern === pairedPattern)
+			return { ...item, [pairedField]: value };
+		return item;
+	});
 }
