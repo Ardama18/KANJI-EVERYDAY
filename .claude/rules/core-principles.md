@@ -1,47 +1,41 @@
-# 共通原則（Hapico）
+# 共通原則（KANJI-EVERYDAY）
 
-AIエージェントが `Hapico` リポジトリで実装・修正を行う際の共通ルール。
+AI エージェントが「まいにち漢字」を変更するときの常時適用ルール。詳細は `.claude/steering/` を正本とし、このファイルへ別プロジェクト固有の構成を複製しない。
 
-## 1. タスク管理
+## 実装原則
 
-- 複数ステップ作業は、実行可能な単位に分解して進める
-- 同時に進行中（`in_progress`）のタスクは1つに限定する
-- ステータス更新時は「何を完了したか」と「次に何をするか」を必ず記録する
-- 不明点が残る場合は、推測実装より先に確認する
+- `AGENTS.md` と `.claude/steering/rules-index.yaml` から対象領域の文書を選ぶ。
+- 仕様は Accepted ADR、対象 Story の requirements、story、design、plan の順で確認する。
+- 実際のバージョンと利用可能なコマンドは `frontend/package.json` を正本とする。
+- 変更は最小差分とし、既存の未関連変更を巻き戻さない。
+- Server Action では認証と所有権を検証し、RLS を最終防衛線として併用する。
+- server-only secret を Client Component やブラウザ用モジュールから参照しない。
+- DB 変更は migration、RLS、Storage、Database 型、seed、テストを一体で扱う。
+- 不具合修正では再現テストを先に追加し、受入条件とテストの対応を記録する。
+- シークレット、個人情報、認証済みデータをコード、ログ、文書、画像へ含めない。
 
-## 2. 実装方針
+## 標準品質ゲート
 
-- 変更は最小差分を原則とし、無関係なリファクタを混ぜない
-- 既存ディレクトリの設計・命名流儀を優先する
-- 新規ファイル追加前に、既存ファイル拡張で解決できるかを検討する
-- YAGNIを徹底し、未要求の抽象化・汎用化を避ける
+リポジトリルートから次を実行する。
 
-## 3. 技術品質基準
+```bash
+npm --prefix frontend run check
+```
 
-- 型安全性を優先し、`any` は原則禁止（やむを得ない場合は理由をコメントで明示）
-- Lint/Format/TypeCheck/Test を変更範囲に応じて実施する
-- 推奨コマンド（ルート実行）:
-  - `npm run check --workspaces --if-present`
-  - `npm run lint --workspaces --if-present`
-  - `npm run test --workspaces --if-present`
-  - 必要に応じて `npm run check:all`
-- テストは「壊れやすい境界」から優先して追加・更新する
+ルーティング、Server/Client 境界、環境変数、production bundling に影響する場合は追加で実行する。
 
-## 4. エラー対応原則
+```bash
+npm --prefix frontend run build
+```
 
-- 同一原因のエラーが3回続いたら一旦停止し、根本原因を再分析する
-- エラーを握りつぶさない（無条件フォールバック禁止）
-- 例外時は原因特定に必要な情報を残し、機密情報はログに出さない
+Playwright、Jest、Prisma、NestJS、AWS CDK、npm workspaces は現時点で導入されていない。存在確認なしに計画やコマンドへ含めない。
 
-## 5. エスカレーション基準（要確認）
+## 停止・確認が必要な変更
 
-- アーキテクチャ変更（責務分割の再設計、層追加）
-- 外部依存追加・更新（npmパッケージ、外部API導入）
-- 破壊的変更（既存API契約、DBスキーマ、データ構造の非互換変更）
-- 実装案が複数あり、仕様上の優先順位が確定できない場合
+- schema、migration、RLS、Storage policy、認証境界の変更
+- 既存データを削除・変換する操作
+- 外部依存、環境変数、secret、外部 API 契約、利用料金の変更
+- production deploy、remote migration、force push
+- 仕様上の優先順位を安全に決められない不一致
 
-## 6. 作業環境ルール
-
-- 一時ファイルは `tmp/` 配下を使用し、作業完了時に削除する
-- シークレットは `.env` で管理し、コード・ログ・ドキュメントに埋め込まない
-- 既存の未関連変更は巻き戻さず、今回の作業対象と分離して扱う
+詳細は `.claude/steering/implementation-flow.md` と `.claude/steering/security-standards.md` を参照する。

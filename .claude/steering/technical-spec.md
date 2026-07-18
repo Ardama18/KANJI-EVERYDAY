@@ -1,51 +1,56 @@
 # 技術設計ルール
 
-このルールファイルは、プロジェクトの技術的なアーキテクチャ設計、データフロー設計、環境設定に関するルールとガイドラインを定義します。
+## 正本と前提確認
 
-## 技術スタックの基本方針
-TypeScriptをベースとしたアプリケーション実装。アーキテクチャパターンはプロジェクトの要件と規模に応じて選択すること。
+- version / script: `frontend/package.json`
+- schema / policy: `supabase/migrations/*.sql`
+- architecture decision: Accepted ADR
+- feature contract: story の `requirements.md`
+- 実 route / module: 現在の source tree
 
-## 環境変数管理とセキュリティ
+設計文書へ存在しない package、script、service、directory を書かない。
 
-### 環境変数管理
-- 環境変数は一元管理し、型安全性を確保する仕組みを構築すること
-- `process.env` の直接参照は避け、設定管理層を通じて取得すること
-- デフォルト値の設定や必須チェックを適切に実装すること
+## 設計時に明示する境界
 
-### セキュリティ
-- `.env`ファイルはGitに含めない
-- APIキーやシークレットは必ず環境変数として管理
-- 機密情報のログ出力は禁止
-- エラーメッセージに機密情報を含めない
+1. Server Component と Client Component の分割
+2. Server Action の入力、認証、所有権、戻り値、エラー
+3. Supabase table / RLS / Storage への影響
+4. JST date と absolute timestamp の扱い
+5. SRS / queue の不変条件と再開可能性
+6. external Gemini failure 時の劣化動作
+7. unit / integration / UI verification の検証範囲
 
-## アーキテクチャ設計
+## 環境変数
 
-### アーキテクチャ設計の原則
-プロジェクトごとに適切なアーキテクチャを選択し、明確に定義すること：
+環境変数は `frontend/src/lib/env.ts` を入口とし、起動時または利用境界で fail-fast に検証する。
 
-- **明確な定義**: プロジェクトのアーキテクチャは`@.claude/steering/architecture/`配下に専用ファイルで定義
-- **責務の分離**: 各層やモジュールの責務を明確に定義し、境界を守ること
+- browser 公開可: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- server only: `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY`
 
-## パターン適用の一貫性
+server-only 値に `NEXT_PUBLIC_` を付けない。値そのものを docs、test fixture、ログへ記録しない。
 
-選択したアーキテクチャパターンに厳密に従うこと。ただし、これは設計・実装の一貫性であり、LLM出力のような実行時データの一貫性とは異なる。
+## データフロー
 
-プロジェクト固有のアーキテクチャ詳細は該当するアーキテクチャルールファイルを参照。
+- read は Server Component を優先する。
+- mutation は Server Action に集約する。
+- browser から Supabase を利用する場合は RLS 前提のユーザー権限に限定する。
+- DB row、Storage object、signed URL の owner 境界を揃える。
+- 学習 UI の一時 state と `study_sessions` の永続 state を区別する。
 
-## データフロー統一原則
+## 変更判断
 
-#### 基本原則
-1. **単一データソース**: 同じ情報は1箇所にのみ保存する
-2. **構造化データ優先**: JSON文字列ではなくパース済みオブジェクトを使用
-3. **明確な責務分離**: 各層の責務を明確に定義
+次は ADR を作成または更新する。
 
-#### データフローのベストプラクティス
-- **入力時点での検証**: データは入力層で検証し、型安全な形で内部に渡す
-- **変換の一元化**: データ変換ロジックは専用のユーティリティに集約
-- **ログの構造化**: データフローの各段階で構造化ログを出力
+- 認証 / 認可境界の変更
+- schema、RLS、Storage policy の非互換変更
+- SRS の評価規則、queue 順、日付基準の変更
+- セッション正本や更新順序の変更
+- external provider / dependency / async 実行方式の変更
+- 学習表面に答えのヒントとなる情報を出す変更
 
-## ビルドとテスト
+## 完了基準
 
-プロジェクトごとにビルドコマンドとテスト実行方法を定義。
-
-品質チェックは実装完了時に必須。
+- requirement と implementation の traceability が説明できる。
+- error / empty / pending / retry / unauthorized の経路を検討している。
+- `npm run check` を通し、必要に応じて `npm run build` と実 UI を確認している。
+- DB 変更は policy / type / seed / tests を含めて整合している。

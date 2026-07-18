@@ -1,206 +1,65 @@
 ---
-id: [関連ストーリーID]  # 例: S-34
-feature: [機能名]
-type: adr
-version: 1.0.0
-created: [YYYY-MM-DD]
-based_on: specs/stories/[STORY_ID]-[title]/requirements.md
+id: ADR-[NNN]
+title: [infrastructure-decision]
+status: Proposed
+date: [YYYY-MM-DD]
+feature: infrastructure
+related_stories:
+  - S-[NN]-[story-title]
 ---
 
-# ADR [通し番号]: [タイトル]
-# ファイル名: [通し番号]-[kebab-case-title].md (例: 007-multi-az-deployment.md)
-
-## ステータス
-
-[Proposed | Accepted | Deprecated | Superseded]
+# ADR-[NNN]: [インフラ判断]
 
 ## コンテキスト
 
-[AWS Well-Architected Framework 5本柱の観点から課題を記述]
+[Vercel、Supabase、Gemini、環境変数、監視、migration 運用のどの判断が必要か]
 
-### 運用の優秀性
-[運用面の課題、自動化要件、監視要件]
+## 現行前提
 
-### セキュリティ
-[セキュリティ要件、コンプライアンス要件、暗号化要件]
+- Web hosting: Vercel
+- Auth / Database / Storage: Supabase
+- Server execution: Next.js Server Components / Server Actions
+- AI: Gemini REST API
+- AWS CDK は現行構成に含まれない
 
-### 信頼性
-[可用性要件、RPO/RTO要件、バックアップ要件]
+## 決定ドライバー
 
-### パフォーマンス効率
-[スループット要件、レイテンシ要件、スケーラビリティ要件]
+- セキュリティとユーザーデータ分離
+- deploy / migration の順序と復旧性
+- preview / production の環境分離
+- 可観測性、コスト、運用負荷
 
-### コスト最適化
-[予算制約、コスト削減目標、リソース最適化要件]
+## 検討案
 
-## 決定事項
-
-[選択したAWSサービス・アーキテクチャパターンを明記]
-
-## 根拠
-
-### 検討した選択肢
-
-#### 案A: [サービス名・パターン名]
-- **概要**: [1文で説明]
-- **利点**:
-  - [Well-Architectedの観点から評価]
-  - コスト: $XX/月
-  - スケーラビリティ: XX req/s
-  - セキュリティ: [評価]
-  - 運用負荷: [評価]
-- **欠点**:
-  - [トレードオフを明記]
-  - [制約事項]
-- **実装工数**: X日
-
-#### 案B: [サービス名・パターン名]
-- **概要**: [1文で説明]
-- **利点**:
-  - [同様に記載]
-- **欠点**:
-  - [同様に記載]
-- **実装工数**: X日
-
-#### 案C: [サービス名・パターン名]
-- **概要**: [1文で説明]
-- **利点**:
-  - [同様に記載]
-- **欠点**:
-  - [同様に記載]
-- **実装工数**: X日
-
-### 比較マトリクス
-
-| 評価軸 | 案A | 案B | 案C |
-|--------|-----|-----|-----|
-| 月額コスト | $500 | $800 | $300 |
-| 最大スループット | 1000 req/s | 5000 req/s | 500 req/s |
-| 運用負荷 | 低 | 中 | 高 |
-| セキュリティ | 高 | 高 | 中 |
-| スケーラビリティ | 自動 | 手動 | 制限あり |
-| 実装工数 | 3日 | 5日 | 2日 |
+| 案 | 概要 | 利点 | 欠点 | コスト・運用 |
+|---|---|---|---|---|
+| A | [案] | [利点] | [欠点] | [影響] |
+| B | [案] | [利点] | [欠点] | [影響] |
 
 ## 決定
 
-案[X]を選択。
+[採用案と理由]
 
-**理由**:
-[AWS Well-Architected Frameworkの観点から、なぜこの案が最適かを2-3文で説明]
+## セキュリティ・データ境界
 
-例：
-- 運用の優秀性: 自動スケーリングにより運用負荷を最小化
-- セキュリティ: KMS暗号化とIAM最小権限により高いセキュリティを実現
-- 信頼性: Multi-AZ配置により99.99%の可用性を保証
-- パフォーマンス効率: 要件の1000 req/sを十分に満たす
-- コスト最適化: 月額$500で予算内に収まる
+- environment / secret: [公開・server-only の区別]
+- Auth / RLS / Storage: [影響]
+- 個人情報・ログ: [方針]
+- service role: [限定用途と所有権確認]
+
+## Rollout / Rollback
+
+- migration と deploy の順序: [説明]
+- preview 検証: [説明]
+- rollback または forward-fix: [説明]
+
+## 検証・監視
+
+- static / local integration / preview / production canary: [項目]
+- alert / log / cost observation: [項目]
 
 ## 影響
 
-### ポジティブな影響
-
-- [具体的なメリット]
-- 例: 自動スケーリングにより運用負荷が50%削減
-- 例: Multi-AZ配置によりRTO 1分以内を達成
-
-### ネガティブな影響（受け入れるトレードオフ）
-
-- [具体的なデメリット]
-- 例: 初期構築コストが従来比20%増加
-- 例: 新技術習得に2週間の学習期間が必要
-
-### 中立的な影響
-
-- [変化する事項]
-- 例: デプロイ手順がCDKベースに変更
-- 例: 監視ツールがCloudWatchに統一
-
-## 実装への指針
-
-[原則的な方向性のみ記載。具体的な実装手順はInfrastructure Design Docへ]
-
-### アーキテクチャ原則
-- [例: VPC設計: マルチAZ配置、プライベートサブネット優先]
-- [例: コンピューティング: Lambda優先、長時間処理はECS Fargate]
-
-### セキュリティ原則
-- [例: IAM設計: 最小権限の原則、インラインポリシー禁止]
-- [例: データ暗号化: 保管時・転送時ともにKMS使用]
-
-### 運用原則
-- [例: 監視: CloudWatch Alarms、重要メトリクスのアラート設定]
-- [例: ログ: CloudWatch Logs、本番環境は90日保持]
-
-### コスト原則
-- [例: 開発環境: 夜間自動停止、小スペック]
-- [例: 本番環境: Reserved Instances検討（稼働率 > 70%）]
-
-## セキュリティ考慮事項
-
-### データ保護
-- **保管時暗号化**: [S3: SSE-KMS, RDS: KMS, DynamoDB: KMS]
-- **転送時暗号化**: [TLS 1.2以上、ALBでHTTPS強制]
-
-### アクセス制御
-- **IAMロール・ポリシー**: [最小権限、サービスごとに分離]
-- **Security Group**: [必要最小限のポート開放、0.0.0.0/0禁止]
-
-### 監査・ログ
-- **CloudTrail**: [全APIアクション記録、S3に保存]
-- **VPC Flow Logs**: [ネットワークトラフィック記録]
-
-### コンプライアンス
-- **GDPR**: [該当する場合の対応]
-- **HIPAA**: [該当する場合の対応]
-
-## コスト見積もり
-
-### 月間コスト（本番環境、想定トラフィック: XX req/s）
-
-```yaml
-コンピューティング:
-  [サービス名]:
-    - [詳細]: $XXX
-  合計: $XXX/月
-
-データベース:
-  [サービス名]:
-    - [詳細]: $XXX
-  合計: $XXX/月
-
-ネットワーク:
-  [サービス名]:
-    - [詳細]: $XXX
-  合計: $XXX/月
-
-ストレージ:
-  [サービス名]:
-    - [詳細]: $XXX
-  合計: $XXX/月
-
-合計: $XXX/月
-```
-
-### 環境別コスト
-```yaml
-本番環境: $XXX/月
-ステージング環境: $XXX/月
-開発環境: $XXX/月
-年間総コスト: $XXX/年
-```
-
-## 参考資料
-
-[最新技術情報の調査で参照した情報源を記載]
-
-- [AWS Well-Architected Framework]: https://aws.amazon.com/architecture/well-architected/
-  - 該当する柱と関連セクション
-- [AWS公式ドキュメント URL]: [簡潔な説明]
-- [AWSブログ・事例 URL]: [参考にしたベストプラクティス]
-- [技術記事・ブログ URL]: [ベストプラクティス情報]
-
-## 関連情報
-
-- [関連するADR]: specs/adr/[通し番号]-[title].md
-- [関連するDesign Doc]: specs/stories/[STORY_ID]-[title]/design.md
-- [関連する要件定義書]: specs/stories/[STORY_ID]-[title]/requirements.md
+- ポジティブ: [影響]
+- トレードオフ: [影響]
+- 後続作業: [Story / Issue]

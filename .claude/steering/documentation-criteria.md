@@ -1,217 +1,109 @@
 # ドキュメント作成基準
 
-## 作成判定マトリクス
+文書は量ではなく、将来の実装者が scope、contract、判断理由、検証方法を再現できることを目的とする。配置は `story-structure.md` に従う。
 
-| 条件 | 必要ドキュメント | 作成順序 |
-|-----|--------------|---------|
-| 新機能追加 | 要件定義書 → [ADR] → Design Doc → 作業計画書 | 要件定義書承認後 |
-| ADR条件該当（下記参照） | ADR → Design Doc → 作業計画書 | 即座に開始 |
-| 6ファイル以上 | ADR → Design Doc → 作業計画書（必須） | 即座に開始 |
-| 3-5ファイル | Design Doc → 作業計画書（推奨） | 即座に開始 |
-| 1-2ファイル | なし | 直接実装 |
+## 作成判定
 
-## ADR作成条件（いずれか該当で必須）
+| 変更 | 必須成果物 |
+|---|---|
+| 小さな bug / 1〜2 file の局所変更 | 既存 story / issue と回帰 test。必要なら簡易 plan |
+| 3〜5 file、複数境界 | story / requirements の確認、design、plan |
+| 6 file 以上または新機能 | story、requirements、design、plan |
+| schema / RLS / auth / SRS contract / external provider の判断変更 | 上記 + ADR |
+| 既存 Accepted ADR の範囲内の実装 | 新規 ADR は不要。該当 ADR を参照 |
 
-### 1. 型システム変更
-- **3階層以上のネスト型追加**: `type A = { b: { c: { d: T } } }`
-  - 判断理由: 深いネストは複雑性が高く、影響範囲が広い
-- **3箇所以上で使用される型の変更・削除**
-  - 判断理由: 複数箇所への影響は慎重な判断が必要
-- **型の責務変更**（例: DTO→Entity）
-  - 判断理由: 概念モデルの変更は設計思想に関わる
+file 数は目安。data loss、cross-user access、secret、外部費用、学習 contract に影響する場合は文書レベルを引き上げる。
 
-### 2. データフロー変更
-- **保存場所変更**（DB→ファイル、メモリ→キャッシュ）
-- **3ステップ以上の処理順序変更**
-  - 例: 「入力→検証→保存」から「入力→保存→非同期検証」
-- **データ受け渡し方法変更**（props→Context、直接参照→イベント）
+## Epic
 
-### 3. アーキテクチャ変更
-- レイヤー追加・責務変更・コンポーネント再配置
+複数 story に共有される次を記載する。
 
-### 4. 外部依存変更
-- ライブラリ・フレームワーク・外部API導入・置換
+- 背景、目的、対象 user
+- in scope / out of scope
+- domain model と共通 architecture
+- security / performance / UX の横断要件
+- story 一覧と依存順
 
-### 5. 複雑な実装ロジック（規模に関わらず）
-- 3つ以上の状態を管理
-- 5つ以上の非同期処理の連携
+個別実装手順や日々の進捗は書かない。
 
-## 各ドキュメントの詳細定義
+## Story
 
-### エピック
+- user value と解決する課題
+- in scope / out of scope
+- 前提と依存
+- 観測可能な acceptance criteria
+- related epic / ADR
 
-**目的**: 1-3ヶ月規模の機能群の背景・目的・スコープを定義
+1 story は独立して検証可能な user value を持つ粒度にする。
 
-**含むもの**:
-- 背景・課題（2-3文）
-- 目的・KPI（測定可能な目標値）
-- スコープ（やること/やらないこと）
-- 対象ユーザー（1-2行）
-- 主なストーリー一覧（リリース順）
+## Requirements
 
-**含まないもの**:
-- 技術実装詳細（→Design Doc）
-- タスク分解（→作業計画書）
-- 個別機能の受入条件（→ストーリー）
+- Must / Should / Could / Won't
+- actor、trigger、input、output、error / empty / retry
+- security / privacy / performance / accessibility
+- data retention、JST boundary、external failure（該当時）
+- requirement ID と測定可能な acceptance criteria
+- MVP と Future の境界
 
-**作成時間目安**: 10分
+solution の詳細は Design へ分離する。曖昧な「適切に」「必要に応じて」「高速に」は判定値または具体的な挙動へ変える。
 
-### ストーリー
+## ADR
 
-**目的**: 1-2週間（リリース単位）の機能のユーザー価値と受入条件を定義
+### 作成条件
 
-**含むもの**:
-- ユーザーストーリー（1文: 「{誰が}として、{何を}して、{なぜ}したい」）
-- 解決する課題（2-3行）
-- スコープ（やること/やらないこと）
-- 受入条件（3-5個、検証可能な形式: 「○○すると、××が表示される」）
+- Supabase client / auth / owner boundary の変更
+- schema、RLS、Storage policy の構造的・非互換変更
+- SRS algorithm、JST date、queue / session 正本の変更
+- Server Action 以外の API / backend 境界の導入
+- Gemini provider、SDK、async job 基盤、公開 Storage の導入
+- package / framework の重要な追加・置換
 
-**含まないもの**:
-- 技術実装詳細（→Design Doc）
-- タスク分解（→作業計画書）
-- 背景・KPI（→エピック）
+### 内容
 
-**作成時間目安**: 5-10分
+- status、context、decision
+- 現実的な選択肢と比較（数合わせの3案は不要）
+- decision reason と trade-off
+- positive / negative impact
+- migration / security / test strategy
+- supersedes / related story
 
-**粒度判断基準**:
-- ✅ 適切: 1-2週間で完了し、ユーザーに価値を提供できる
-- ❌ 大きすぎ: 「債務者管理機能」→ 複数ストーリーに分割
-- ❌ 小さすぎ: 「バリデーション追加」→ 親ストーリーに統合
+既存 ADR を変更する場合は履歴を消さず、Superseded または新 ADR で関係を明示する。現在は ADR-004 の番号重複があるため feature と filename も識別に使う。
 
-### 要件定義書
+## Design Document
 
-**目的**: ビジネス要件とユーザー価値を定義
+最低限次を含める。
 
-**含むもの**:
-- ビジネス要件とユーザー価値
-- 成功指標とKPI（測定可能な形式）
-- ユーザーストーリーとユースケース
-- MoSCoW法による優先順位（Must/Should/Could/Won't）
-- MVPとFutureフェーズの分離
-- ユーザージャーニー図（必須）
-- スコープ境界図（必須）
+1. 現行調査と再利用する code
+2. scope と non-goal
+3. 選択した実装 approach と責務境界
+4. Server / Client / Action / Supabase / external の data flow
+5. interface / type / schema / state transition
+6. auth、owner、RLS、secret、failure handling
+7. impact map（直接 / 間接 / 非影響）
+8. requirement ごとの test strategy（L1 / L2 / L3）
+9. rollout、migration、rollback / forward-fix（該当時）
+10. unresolved question
 
-**含まないもの**:
-- 技術実装詳細（→Design Doc）
-- 技術選定理由（→ADR）
-- **実装フェーズ**（→作業計画書）
-- **タスク分解**（→作業計画書）
+diagram は3つ以上の component / state / step の関係を文章より明確にできる場合に使う。形式だけの図を必須にしない。
 
-### ADR（Architecture Decision Record）
+## Plan
 
-**目的**: 技術的決定の理由と背景を記録
+`plan.md` は実装の単一情報源とし、依存順の phase に分ける。
 
-**含むもの**:
-- 決定事項（何を選択したか）
-- 根拠（なぜその選択をしたか）
-- 選択肢の比較（最低3案）とトレードオフ
-- アーキテクチャへの影響
-- 実装への原則的な指針（例:「依存性注入を使用」）
+各 phase に次を記載する。
 
-**含まないもの**:
-- 実装スケジュール、期間（→作業計画書）
-- 実装手順の詳細（→Design Doc）
-- 具体的なコード例（→Design Doc）
-- 担当者の割り当て（→作業計画書）
+- 対象 requirement / design section
+- 変更 file と変更内容
+- 先行 dependency
+- implementation の完了条件
+- test / verification command と期待結果
+- security / data / external risk
 
-### Design Document
+最後に全体の `npm run check`、必要な build、UI / Supabase 検証を置く。存在しない tool や script は書かない。新規個別 `tasks/` file は作らない。
 
-**目的**: 技術的実装方法を詳細定義
+## 更新規則
 
-**含むもの**:
-- **既存コードベース分析**（必須）
-  - 実装パスマッピング（既存と新規の両方を記載）
-  - 統合点の明確化（新規実装でも既存との接続点を記載）
-- 技術的実装アプローチ（垂直/水平/ハイブリッド）
-- **技術的依存関係と実装制約**（実装の必要順序）
-- インターフェース定義と型定義
-- データフローとコンポーネント設計
-- **統合ポイントでのE2E確認手順**
-- **受入条件（測定可能な形式）**
-- 変更影響マップ（直接影響/間接影響/波及なしを明記）
-- 統合点の完全な列挙
-- データ契約の明確化
-- **合意事項チェックリスト**（関係者との合意内容）
-- **前提となるADR**（共通ADR含む）
-
-**必須構造要素**:
-```yaml
-変更影響マップ:
-  変更対象: [コンポーネント/機能]
-  直接影響: [ファイル/関数]
-  間接影響: [データ形式/処理時間]
-  波及なし: [影響を受けない機能]
-
-インターフェース変更マトリクス:
-  既存: [メソッド名]
-  新規: [メソッド名]
-  変換必要性: [あり/なし]
-  互換性確保: [方法]
-```
-
-**含まないもの**:
-- なぜその技術を選んだか（→ADR参照）
-- いつ実装するか、期間（→作業計画書）
-- 誰が実装するか（→作業計画書）
-
-### 作業計画書
-
-**目的**: 実装タスクの管理と進捗追跡
-
-**含むもの**:
-- **フェーズ構成**（Design Docの技術的依存関係を基に作成）
-- タスク分解と依存関係（最大2階層まで）
-- スケジュールと期間見積もり
-- **Design DocのE2E確認手順を各フェーズに配置**
-- **最終フェーズに品質保証を含む**（必須）
-- 進捗記録（チェックボックス形式）
-
-**含まないもの**:
-- 技術的な根拠（→ADR）
-- 設計の詳細（→Design Doc）
-- 技術的依存関係の決定（→Design Doc）
-
-**タスク完了定義の3要素**:
-1. **実装完了**: コードが動作する
-2. **品質完了**: テスト・型チェック・リントがパス
-3. **統合完了**: 他コンポーネントとの連携確認
-
-## 作成プロセス
-
-1. **問題分析**: 変更規模判定、ADR条件確認
-2. **ADR選択肢検討**（ADR時のみ）: 3案以上比較、トレードオフ明記
-3. **作成**: テンプレート使用、測定可能な条件記載
-4. **承認**: レビュー後「Accepted」で実装可
-
-## 保存場所
-
-ドキュメントの保存場所と命名規則は `.claude/rules/naming-convention.md` の「7. 設計ドキュメント」を参照。
-
-**Git管理対象:**
-- エピック: `specs/epics/{EPIC_ID}-{title}/epic.md`
-- ストーリー: `specs/stories/{STORY_ID}-{title}/`
-
-## ADRステータス
-`Proposed` → `Accepted` → `Deprecated`/`Superseded`/`Rejected`
-
-## AI自動化ルール
-- 5ファイル以上: ADR作成提案
-- 型・データフロー変更検出: ADR必須化
-- 既存ADR確認してから実装
-
-## 図表作成要件
-
-各ドキュメントで必須の図表（mermaid記法使用）：
-
-| ドキュメント | 必須図表 | 目的 |
-|------------|---------|-----|
-| 要件定義書 | ユーザージャーニー図、スコープ境界図 | ユーザー体験と範囲の明確化 |
-| ADR | 選択肢比較図（必要時） | トレードオフの視覚化 |
-| Design Doc | アーキテクチャ図、データフロー図 | 技術構造の理解 |
-| 作業計画書 | フェーズ構成図、タスク依存関係図 | 実装順序の明確化 |
-
-## 共通ADRとの関係性
-1. **作成時**: 共通技術領域（ログ、エラーハンドリング、非同期処理等）を特定し、既存共通ADRを参照
-2. **不足時**: 必要な共通ADRが存在しない場合は作成を検討
-3. **Design Doc**: 「前提となるADR」セクションで共通ADRを明記
-4. **準拠確認**: 設計が共通ADRの決定事項と整合しているかを検証
+- requirement 変更は story → requirements → design → plan → tests の順で同期する。
+- 実装中に前提が崩れた場合は plan だけを黙って変更せず、上流文書へ戻す。
+- code と docs の不一致を見つけたら、どちらが正本かを優先順位で判断し差分を記録する。
+- 実装完了時に status、test result、未検証範囲を更新する。
