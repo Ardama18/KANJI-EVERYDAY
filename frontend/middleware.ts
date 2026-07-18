@@ -7,7 +7,6 @@ export const GUEST_ONLY_ROUTES = ["/login", "/signup"] as const;
 export const PUBLIC_ROUTES = ["/"] as const;
 export const EXCLUDED_ROUTE_PREFIXES = ["/_next/static", "/_next/image"] as const;
 export const EXCLUDED_ROUTES = ["/favicon.ico"] as const;
-export const MIDDLEWARE_MATCHER = "/((?!_next/static|_next/image|favicon.ico).*)";
 
 const isRoutePrefixMatch = (pathname: string, prefixes: readonly string[]) =>
 	prefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
@@ -60,5 +59,6 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-	matcher: [MIDDLEWARE_MATCHER],
+	// Next.js statically analyzes this value and does not resolve identifiers here.
+	matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };

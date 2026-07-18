@@ -395,20 +395,39 @@ const requireSessionOwner = async (
 
 const fetchDeckCardsWithReviewStates = async (
 	supabase: SupabaseClient,
-	deckId: string
+	deckId: string,
+	userId: string
 ): Promise<DeckCardWithReviewRows[]> => {
-	const { data, error } = await supabase
-		.from("deck_cards")
-		.select(
-			"card_id, review_states!left(user_id, card_id, level, due_date, last_rating, retry_today_count, last_reviewed_at)"
-		)
-		.eq("deck_id", deckId);
+	const { data, error } = await supabase.from("deck_cards").select("card_id").eq("deck_id", deckId);
 
 	if (error) {
 		throw new Error(`Failed to fetch deck cards: ${error.message}`);
 	}
 
-	return (data ?? []) as DeckCardWithReviewRows[];
+	const deckCards = (data ?? []) as Pick<DeckCardWithReviewRows, "card_id">[];
+	const cardIds = [...new Set(deckCards.map((row) => row.card_id))];
+	if (cardIds.length === 0) {
+		return [];
+	}
+
+	const { data: reviewData, error: reviewError } = await supabase
+		.from("review_states")
+		.select("user_id, card_id, level, due_date, last_rating, retry_today_count, last_reviewed_at")
+		.eq("user_id", userId)
+		.in("card_id", cardIds);
+
+	if (reviewError) {
+		throw new Error(`Failed to fetch review states: ${reviewError.message}`);
+	}
+
+	const reviewStatesByCardId = new Map(
+		((reviewData ?? []) as ReviewStateRow[]).map((row) => [row.card_id, row] as const)
+	);
+
+	return deckCards.map((row) => ({
+		...row,
+		review_states: reviewStatesByCardId.get(row.card_id) ?? null,
+	}));
 };
 
 const fetchReviewStateForCard = async (
@@ -467,7 +486,11 @@ const fetchLatestIllustrationByKey = async (
 		throw new Error(`Failed to fetch illustration: ${error.message}`);
 	}
 
-	return (data as IllustrationRow | null) ?? null;
+	const row = (data as IllustrationRow | null) ?? null;
+	if (row !== null && row.storage_path !== null && !row.storage_path.startsWith(`${userId}/`)) {
+		return { ...row, storage_path: null };
+	}
+	return row;
 };
 
 const countRemainingUniqueCards = (queue: SessionQueue): number => {
@@ -480,7 +503,7 @@ const countReviewedUniqueCards = async (
 	deckId: string,
 	sessionStartedAt: string
 ): Promise<number> => {
-	const rows = await fetchDeckCardsWithReviewStates(supabase, deckId);
+	const rows = await fetchDeckCardsWithReviewStates(supabase, deckId, userId);
 	const startedAtMs = Date.parse(sessionStartedAt);
 	const reviewedCardIds = new Set<string>();
 
@@ -736,7 +759,7 @@ export async function startStudySession(deckId: string): Promise<StartStudySessi
 	}
 
 	const today = getTodayJST();
-	const deckCardRows = await fetchDeckCardsWithReviewStates(supabase, deck.id);
+	const deckCardRows = await fetchDeckCardsWithReviewStates(supabase, deck.id, userId);
 	const queue = buildSessionQueue(
 		deckCardRows.map((row) => ({
 			cardId: row.card_id,

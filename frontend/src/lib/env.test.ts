@@ -1,122 +1,66 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
-import { getAiPreviewHmacSecret, getEnvConfig } from "./env";
+import { getOpenAiCardGenerationConfig, getPublicEnvConfig, isAiCardImportEnabled } from "./env";
 
-const REQUIRED_KEYS = [
+const keys = [
+	"AI_CARD_IMPORT_ENABLED",
+	"OPENAI_API_KEY",
+	"OPENAI_CARD_GENERATION_MODEL",
+	"OPENAI_MODERATION_MODEL",
+	"OPENAI_CARD_IMAGE_DETAIL",
+	"OPENAI_CARD_GENERATION_TIMEOUT_MS",
+	"OPENAI_MODERATION_TIMEOUT_MS",
 	"NEXT_PUBLIC_SUPABASE_URL",
 	"NEXT_PUBLIC_SUPABASE_ANON_KEY",
-	"SUPABASE_SERVICE_ROLE_KEY",
 ] as const;
-const OPTIONAL_KEYS = ["GEMINI_API_KEY", "AI_PREVIEW_HMAC_SECRET"] as const;
-const TEST_KEYS = [...REQUIRED_KEYS, ...OPTIONAL_KEYS] as const;
-
-const SNAPSHOT: Partial<Record<(typeof TEST_KEYS)[number], string>> = {};
-let nodeEnvSnapshot: string | undefined;
-type MutableProcessEnv = { [key: string]: string | undefined };
-const processEnv = process.env as MutableProcessEnv;
-
-const BASELINE_ENV: Record<string, string> = {
-	NEXT_PUBLIC_SUPABASE_URL: "https://example.supabase.co",
-	NEXT_PUBLIC_SUPABASE_ANON_KEY: "anon-key",
-	SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
-};
-
-beforeEach(() => {
-	for (const key of TEST_KEYS) {
-		SNAPSHOT[key] = process.env[key];
-		delete process.env[key];
-	}
-	nodeEnvSnapshot = processEnv.NODE_ENV;
-	processEnv.NODE_ENV = undefined;
-});
 
 afterEach(() => {
-	processEnv.NODE_ENV = nodeEnvSnapshot;
-	for (const key of TEST_KEYS) {
-		if (SNAPSHOT[key] === undefined) {
-			delete process.env[key];
-		} else {
-			process.env[key] = SNAPSHOT[key];
-		}
-	}
-	for (const key of TEST_KEYS) {
-		delete SNAPSHOT[key];
-	}
-	nodeEnvSnapshot = undefined;
+	for (const key of keys) Reflect.deleteProperty(process.env, key);
 });
 
-describe("getEnvConfig", () => {
-	it("NEXT_PUBLIC_SUPABASE_URL が未設定のとき例外を投げる", () => {
-		process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = BASELINE_ENV.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-		process.env.SUPABASE_SERVICE_ROLE_KEY = BASELINE_ENV.SUPABASE_SERVICE_ROLE_KEY;
-
-		expect(() => getEnvConfig()).toThrowError(
-			"Missing required environment variables: NEXT_PUBLIC_SUPABASE_URL"
-		);
-	});
-
-	it("NEXT_PUBLIC_SUPABASE_ANON_KEY が未設定のとき例外を投げる", () => {
-		process.env.NEXT_PUBLIC_SUPABASE_URL = BASELINE_ENV.NEXT_PUBLIC_SUPABASE_URL;
-		process.env.SUPABASE_SERVICE_ROLE_KEY = BASELINE_ENV.SUPABASE_SERVICE_ROLE_KEY;
-
-		expect(() => getEnvConfig()).toThrowError(
-			"Missing required environment variables: NEXT_PUBLIC_SUPABASE_ANON_KEY"
-		);
-	});
-
-	it("SUPABASE_SERVICE_ROLE_KEY が未設定のとき例外を投げる", () => {
-		process.env.NEXT_PUBLIC_SUPABASE_URL = BASELINE_ENV.NEXT_PUBLIC_SUPABASE_URL;
-		process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = BASELINE_ENV.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-		expect(() => getEnvConfig()).toThrowError(
-			"Missing required environment variables: SUPABASE_SERVICE_ROLE_KEY"
-		);
-	});
-
-	it("NODE_ENV=test でも SUPABASE_SERVICE_ROLE_KEY 未設定は例外になる", () => {
-		processEnv.NODE_ENV = "test";
-		process.env.NEXT_PUBLIC_SUPABASE_URL = BASELINE_ENV.NEXT_PUBLIC_SUPABASE_URL;
-		process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = BASELINE_ENV.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-		expect(() => getEnvConfig()).toThrowError(
-			"Missing required environment variables: SUPABASE_SERVICE_ROLE_KEY"
-		);
-	});
-
-	it("不足キー一覧を不足順で一度に返す", () => {
-		expect(() => getEnvConfig()).toThrowError(
-			"Missing required environment variables: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY"
-		);
-	});
-
-	it("全ての必須キーがある場合に設定オブジェクトを返す", () => {
-		Object.assign(process.env, BASELINE_ENV);
-
-		const config = getEnvConfig();
-
-		expect(config).toEqual({
-			supabaseUrl: BASELINE_ENV.NEXT_PUBLIC_SUPABASE_URL,
-			supabaseAnonKey: BASELINE_ENV.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-			supabaseServiceRoleKey: BASELINE_ENV.SUPABASE_SERVICE_ROLE_KEY,
-			geminiApiKey: undefined,
-			nodeEnv: process.env.NODE_ENV,
+describe("S-12 typed server config", () => {
+	it("reads browser Supabase values through statically analyzable public env properties", () => {
+		process.env.NEXT_PUBLIC_SUPABASE_URL = " http://127.0.0.1:54321 ";
+		process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "public-key";
+		expect(getPublicEnvConfig()).toEqual({
+			supabaseUrl: " http://127.0.0.1:54321 ",
+			supabaseAnonKey: "public-key",
 		});
 	});
 
-	it("GEMINI_API_KEY が未設定でも例外を投げずに undefined を返す", () => {
-		Object.assign(process.env, BASELINE_ENV);
-
-		const config = getEnvConfig();
-
-		expect(Object.hasOwn(config, "geminiApiKey")).toBe(true);
-		expect(config.geminiApiKey).toBeUndefined();
+	it("enables only trimmed exact true", () => {
+		for (const value of [undefined, "", "false", "TRUE", "1"]) {
+			if (value === undefined) Reflect.deleteProperty(process.env, "AI_CARD_IMPORT_ENABLED");
+			else process.env.AI_CARD_IMPORT_ENABLED = value;
+			expect(isAiCardImportEnabled()).toBe(false);
+		}
+		process.env.AI_CARD_IMPORT_ENABLED = " true ";
+		expect(isAiCardImportEnabled()).toBe(true);
 	});
 
-	it("AI_PREVIEW_HMAC_SECRET をtrimし、missing/blankはundefinedとして安全に扱う", () => {
-		expect(getAiPreviewHmacSecret()).toBeUndefined();
-		process.env.AI_PREVIEW_HMAC_SECRET = "   ";
-		expect(getAiPreviewHmacSecret()).toBeUndefined();
-		process.env.AI_PREVIEW_HMAC_SECRET = "  preview-secret  ";
-		expect(getAiPreviewHmacSecret()).toBe("preview-secret");
+	it("returns the bounded server-only OpenAI defaults", () => {
+		process.env.OPENAI_API_KEY = "secret";
+		expect(getOpenAiCardGenerationConfig()).toMatchObject({
+			model: "gpt-5.6-luna",
+			moderationModel: "omni-moderation-latest",
+			imageDetail: "high",
+			generationTimeoutMs: 60_000,
+			moderationTimeoutMs: 10_000,
+		});
+	});
+
+	it("fails closed for invalid model, detail, moderation, or timeout", () => {
+		process.env.OPENAI_API_KEY = "secret";
+		for (const [key, value] of [
+			["OPENAI_CARD_GENERATION_MODEL", "bad model"],
+			["OPENAI_MODERATION_MODEL", "other"],
+			["OPENAI_CARD_IMAGE_DETAIL", "original"],
+			["OPENAI_CARD_GENERATION_TIMEOUT_MS", "4999"],
+			["OPENAI_MODERATION_TIMEOUT_MS", "30001"],
+		] as const) {
+			process.env[key] = value;
+			expect(getOpenAiCardGenerationConfig()).toBeUndefined();
+			Reflect.deleteProperty(process.env, key);
+		}
 	});
 });

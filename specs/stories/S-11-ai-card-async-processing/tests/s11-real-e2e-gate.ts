@@ -216,6 +216,7 @@ const commit = await fetchApp(ownerA, "/api/ai/imports/commit", {
 		importRequestHash,
 		cardReservationKey,
 		previewToken,
+		confirmedWarnings: true,
 		request,
 	}),
 });
@@ -236,6 +237,7 @@ const retryCommit = await fetchApp(ownerA, "/api/ai/imports/commit", {
 		importRequestHash,
 		cardReservationKey,
 		previewToken,
+		confirmedWarnings: true,
 		request,
 	}),
 });
@@ -293,6 +295,7 @@ const terminalRetry = await fetchApp(ownerA, "/api/ai/imports/commit", {
 		importRequestHash,
 		cardReservationKey,
 		previewToken,
+		confirmedWarnings: true,
 		request,
 	}),
 });
@@ -471,6 +474,7 @@ async function runProviderRuntimeScenario(
 			importRequestHash: requestHash,
 			cardReservationKey: reservationKey,
 			previewToken: token,
+			confirmedWarnings: true,
 			request: scenarioRequest,
 		}),
 	});
@@ -712,6 +716,7 @@ async function assertCrossOwnerUploadCommitDenied(uploadId: string, id: string):
 			importRequestHash: requestHash,
 			cardReservationKey: reservationKey,
 			previewToken: token,
+			confirmedWarnings: true,
 			request: crossOwnerRequest,
 		}),
 	});

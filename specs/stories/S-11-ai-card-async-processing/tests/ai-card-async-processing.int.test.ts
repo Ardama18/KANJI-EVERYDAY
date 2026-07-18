@@ -148,6 +148,7 @@ vi.mock("@/lib/supabase/server", () => ({
 }));
 
 beforeEach(() => {
+	process.env.AI_CARD_IMPORT_ENABLED = "true";
 	routeBoundary.userId = OWNER_ID;
 	routeBoundary.rpc.mockReset();
 	routeBoundary.from.mockReset();
@@ -218,6 +219,7 @@ describe("S-11 commit and queue integration", () => {
 					importRequestHash,
 					cardReservationKey,
 					previewToken,
+					confirmedWarnings: true,
 					request,
 				}),
 			})
@@ -801,6 +803,7 @@ describe("S-11 commit and queue integration", () => {
 				raw_storage_path: rawPath,
 				mime_type: "image/png",
 				byte_size: png.byteLength,
+				usage_scope: "generation_source",
 			},
 			error: null,
 		});
@@ -1091,7 +1094,8 @@ describe("S-11 commit and queue integration", () => {
 			["blank-secret", "   "],
 		] as const) {
 			const request = await validCommitRequest(suffix);
-			if (configuredSecret === undefined) delete process.env.AI_PREVIEW_HMAC_SECRET;
+			if (configuredSecret === undefined)
+				Reflect.deleteProperty(process.env, "AI_PREVIEW_HMAC_SECRET");
 			else process.env.AI_PREVIEW_HMAC_SECRET = configuredSecret;
 			const response = await POST(request);
 			expect(response.status).toBe(500);
@@ -3593,6 +3597,7 @@ describe("S-11 reviewer regression boundaries", () => {
 				raw_storage_path: rawPath,
 				mime_type: "image/png",
 				byte_size: input.byteLength,
+				usage_scope: "generation_source",
 			},
 			error: null,
 		});
@@ -3655,6 +3660,7 @@ describe("S-11 reviewer regression boundaries", () => {
 				raw_storage_path: rawPath,
 				mime_type: "image/png",
 				byte_size: png.byteLength,
+				usage_scope: "generation_source",
 			},
 			error: null,
 		});
@@ -3742,6 +3748,7 @@ describe("S-11 reviewer regression boundaries", () => {
 				raw_storage_path: rawPath,
 				mime_type: "image/png",
 				byte_size: 1,
+				usage_scope: "generation_source",
 			},
 			error: null,
 		});
@@ -4383,6 +4390,7 @@ async function validCommitRequest(suffix: string): Promise<Request> {
 			importRequestHash,
 			cardReservationKey,
 			previewToken,
+			confirmedWarnings: true,
 			request,
 		}),
 	});
