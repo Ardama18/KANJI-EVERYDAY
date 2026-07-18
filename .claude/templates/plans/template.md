@@ -1,151 +1,91 @@
 ---
-id: [STORY_ID]
+id: S-[NN]
 feature: [機能名]
 type: plan
 version: 1.0.0
 created: [YYYY-MM-DD]
-based_on: specs/stories/[STORY_ID]-[title]/design.md
-ui_design: [specs/stories/[STORY_ID]-[title]/ui-design/]（UI実装を含む場合のみ。不在の場合は "none"）
+based_on: specs/stories/S-[NN]-[title]/design.md
 ---
 
-# 作業計画書: [タイトル]
+# 作業計画書: [機能名]
 
-作成日: YYYY-MM-DD
-種別: feature|fix|refactor
-想定影響範囲: Xファイル
-関連Issue/PR: #XXX（あれば）
+## 目的・完了条件
 
-## 関連ドキュメント
-- ADR: [specs/adr/[num]-[title].md]（あれば）
-- 要件定義書: [specs/stories/[STORY_ID]-[title]/requirements.md]（あれば）
-- Figma UI仕様: [specs/stories/[STORY_ID]-[title]/ui-design/]（UI実装を含む場合のみ）
-  - outline.json: 画面構造
-  - screenshots/: 視覚確認用
-  - components/: 詳細仕様（TSX）
+- 目的: [この変更で実現する価値]
+- 完了条件: [観測可能な結果]
+- 対象外: [今回行わないこと]
 
-## 目的
-[なぜこの変更が必要か、解決する問題は何か]
+## 参照
+
+- Story: `specs/stories/S-[NN]-[title]/story.md`
+- Requirements: `specs/stories/S-[NN]-[title]/requirements.md`
+- Design: `specs/stories/S-[NN]-[title]/design.md`
+- ADR: [該当する `specs/adr/ADR-...`]
+- UI baseline: requirements / `.claude/steering/design-system.md` / 既存 component
 
 ## 影響範囲
-### 対象ファイル
-- [ ] {backend,frontend}/src/domain/xxx
-- [ ] {backend,frontend}/src/application/xxx
-- [ ] {backend,frontend}/src/infrastructure/xxx
-- [ ] {backend,frontend}/src/presentation/xxx
 
-### テストファイル
-※ 配置・命名は @.claude/steering/typescript-testing.md「命名規則」「ディレクトリ構造」に準拠
-- [ ] 単体テスト: ソースと同フォルダに `{ファイル名}.unit.test.ts`
-- [ ] 統合テスト: `tests/integration/{機能名}.int.test.ts`
-- [ ] E2Eテスト: `e2e/tests/{機能名}.e2e.test.ts`
+| 領域 | 対象パス | 変更内容 |
+|---|---|---|
+| Route / UI | `frontend/app/**`, `frontend/src/components/**` | [内容] |
+| Server Action | `frontend/src/actions/**` | [内容] |
+| Domain / Supabase client | `frontend/src/lib/**` | [内容] |
+| DB / RLS / Storage | `supabase/**` | [内容] |
+| Types / Tests / Specs | [path] | [内容] |
 
-### ドキュメント
-- [ ] ADR作成が必要（アーキテクチャ変更の場合）
-- [ ] Design Doc更新が必要
-- [ ] READMEの更新が必要
+## 実装フェーズ
 
-## 実装計画
+フェーズは依存順に並べる。`tasks/` や個別 task ファイルへ分解せず、この `plan.md` を単一の作業正本とする。
 
-（注: フェーズ構成はDesign Docの技術的依存関係と実装アプローチに基づいて決定）
+### Phase 1: [観測可能な単位]
 
-### Phase 1: [フェーズ名]（想定コミット数: X）
-**目的**: [このフェーズで達成すること]
+- [ ] 先に失敗するテストまたは契約テストを追加する
+- [ ] [対象 path / symbol] を実装する
+- [ ] 旧経路を置換する場合は upstream wiring と旧実装の除去を確認する
+- [ ] 対象テストを実行する
 
-#### タスク
-※ テストパスは @.claude/steering/typescript-testing.md 参照
-- [ ] タスク1: 具体的な作業内容
-  - 実装: {backend,frontend}/src/{ディレクトリ}/{ファイル名}.ts
-  - テスト: 同フォルダに `{ファイル名}.unit.test.ts`
-- [ ] タスク2: 具体的な作業内容
-  - 実装: {backend,frontend}/src/{ディレクトリ}/{ファイル名}.ts
-  - テスト: 同フォルダに `{ファイル名}.unit.test.ts`
-- [ ] 単体テスト: 関連するテストがすべてパス
+完了条件:
 
-**タスク記載例**:
-- [ ] UserService実装と単体テスト作成
-  - 実装: backend/src/services/UserService.ts
-  - テスト: backend/src/services/UserService.unit.test.ts
-- [ ] 統合テスト作成
-  - テスト: backend/tests/integration/userAuth.int.test.ts
+- [AC-ID と対応する結果]
 
-**（UI実装タスクの場合の完了条件例）**:
-- [ ] Button コンポーネント実装
-  - Props定義完了（variant, size, disabled）
-  - 基本スタイル実装完了
-  - 単体テスト作成・実行完了
-  - **検証方法**: サブエージェント呼び出し（ui-fixer）
-  - cache: specs/stories/[STORY_ID]-[title]/ui-design/
-  - component: Button
-  - implementation: frontend/src/components/Button.tsx
+### Phase 2: [観測可能な単位]
 
-#### フェーズ完了条件
-- [ ] [機能的な完了条件]
-- [ ] [品質的な完了条件]
+- [ ] [実装内容]
+- [ ] [認証 / owner / RLS / error 境界]
+- [ ] [対象テスト]
 
-#### 動作確認手順
-1. [動作確認手順]
-2. [期待結果の確認]
-3. [パフォーマンス確認（該当する場合）]
+完了条件:
 
-### Phase 2: [フェーズ名]（想定コミット数: X）
-**目的**: [このフェーズで達成すること]
+- [AC-ID と対応する結果]
 
-#### タスク
-※ テストパスは @.claude/steering/typescript-testing.md 参照
-- [ ] タスク1: 具体的な作業内容
-  - 実装: {backend,frontend}/src/{ディレクトリ}/{ファイル名}.ts
-  - テスト: 同フォルダに `{ファイル名}.unit.test.ts`
-- [ ] タスク2: 具体的な作業内容
-  - 実装: {backend,frontend}/src/{ディレクトリ}/{ファイル名}.ts
-  - テスト: 同フォルダに `{ファイル名}.unit.test.ts`
-- [ ] 統合テスト: 機能全体の動作確認
-  - テスト: `{backend,frontend}/tests/integration/{機能名}.int.test.ts`
+### Phase 3: 統合・品質保証
 
-#### フェーズ完了条件
-- [ ] [機能的な完了条件]
-- [ ] [品質的な完了条件]
+- [ ] すべての AC とテストの対応を確認する
+- [ ] loading / empty / error / disabled / complete を確認する
+- [ ] UI変更時は mobile / desktop / keyboard / console を実ブラウザで確認する
+- [ ] migration 変更時は隔離環境で apply、constraint、RLS actor、seed 再実行を確認する
+- [ ] `npm --prefix frontend run check`
+- [ ] route、Server/Client 境界、env、production bundling 変更時は `npm --prefix frontend run build`
+- [ ] `git diff --check` と差分レビュー
 
-#### 動作確認手順
-1. [動作確認手順]
-2. [期待結果の確認]
-3. [パフォーマンス確認（該当する場合）]
+## 受入条件トレーサビリティ
 
-### Phase 3: [フェーズ名]（想定コミット数: X）
-**目的**: [このフェーズで達成すること]
+| AC | 実装 | 自動テスト | 手動確認 |
+|---|---|---|---|
+| AC-01 | [path / symbol] | [test path] | [手順または不要] |
 
-#### タスク
-※ テストパスは @.claude/steering/typescript-testing.md 参照
-- [ ] タスク1: 具体的な作業内容
-  - 実装: {backend,frontend}/src/{ディレクトリ}/{ファイル名}.ts
-  - テスト: 同フォルダに `{ファイル名}.unit.test.ts`
-- [ ] タスク2: 具体的な作業内容
-  - 実装: {backend,frontend}/src/{ディレクトリ}/{ファイル名}.ts
-  - テスト: 同フォルダに `{ファイル名}.unit.test.ts`
-- [ ] 統合テスト: コンポーネント間の連携確認
-  - テスト: `{backend,frontend}/tests/integration/{機能名}.int.test.ts`
+## リスクと停止条件
 
-#### フェーズ完了条件
-- [ ] [機能的な完了条件]
-- [ ] [品質的な完了条件]
+- schema / RLS / Storage / 認証 / secret / 外部料金へ影響する場合は実行前に対象環境と方針を確認する。
+- 同一原因の失敗が続く場合は、追加修正前に根本原因を再分析する。
+- credential や外部環境が必要で未検証なら、unit test 成功と混同せず明記する。
 
-#### 動作確認手順
-[Design Docの該当統合ポイントのE2E確認を転記]
+## 検証結果
 
----
+| Command / 手順 | 結果 | 備考 |
+|---|---|---|
+| [command] | pass / fail / not-run | [理由] |
 
+## 残課題
 
-### 最終Phase: 品質保証（必須）（想定コミット数: 1-2）
-## 目的: 全体品質の保証とDesign Doc整合性確認
-
-#### タスク
-- [ ] Design Doc全受入条件の達成確認
-- [ ] 全テスト実行
-- [ ] カバレッジ70%以上
-- [ ] **（UI実装を含む場合）ビジュアル検証実行**: サブエージェント呼び出し（visual-checker）
-- [ ] ドキュメント更新
-
-#### 動作確認手順
-[Design DocのE2E確認手順を転記]
-
-## 備考
-[特記事項、参考情報、注意点など]
+- [なければ「なし」]

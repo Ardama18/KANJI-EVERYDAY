@@ -1,43 +1,23 @@
-# Shared モジュール
+# 共有モジュールと型の配置
 
-## 目的
+本プロジェクトに workspace の `shared/types` package はない。共有は `frontend/` 内に閉じ、実行境界に応じて配置する。
 
-Frontend/Backend間で再利用する型定義を一元管理し、API契約の重複を防ぐ。
+## 配置ルール
 
-## 構成
+| 種類 | 配置 |
+|---|---|
+| Supabase schema に由来する型 | `frontend/src/types/database.ts` |
+| Server Action の入出力 | 対応する `frontend/src/actions/*` または小さな sibling type file |
+| SRS の domain type | `frontend/src/lib/srs/types.ts` |
+| イラスト生成の domain type | `frontend/src/lib/illustration/types.ts` |
+| component 専用 props | component file 内 |
+| 複数 UI で使う純粋 utility | `frontend/src/lib/**` |
 
-```
-shared/types/
-├── src/
-│   ├── index.ts
-│   ├── enforcement.ts
-│   └── learning-timer.ts
-├── dist/
-├── package.json
-└── tsconfig.json
-```
+## 原則
 
-- ファイル名は `kebab-case.ts`
-- ワークスペースパッケージとしてビルド成果物（`dist/`）を配布
-
-## 利用方針
-
-- 共有すべき契約型のみを配置する
-- UI専用型は `frontend/src/types` に置く
-- Backend内部専用型は `backend/src/**/types` に置く
-
-## 現在の主用途
-
-- SRM連携の `EnforcementStatus` / `EnforcementProvider`
-- 学習タイマー関連のリクエスト/レスポンス型
-
-## インポート例
-
-```typescript
-import type { EnforcementProvider } from "@debt-collect-robo/shared-types"
-```
-
-## 更新ルール
-
-- API契約を変更したら、共有型と利用側（frontend/backend）を同一PRで更新する
-- 命名規則は `.claude/rules/naming-convention.md` に従う
+- 型の所有者に最も近い場所へ置く。
+- DB 型、domain 型、UI 表示型を一つの巨大な型へ混ぜない。
+- client から server-only module を import させる目的で型を同居させない。必要なら `import type` と type-only file で境界を切る。
+- Supabase schema 変更時は `database.ts` を同期し、手書き型が schema drift を隠していないか確認する。
+- 同じ概念を複数箇所で再定義する前に既存型を検索する。ただし偶然形が同じだけの概念は無理に統合しない。
+- package 化は複数アプリで共有する現実の要件が生じてから判断する。

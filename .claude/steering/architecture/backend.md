@@ -1,79 +1,69 @@
-# Backend アーキテクチャ（NestJS）
+# Backend アーキテクチャ（Next.js Server + Supabase）
+
+本プロジェクトに独立した `backend/` はない。ここでいう Backend は、Next.js の Server Components / Server Actions と Supabase の組み合わせを指す。
 
 ## 技術スタック
 
-- **フレームワーク**: NestJS 11
-- **言語**: TypeScript
-- **ORM**: Prisma 6 / PostgreSQL
-- **バリデーション**: class-validator + Global ValidationPipe
-- **認証**: Session Cookie（parent / child）
-- **テスト**: Jest（unit/integration）
+- Next.js 14 App Router
+- Server Actions
+- Supabase Auth / PostgreSQL / Storage
+- Gemini REST API（イラスト生成のみ）
+- TypeScript / Vitest
 
-## ディレクトリ構成
+## 配置
 
-```
-backend/src/
-├── main.ts                    # ブートストラップ（CORS, Session, Swagger, ValidationPipe）
-├── app.module.ts              # ルートモジュール
-├── prisma/                    # PrismaService / PrismaModule
-├── common/                    # guard, util, shared types
-└── modules/
-    ├── auth/
-    ├── tasks/
-    ├── reward/
-    ├── point/
-    ├── gametime/
-    ├── learning-timer/
-    ├── time-extension/
-    ├── dashboard/
-    ├── report/
-    ├── settings/
-    ├── children/
-    ├── task-templates/
-    ├── srm/
-    ├── srm-profile/
-    └── ai/
+```text
+frontend/src/actions/
+├── auth-actions.ts
+├── deck-actions.ts
+├── session-actions.ts
+└── illustration-actions.ts
+frontend/src/lib/
+├── auth/
+├── illustration/
+├── srs/
+└── supabase/
 ```
 
-## 基本データフロー
+## Server Action の契約
 
-`Controller -> Service -> PrismaService -> PostgreSQL`
+すべての Server Action は外部入力境界として次を満たす。
 
-- Controller: HTTP入出力と認可境界
-- Service: ビジネスロジック
-- DTO: 入出力契約（`dto/*.dto.ts`）
-- Exception: ドメイン固有エラー（`exceptions/*.exception.ts`）
+1. `'use server'` 境界を明示する。
+2. セッションから利用者を取得し、未認証なら副作用前に終了する。
+3. ID、FormData、rating などを実行時に検証する。
+4. 対象行を `user_id` / `owner_user_id` で絞り、所有権を確認する。
+5. Supabase のエラーを握りつぶさず、UI に安全な形へ変換する。
+6. 戻り値の union / type を明示し、UI が文字列解析に依存しないようにする。
 
-## 主要実装パターン
+RLS は最終防衛線だが、Action 内の認証・所有権検証の代替ではない。
 
-### 1. モジュール単位の縦割り
+## Supabase client の使い分け
 
-- 1機能ごとに `controller / service / module / dto / exceptions` を配置
-- 共有ロジックは `common/` に集約
+- Server Component / Server Action: `frontend/src/lib/supabase/server.ts`
+- Client Component: `frontend/src/lib/supabase/client.ts`
+- middleware: `frontend/src/lib/supabase/middleware.ts`
+- service role: owner scoped な通常 CRUD には使用しない。イラスト生成・Storage 保存など、Action で認証と所有権を確認した後の隔離された server-only 処理に限定する
 
-### 2. 入力検証
+server-only secret を `NEXT_PUBLIC_` で定義しない。server client を Client Component から import しない。
 
-- `main.ts` で `ValidationPipe` をグローバル設定
-- DTOに `class-validator` デコレータを付与して検証
+## ドメインロジック
 
-### 3. 認証・認可
+- SRS の計算・分類・queue 操作は `src/lib/srs` の純粋関数へ置く。
+- Action は認証、DB I/O、ドメイン関数の呼び出し、結果の永続化を調整する。
+- 時刻依存値は注入し、JST 日付ユーティリティを経由する。
+- 学習セッションの更新順は Accepted ADR に従う。特に `rateCard` は review state、queue、次カードの整合を崩さない。
 
-- 親・子で別Cookieを使用（`hapico.parent.sid`, `hapico.child.sid`）
-- Guardでアクセス制御（`ParentAuthGuard`, `ChildAuthGuard`, `ChildOrParentAuthGuard`）
-- `main.ts` でAPIパスごとに適切なsession middlewareを適用
+## 外部 AI / Storage
 
-### 4. スケジューラ
+- Gemini は `frontend/src/lib/illustration/gemini-client.ts` に隔離する。
+- API key 未設定や外部失敗は安全に `failed` へ遷移させ、学習要求は継続可能にする。
+- Storage bucket は private。object path は `{user_id}/{illustration_id}.png`。
+- Signed URL は server で短時間だけ発行する。
+- prompt や model info に secret、メール、user ID など不要な個人情報を含めない。
 
-- `@nestjs/schedule` を利用
-- 例: `auto-sync.scheduler.ts`, `extension-job-scheduler.service.ts`
+## テスト
 
-## API運用
-
-- Swagger: `/api/docs`
-- 静的配信: `/uploads/*`（証跡画像など）
-- CORS: 環境変数 `FRONTEND_URL` を基準に許可
-
-## 参照先
-
-- 命名規則: `.claude/rules/naming-convention.md`
-- 技術仕様: `.claude/steering/technical-spec.md`
+- Action: Supabase client と外部 API を境界で mock し、未認証・所有権・失敗・成功を検証する。
+- SRS: 固定時刻と固定入力で純粋関数の境界値・非破壊性を検証する。
+- RLS / Storage policy: SQL またはローカル Supabase を使う integration test で別ユーザー拒否を検証する。

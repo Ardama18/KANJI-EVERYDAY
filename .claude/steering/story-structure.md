@@ -1,111 +1,51 @@
-# ストーリー中心のディレクトリ構造ガイド
+# ストーリー中心のディレクトリ構造
 
-## 概要
+Git repository の `specs/` を要件・設計判断の SSOT とする。
 
-AI駆動開発における最適化されたディレクトリ構造を定義します。Gitリポジトリを唯一の情報源（SSOT）とし、開発効率を最大化します。
+## 標準構造
 
-## ディレクトリ構造
-
-```
+```text
 specs/
-├── stories/{STORY_ID}-{title}/  # 例: S-34-user-authentication
-│   ├── meta.json                # ストーリーメタ情報（必須）
-│   ├── story.md                 # ストーリー定義（要件概要・機能詳細）
-│   ├── requirements.md          # 要件定義書（必須、AIが生成）
-│   ├── design.md                # 設計書（必須、AIが生成）
-│   └── tasks/                   # タスク一覧（Gitでは管理しない）
-│
-├── epics/{EPIC_ID}-{title}/     # 例: E-7-authentication-system
-│   └── epic.md                  # エピック全体のアーキテクチャ方針
-│
-└── adr/                         # 技術的意思決定記録（通し番号）
-
+├── epics/E-{NN}-{title}/
+│   └── epic.md
+├── stories/S-{NN}-{title}/
+│   ├── meta.json
+│   ├── story.md
+│   ├── requirements.md
+│   ├── design.md
+│   ├── plan.md
+│   └── tests/                 # story 固有の integration / traceability（必要時）
+└── adr/
+    └── ADR-{NNN}-{title}.md
 ```
 
-## 各ディレクトリの役割
+既存の `tasks/` と `task-*.md` は旧フローの成果物として残っている。新規作業では `plan.md` を実装計画の正本とし、ユーザーが明示しない限り個別 task file を追加・更新しない。
 
-### `specs/stories/{STORY_ID}-{title}/`
+## 各文書
 
-**目的**: ストーリー単位で関連ドキュメントを集約
+- `epic.md`: 複数 story に共通する目的、scope、domain / architecture 方針
+- `story.md`: user value、scope、acceptance の概要
+- `requirements.md`: EARS 等で検証可能にした機能 / 非機能 / security 要件
+- `design.md`: 現行調査、選択肢、責務、data flow、test strategy
+- `plan.md`: implementation order、対象 file、各 phase の完了条件と command
+- `meta.json`: ID、epic、status、GitHub link などの metadata
+- ADR: 長期に影響する技術判断、代替案、影響、status
 
-**配置ファイル**:
-- `meta.json`: ストーリーメタ情報（ID、エピック、ステータス等）（必須）
-- `story.md`: ストーリー定義（エピック分解時に生成される要件概要・機能詳細）
-- `requirements.md`: 要件定義書（AIが生成）
-- `design.md`: 設計書（AIが生成）
+## ID
 
-**命名規則**: `{STORY_ID}-{title}` 例: `S-34-user-authentication`
+- story: `S-{NN}`。既存 `specs/stories/S-*` の最大番号 + 1
+- epic: `E-{NN}`。既存 `specs/epics/E-*` の最大番号 + 1
+- GitHub issue 番号を story / epic ID に流用しない
+- ADR は既存番号に重複があるため、番号だけでなく filename、front matter の `feature`、関連 story を照合する
 
-**親子ストーリーの概念**:
-- ストーリーのスコープが大きすぎる場合、親ストーリーを複数の子ストーリーに分割できます
-- 子ストーリーは独立したストーリーディレクトリとして作成されます
-- 親子関係は`meta.json`の`parent_story_id`フィールドで管理されます
-- 親ストーリーの`requirements.md`および`design.md`には「## 子ストーリー」セクションが追加され、子ストーリーへのリンクが記載されます
+## Status
 
-### `specs/epics/{EPIC_ID}-{title}/`
+既存 `meta.json` の語彙をその story で優先する。新規では少なくとも `not_started`、`in_progress`、review、`completed` を一貫して使い、成果物や code と矛盾する status を機械的に更新しない。
 
-**目的**: エピック全体の技術方針を記録
+## Traceability
 
-**配置ファイル**: `epic.md` - エピック全体のアーキテクチャ方針、技術スタック、共通設計方針
+`Epic → Story → Requirement / AC → Design decision / ADR → Plan phase → Code → Test`
 
-**epic.mdに記載する内容**:
-- ✅ 技術スタック、共通設計方針、セキュリティ要件、パフォーマンス要件、関連ADR
-- ❌ 管理情報（ステータス、進捗率、担当PM、スケジュール）
-
-**命名規則**: `{EPIC_ID}-{title}` 例: `E-7-authentication-system`
-
-### `specs/adr/`
-
-**目的**: プロジェクト全体の技術的意思決定を記録
-
-**命名規則**: `{num}-{title}.md` 例: `001-story-centric-directory-structure.md`（ストーリーIDは含めない）
-
-**記載内容**: 背景（Context）、決定内容（Decision）、影響（Consequences）、代替案（Alternatives）
-
-## ID採番ルール
-
-### ストーリーID
-- プレフィックス: `S-`
-- 採番方法: `specs/stories/S-*` ディレクトリをスキャンし、最大番号+1
-- 例: 既存が S-33 まであれば、次は S-34
-
-### エピックID
-- プレフィックス: `E-`
-- 採番方法: `specs/epics/E-*` ディレクトリをスキャンし、最大番号+1
-
-## Gitが「正」とする情報（SSOT原則）
-
-すべての開発情報はGitリポジトリで一元管理します。
-
-| 情報 | 保存場所 | 更新タイミング |
-|------|---------|---------------|
-| ストーリー定義 | `story.md` | エピック/ストーリー分解時 |
-| 要件詳細 | `requirements.md` | 要件分析時 |
-| 設計書 | `design.md` | 技術設計時 |
-| ADR | `specs/adr/` | 技術決定時 |
-| epic.md（技術方針） | `specs/epics/*/epic.md` | エピック作成時 |
-| ストーリーメタ情報 | `meta.json` | 各フェーズ完了時 |
-| コード | Git | 実装時 |
-
-### meta.json フォーマット
-
-```json
-{
-  "story_id": "S-34",
-  "epic_id": "E-2",
-  "parent_story_id": "",
-  "status": "not_started",
-  "github_pr_url": "",
-  "github_branch": ""
-}
-```
-
-**フィールド説明**:
-| フィールド | 説明 | 更新タイミング |
-|-----------|------|---------------|
-| `story_id` | ストーリーID | 作成時 |
-| `epic_id` | 所属エピックID | 作成時 |
-| `parent_story_id` | 親ストーリーID（子ストーリーの場合） | 作成時 |
-| `status` | ステータス（not_started / in_progress / design_review / impl_review / done） | 各フェーズ完了時 |
-| `github_pr_url` | PRのURL | PR作成時 |
-| `github_branch` | ブランチ名 | 実装開始時 |
+- requirement ID がある場合は plan と test から参照する。
+- scope 変更は story / requirements から下流へ反映する。
+- code だけ先行した場合も、後から実装を正当化せず仕様差分を明示する。

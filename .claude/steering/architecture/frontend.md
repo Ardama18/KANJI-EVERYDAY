@@ -1,61 +1,70 @@
-# Frontend アーキテクチャ（Next.js 16）
+# Frontend アーキテクチャ（Next.js 14）
 
 ## 技術スタック
 
-- **フレームワーク**: Next.js 16（App Router）
-- **言語**: TypeScript
-- **UI**: React 19 + Tailwind CSS 4
-- **データ取得**: `apiClient` + custom hooks
-- **テスト**: Vitest（unit/integration）+ Playwright（E2E）
+- Next.js 14 App Router / React 18
+- TypeScript
+- Tailwind CSS 3
+- Supabase SSR client
+- Vitest
 
-## ディレクトリ構成
+実バージョンは常に `frontend/package.json` を確認する。
 
-```
+## ディレクトリ構造
+
+```text
 frontend/
-├── app/                      # ルーティング、ページ、レイアウト
-│   ├── child/
-│   ├── parent/
+├── app/
+│   ├── (auth)/                 # 認証必須 route group
+│   ├── login/、signup/
 │   ├── layout.tsx
 │   └── page.tsx
-├── src/
-│   ├── components/           # 再利用コンポーネント
-│   ├── hooks/                # ドメイン別hooks（api hooks含む）
-│   ├── contexts/             # 認証・プロフィール等のContext
-│   ├── lib/                  # api-client等の基盤処理
-│   └── types/                # フロント固有型
-├── middleware.ts             # /api, /auth, /uploads をBackendへプロキシ
-├── e2e/                      # Frontend起点のE2E
-└── tests/                    # unit / integration
+└── src/
+    ├── actions/
+    ├── components/{auth,deck,study}/
+    ├── lib/
+    └── types/
 ```
 
-命名規則は `.claude/rules/naming-convention.md` を参照。
+App Router の実 route は `frontend/app` が正本。`frontend/src/app/**/*.test.tsx` は route 実装ではなくページテストである。
 
-## データ通信戦略
+## Server / Client Component
 
-### 1. クライアント側API呼び出し
+- ページ、layout、初期データ取得は Server Component をデフォルトにする。
+- state、event handler、browser API が必要な部分だけ Client Component にする。
+- `'use client'` をページ全体へ広げない。
+- Client Component に secret、service role client、server-only utility を渡さない。
+- Server から Client へ渡す props は serializable かつ必要最小限にする。
 
-- 基本は `src/lib/api-client.ts` の `apiClient<T>()` を使用
-- リクエスト先は相対パス（例: `/api/tasks/today`）
-- `credentials: include` でCookie認証を維持
+## ページ責務
 
-### 2. プロキシ方式
+- `/`: セッション状態に応じた入口
+- `/login`、`/signup`: 認証フォーム
+- `/decks`: デッキと New / Learn / Due の一覧
+- `/decks/[deckId]`: 対象デッキの概要と開始操作
+- `/decks/[deckId]/study`: server shell + `StudyClient` による学習遷移
 
-- `middleware.ts` が `/api/*`, `/auth/*`, `/uploads/*` を backend に転送
-- Cookie を双方向に引き継ぎ、同一オリジン運用を実現
+認証リダイレクトは middleware だけに依存せず、保護ページ / Action 側でも確認する。
 
-### 3. 画面責務
+## UI 状態
 
-- `app/*/page.tsx`: 画面エントリとページ構成
-- `src/components/*`: UI分割
-- `src/hooks/api/*`: API通信・キャッシュ制御
+- loading、empty、error、success を区別する。
+- 二重送信を防ぎ、処理中の操作可否を明示する。
+- Server Action 失敗時に、成功したような optimistic state を残さない。
+- 学習の front / back / complete は server のセッション状態から復元できること。
+- イラスト pending / failed はプレースホルダに劣化し、評価操作を妨げないこと。
 
-## コンポーネント設計方針
+## スタイリングとアクセシビリティ
 
-- 対話/状態管理がある箇所は Client Component（`"use client"`）
-- 画面単位の専用コンポーネントは `app` 配下に配置する場合あり
-  - 例: `parent/approval-center/ApprovalCenterClient.tsx`
+- 既存の `frontend/app/globals.css` と Tailwind token を優先する。
+- 子どもがスマートフォンで使う前提で、主要操作は 48px 以上の touch target を確保する。
+- button / link / heading など意味のある HTML を使い、キーボード focus を可視化する。
+- 色だけで New / Learn / Due や評価を伝えない。
+- 長い日本語、200% zoom、狭い viewport で overflow しないようにする。
 
-## 参照先
+## テスト
 
-- 命名規則: `.claude/rules/naming-convention.md`
-- フロントAPIパターン: `.claude/steering/frontend-api-patterns.md`
+- component は観測可能な表示と操作をテストする。
+- Server Action は別テストにし、UI テストでは境界を mock する。
+- route page テストと実 route の配置差を意識し、存在しない module path を前提にしない。
+- 実ブラウザ確認が必要な変更は、導入済みでない Playwright を仮定せず手動検証内容を記録する。

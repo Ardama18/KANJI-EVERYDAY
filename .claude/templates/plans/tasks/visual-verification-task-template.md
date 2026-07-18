@@ -1,34 +1,17 @@
----
-id: {STORY_ID}
-feature: {FEATURE}
-type: tasks
-task_number: task-{TASK_NUMBER}
-version: 1.0.0
-created: {CREATED_DATE}
-based_on: specs/stories/{STORY_ID}-{title}/plan.md
----
+# 廃止済み: 個別ビジュアル検証 task テンプレート
 
-# タスク: ビジュアル検証実行
+KANJI-EVERYDAY の現行フローでは `tasks/` や個別 task ファイルを新規作成しない。このファイルは旧フローからの参照を安全に止めるための互換 notice であり、コピーして使用しない。
 
-**実行パターン**: 2フェーズ実行（UI検証タスク）
+UI 検証は対象 Story の `plan.md` に直接記載する。
 
-## メタ情報
-- 依存: Figmaキャッシュ specs/stories/{STORY_ID}-{title}/ui-design/
-- サイズ: 検証タスク
+最低限、次を含める。
 
-## 実装手順
+- 対象 route と実際に確認した URL
+- mobile と desktop の viewport
+- loading / empty / error / disabled / pending / complete
+- keyboard focus、accessible name、200% zoom、48px touch target
+- requirements、design system、既存 component を比較基準とする
+- console error、failed request、unexpected redirect の有無
+- 自動ブラウザテストを実行していない場合は、手動確認と明記する
 
-### Phase 1: 検証準備
-- [ ] Figmaキャッシュ存在確認: specs/stories/{STORY_ID}-{title}/ui-design/
-- [ ] 実装コンポーネント確認: frontend/src/components/, frontend/src/app/
-- [ ] 構造化レスポンスでvisual-checker呼び出しを要求: status: "visual_validation_pending"
-
-### Phase 2: 検証結果確認
-- [ ] visual-checkerの結果を確認
-- [ ] 差異がある場合は修正を実施
-
-## 完了条件
-- [ ] **visual-checkerで全チェックパス**
-  - matchRate: 95%以上
-  - 優先度P0/P1の差異: ゼロ
-- [ ] 動作確認完了（L1: 機能動作確認）
+標準の記載先は `.claude/templates/plans/template.md` の「Phase 3: 統合・品質保証」と「検証結果」。

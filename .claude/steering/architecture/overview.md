@@ -1,65 +1,70 @@
-# プロジェクトアーキテクチャ概要（Hapico）
+# プロジェクトアーキテクチャ概要（まいにち漢字）
 
 ## システム構成
 
-```
-┌──────────────────────────────────────────────────┐
-│                    Browser                        │
-│                 (localhost:3001)                  │
-└──────────────────────┬───────────────────────────┘
-                       │
-             fetch('/api/*', '/auth/*')
-                       ↓
-┌──────────────────────────────────────────────────┐
-│              Next.js Frontend                     │
-│                 (localhost:3001)                  │
-│  - App Router (`frontend/app`)                    │
-│  - UI/Hook/Context (`frontend/src`)               │
-│  - middleware で Backend へプロキシ               │
-└──────────────────────┬───────────────────────────┘
-                       │
-             proxy to http://localhost:3000
-                       ↓
-┌──────────────────────────────────────────────────┐
-│               NestJS Backend                      │
-│                 (localhost:3000)                  │
-│  - Module単位構成 (`backend/src/modules`)         │
-│  - Prisma ORM / Session認証                       │
-└──────────────────────┬───────────────────────────┘
-                       │
-                       ↓
-┌──────────────────────────────────────────────────┐
-│                  PostgreSQL                        │
-│                (Docker / Local)                   │
-└──────────────────────────────────────────────────┘
+```text
+Browser
+  ├─ Server-rendered pages / Client Components
+  └─ Supabase browser client（公開 anon key + user session）
+          │
+          ▼
+Next.js 14 on Vercel
+  ├─ App Router / Server Components
+  ├─ Server Actions（認証、デッキ、学習、イラスト）
+  └─ server-only utilities
+          │
+          ├─ Supabase Auth
+          ├─ Supabase PostgreSQL + RLS
+          ├─ Supabase Storage（private `illustrations`）
+          └─ Gemini REST API（server only）
 ```
 
-## モノレポ構成
+独立した API サーバーはない。`frontend/` の Next.js アプリが Web とサーバー境界を担い、永続化・認証・Storage は Supabase に委譲する。
 
-命名規則は `.claude/rules/naming-convention.md` を参照。
+## 主要な責務境界
 
-| ディレクトリ | 役割 |
-|------------|------|
-| `frontend/` | Next.js 16 + React 19 のWebアプリ |
-| `backend/` | NestJS 11 APIサーバー |
-| `shared/types` | 共有型パッケージ（workspace） |
-| `e2e/` | ルート配下のE2Eシナリオ |
-| `specs/` | ADR / Epic / Story / Plan |
+| 境界 | 責務 |
+|---|---|
+| `frontend/app` | route、layout、SSR、redirect、ページ組み立て |
+| `frontend/src/components` | 表示とユーザー操作。永続化の正本を持たない |
+| `frontend/src/actions` | 認証済みユースケース、入力検証、所有権確認、データ更新 |
+| `frontend/src/lib/srs` | I/O を持たない決定論的な SRS / queue ロジック |
+| `frontend/src/lib/supabase` | browser / server / middleware client の生成境界 |
+| `frontend/src/lib/illustration` | prompt、安全化、Gemini、Storage の統合 |
+| `supabase/migrations` | schema、constraint、RLS、Storage policy の変更履歴 |
+| `specs` | 要件と設計判断の正本 |
 
-## 技術スタック（現行）
+## データフロー
 
-| 分類 | 技術 |
-|------|------|
-| Frontend | Next.js 16, React 19, Tailwind CSS 4 |
-| Backend | NestJS 11, Prisma 6 |
-| DB | PostgreSQL |
-| 共通 | TypeScript, npm workspaces |
-| テスト | Frontend: Vitest + Playwright / Backend: Jest |
+### 読み取り
+
+`Page (Server Component) → Server Action / server client → Supabase → props → UI`
+
+ページ初期表示は Server Component を優先する。ブラウザでしか必要ない状態だけ Client Component に渡す。
+
+### 更新
+
+`Client Component / Form → Server Action → auth + validation + owner check → Supabase → typed result → UI`
+
+Server Action は公開境界として扱い、呼び出し元 UI を信頼しない。
+
+### 学習セッション
+
+`study_sessions` が永続状態の正本。`StudyClient` は表示状態を持てるが、再開可能性や評価結果をクライアントだけで確定しない。
 
 ## 設計原則
 
-1. **機能単位の分割**: Backendは `modules/{domain}` で責務を分離
-2. **境界の明確化**: Frontendは `app`（ルーティング）と `src`（再利用資産）を分離
-3. **型安全性**: DTO・型定義・共有型で契約を明示
-4. **最小差分変更**: 既存構造に合わせた拡張を優先
-5. **ドキュメント駆動**: `specs/` の設計ドキュメントと実装整合を維持
+- Server Component をデフォルトにし、対話性が必要な最小範囲だけ `'use client'` にする。
+- Supabase の RLS とアプリケーション層の所有権検証を重ねる。
+- SRS と日付計算は純粋関数として保ち、外部 I/O から分離する。
+- 外部画像生成は失敗を前提にし、学習フローをブロックしない。
+- 新しい層・依存・サービスは、既存構成で要件を満たせない根拠がある場合だけ追加する。
+
+## 正本
+
+- client 分離: `specs/adr/ADR-001-project-foundation-supabase-clients.md`
+- DB / RLS: `specs/adr/ADR-002-database-schema-rls-access-boundary.md`
+- 認証: `specs/adr/ADR-003-authentication-flow.md`
+- SRS: `specs/adr/ADR-004-srs-engine.md`
+- 学習状態: `specs/adr/ADR-005-study-session-flow.md`
+- イラスト: `specs/adr/ADR-004-illustration-generation-backend-mvp-decisions.md`
