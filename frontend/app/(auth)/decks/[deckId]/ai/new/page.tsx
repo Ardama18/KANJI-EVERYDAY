@@ -17,7 +17,7 @@ export default async function AiCardNewPage({ params }: AiCardNewPageProps) {
 		<main className="mx-auto w-full max-w-lg px-4 py-6">
 			<Link
 				href={`/decks/${deck.id}`}
-				className="text-sm font-medium text-slate-600 hover:text-slate-900"
+				className="inline-flex min-h-11 items-center text-sm font-medium text-slate-600 hover:text-slate-900"
 			>
 				← デッキへ戻る
 			</Link>
