@@ -4,4 +4,3 @@
 
 GRANT SELECT ON TABLE public.decks TO service_role;
 GRANT SELECT, INSERT, UPDATE ON TABLE public.illustrations TO service_role;
-

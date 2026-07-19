@@ -44,4 +44,3 @@
 ## ロールバック
 
 `AI_CARD_IMPORT_ENABLED=false`で新規作成導線と生成・commit操作を停止する。既存カードと既存batchの状態参照は保持する。
-

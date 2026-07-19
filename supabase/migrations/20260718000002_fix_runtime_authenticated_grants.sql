@@ -6,4 +6,3 @@ GRANT SELECT, INSERT, UPDATE ON TABLE
 	public.illustrations,
 	public.study_sessions
 TO authenticated;
-
