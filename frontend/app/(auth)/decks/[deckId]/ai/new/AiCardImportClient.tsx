@@ -6,6 +6,10 @@ import AiCardForm, { type AiCardFormSubmission } from "@/components/ai-card-impo
 import DraftCardList from "@/components/ai-card-import/DraftCardList";
 import ImportStatus from "@/components/ai-card-import/ImportStatus";
 import WarningConfirmation from "@/components/ai-card-import/WarningConfirmation";
+import {
+	type AiCardImportFocusTarget,
+	focusAiCardImportTarget,
+} from "@/lib/ai-card-generation/focus-target";
 import { safeCodeMessage } from "@/lib/ai-card-generation/safe-code-message";
 import {
 	type ImportStatusResponse,
@@ -57,6 +61,21 @@ export default function AiCardImportClient({ deckId }: AiCardImportClientProps) 
 	const statusChannelRef = useRef<BroadcastChannel>();
 	const terminalBatchRef = useRef<string>();
 	const tabIdRef = useRef(crypto.randomUUID());
+	const focusSequenceRef = useRef(0);
+	const [focusRequest, setFocusRequest] = useState<{
+		readonly target: AiCardImportFocusTarget;
+		readonly sequence: number;
+	}>();
+
+	const requestFocus = useCallback((target: AiCardImportFocusTarget): void => {
+		focusSequenceRef.current += 1;
+		setFocusRequest({ target, sequence: focusSequenceRef.current });
+	}, []);
+
+	useEffect(() => {
+		if (focusRequest === undefined) return;
+		focusAiCardImportTarget(focusRequest.target);
+	}, [focusRequest]);
 
 	async function uploadSources(
 		files: readonly File[],
@@ -144,6 +163,7 @@ export default function AiCardImportClient({ deckId }: AiCardImportClientProps) 
 					? "カード案を生成しました。concept共有画像を準備して再確認してください。"
 					: "カード案を生成しました。全カードを確認してください。"
 			);
+			requestFocus("draft");
 		} catch (error) {
 			setStatus(safeMessage(error));
 		} finally {
@@ -233,6 +253,7 @@ export default function AiCardImportClient({ deckId }: AiCardImportClientProps) 
 			setCardReservationKey(generated.preview.cardReservationKey);
 			setConfirmed(false);
 			setStatus("変更後のカードを再確認しました。");
+			requestFocus("draft");
 		} catch (error) {
 			setStatus(safeMessage(error));
 		} finally {
@@ -276,6 +297,7 @@ export default function AiCardImportClient({ deckId }: AiCardImportClientProps) 
 			generationAttemptRef.current = undefined;
 			commitIdempotencyKeyRef.current = undefined;
 			setStatus("登録処理を開始しました。");
+			requestFocus("status");
 		} catch (error) {
 			setStatus(safeMessage(error));
 		} finally {
@@ -296,9 +318,10 @@ export default function AiCardImportClient({ deckId }: AiCardImportClientProps) 
 				localStorage.removeItem(batchPointerKey(deckId));
 				setBatchId(undefined);
 				setStatus(`登録処理が${parsed.status}になりました。`);
+				requestFocus("status");
 			}
 		},
-		[deckId]
+		[deckId, requestFocus]
 	);
 
 	const refreshStatus = useCallback(async (): Promise<void> => {

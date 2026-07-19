@@ -32,24 +32,26 @@ export async function POST(request: Request): Promise<Response> {
 	} catch {
 		return safeError("VALIDATION_ERROR", 400);
 	}
-	const parsed = parseGenerateRequest(body);
-	if (parsed === undefined) return safeError("VALIDATION_ERROR", 400);
-	const checked = validateGenerationInput(parsed.input);
-	if (!checked.success) return safeError("VALIDATION_ERROR", 400);
-	const config = getOpenAiCardGenerationConfig();
-	if (config === undefined) return safeError("OPENAI_PROVIDER_CONFIG", 503);
-	const secret = getAiPreviewHmacSecret();
-	if (secret === undefined) return safeError("INTERNAL_ERROR", 500);
+	const releaseIds = isRecord(body)
+		? (parseGenerationSourceUploadIds(body.sourceUploadIds) ?? [])
+		: [];
 	const service = createServiceRoleClient();
-	const { data: deck, error: deckError } = await service
-		.from("decks")
-		.select("id")
-		.eq("id", checked.data.deckId)
-		.eq("owner_user_id", authData.user.id)
-		.maybeSingle();
-	if (deckError !== null || deck === null) return safeError("DECK_NOT_FOUND", 404);
-	const releaseIds = parsed.sourceUploadIds;
 	try {
+		const parsed = parseGenerateRequest(body);
+		if (parsed === undefined) return safeError("VALIDATION_ERROR", 400);
+		const checked = validateGenerationInput(parsed.input);
+		if (!checked.success) return safeError("VALIDATION_ERROR", 400);
+		const config = getOpenAiCardGenerationConfig();
+		if (config === undefined) return safeError("OPENAI_PROVIDER_CONFIG", 503);
+		const secret = getAiPreviewHmacSecret();
+		if (secret === undefined) return safeError("INTERNAL_ERROR", 500);
+		const { data: deck, error: deckError } = await service
+			.from("decks")
+			.select("id")
+			.eq("id", checked.data.deckId)
+			.eq("owner_user_id", authData.user.id)
+			.maybeSingle();
+		if (deckError !== null || deck === null) return safeError("DECK_NOT_FOUND", 404);
 		const sources = await loadGenerationSources(service, authData.user.id, releaseIds);
 		const preview = await generateCardDraft(checked.data, sources, {
 			moderateText: async (text, stage) =>
