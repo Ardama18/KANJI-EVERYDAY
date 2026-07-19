@@ -7,7 +7,7 @@
 - **プロダクト名**: まいにち漢字（KANJI-EVERYDAY）
 - **目的**: 小学生が毎日短時間で漢字の読み書きを復習できる、Anki 風の学習体験を提供する
 - **主要体験**: デッキ選択 → 今日の出題確認 → 問題 → 答え表示 → 3段階評価 → 次のカード
-- **主要ユーザー**: MVP ではメール/パスワードで認証した学習者。保護者モードは現行スコープ外
+- **主要ユーザー**: メール/パスワードで認証した学習者。カード作成・管理は保護者・先生が同じownerアカウント境界で利用する
 
 ## 2. 現行ドメイン
 
@@ -15,7 +15,8 @@
 - 学習データ: `decks`、`cards`、`deck_cards`、`review_states`
 - セッション: `study_sessions` を正本とする中断・再開可能な学習状態
 - SRS: `good` / `hard` / `again` の固定間隔テーブル、JST 基準の日付計算
-- イラスト: S-08 で生成・保存の契約と部品を実装済み。ただし production の非同期起動は現在 no-op で、画面表示連携を行う S-09 は `not_started`。完成済み機能として扱わない
+- イラスト: S-08/S-09で生成・保存と答え表示後の5状態表示契約を実装済み。provider設定や非同期起動を含む対象環境の受入証跡がない場合は、production稼働済みとは表現しない
+- AIカード作成: S-10〜S-12で、テキスト指示または教材画像からのOpenAI生成、編集・除外・再preview、画像共有、非同期登録、status復元を実装済み。新規作成はfeature flagで停止でき、既存deck/card/statusは維持する
 - ユーザー境界: `users_profile` と owner scoped な RLS / Storage policy
 
 ## 3. 技術スタック
@@ -26,7 +27,7 @@
 | UI | Tailwind CSS 3 |
 | Backend | Next.js Server Components / Server Actions |
 | BaaS | Supabase Auth / PostgreSQL / Storage |
-| AI | Gemini REST API（SDK 依存を追加せず `fetch` を使用） |
+| AI | Gemini REST API（イラスト）/ OpenAI Responses・Moderation API（AIカード生成）。SDK依存を追加せずserver-side `fetch` を使用 |
 | 品質 | Biome、TypeScript、Vitest |
 | Hosting | Vercel を想定 |
 
@@ -55,7 +56,7 @@ specs/
 
 1. Server 用と Browser 用の Supabase client を混在させない。
 2. Server Action ごとに認証と対象リソースの所有権を検証する。RLS だけに依存しない。
-3. service role key と Gemini API key をブラウザへ露出しない。
+3. service role key、Gemini / OpenAI API key、preview署名secretをブラウザへ露出しない。
 4. `study_sessions` を学習進行の正本とし、クライアント状態だけで永続状態を決めない。
 5. イラストはカード表面に出さず、答え表示後にだけ出す。生成失敗で学習を止めない。
 6. SRS 純粋関数には I/O や暗黙の現在時刻を持ち込まず、JST 境界を明示する。
