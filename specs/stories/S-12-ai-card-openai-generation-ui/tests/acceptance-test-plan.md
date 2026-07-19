@@ -4,7 +4,7 @@
 - 正本: `../design.md` v1.0.1、`../requirements.md` v1.1.1
 - 生成日: 2026-07-18
 - planning gate制約: skeletonは`it.todo`・コメント・importのみ。assertion、mock、fixture、helper、production実装は後続実装gateまで作成しない。
-- 既存境界: S-10/S-11の既存test、実装、migrationは変更しない。
+- 既存境界: S-10/S-11のmigration履歴とQueue/worker architectureは再構築しない。S-12を実DBへ接続するためのroute/action/test互換修正とforward migrationは許容し、差分理由をPRへ記録する。
 
 ## テスト層と成果物
 
@@ -12,7 +12,7 @@
 |---|---|---:|---|
 | Unit | 本書のケース一覧のみ | 16 | pure contract実装と同時。現gateでは実装ファイルを作らない |
 | Integration | `ai-card-openai-generation-ui.int.test.ts` | 15 todo | provider/route/S-10/S-11接続実装と同時 |
-| E2E | `ai-card-openai-generation-ui.e2e.test.ts` | 7 todo | 全実装およびS-11 hosted gate完了後 |
+| Journey contract | `ai-card-openai-generation-ui.e2e.test.ts` | 7実装済み | pure service/static contract。Hosted E2Eの代替にはしない |
 | Visual/accessibility | `../ui-design/visual-checklist.md` | 2ページ/状態群 | UIが機能的に動作した後 |
 
 ## Unit test計画（16件、実装ファイルは作成しない）
@@ -73,10 +73,12 @@
 
 ## 実行結果（2026-07-19）
 
-- Unit 20件、Integration 17件、E2E 7件、合計44件がpassし、S-12内todo/skip/not_runは0件。
+- Unit 20件、Integration 17件、journey contract 7件、合計44件がpassし、S-12内todo/skipは0件。Hosted E2Eは未実行。
 - QA回帰test 5件（paired edit 3件、partial表示1件、除外後commit 1件）がpass。
-- `npm run check`: 56 test files、790 pass、既存9 skip。lint・typecheckもpass。
+- ship監査回帰test 4件（早期失敗source release 2件、非同期focus target 2件）がpass。
+- `npm run check`: 58 test files、794 pass、既存9 skip。lint・typecheckもpass。
 - `npm run test:s12:real-db`: illustration列権限/RLS、failed→pending限定遷移、preview既存重複検査がpass。
 - production buildがローカルSupabase環境変数をprocess内だけで与えた状態でpass。
 - 実OpenAI text/image生成、source即時削除、360px横overflow 0、reload復元、partial表示、keyboard-only生成→除外→再preview→確認→commitをブラウザで確認。
 - 除外後commitは生成時quota 2 unitsを保持したまま最終batch 1枚を202で受理し、reservationとbatchの紐付けを実DBで確認。
+- S-11 Hosted7、scheduled cleanup、flag-off前後snapshot、HTTP route・ブラウザ・hosted DBを接続する自動E2Eは未実行。新しいhosted Supabase対象が用意されるまでmerge blockedとする。

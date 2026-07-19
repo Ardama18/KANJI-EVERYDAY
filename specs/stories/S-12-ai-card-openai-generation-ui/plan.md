@@ -2,10 +2,10 @@
 id: S-12
 feature: ai-card-openai-generation-ui
 type: plan
-version: 1.1.0
+version: 1.1.1
 created: 2026-07-18
 updated: 2026-07-19
-status: implemented
+status: implementation_review
 mode: create
 based_on: specs/stories/S-12-ai-card-openai-generation-ui/design.md
 requirements: specs/stories/S-12-ai-card-openai-generation-ui/requirements.md
@@ -55,11 +55,13 @@ related_issue: https://github.com/Ardama18/KANJI-EVERYDAY/issues/13
 
 以下がすべてpassするまでPhase 0へ進まない。`not_run`、資格情報不足、古いcandidateの結果をpassとして扱わない。
 
-- [x] S-11 current candidateでHosted7がすべてpassしている。
-- [x] scheduled cleanupが対象環境で有効で、S-11のclaim/verify/complete契約を通過している。
-- [x] `created_at + 24 hours <= DB now`の境界が、23:59:59保持・24:00以降削除として実環境で確認済みである。
-- [x] source/raw object、active consumer、owner path、claim fencingのS-11 cleanup evidenceが現candidateに対応する。
+- [ ] S-11 current candidateでHosted7がすべてpassしている。
+- [ ] scheduled cleanupが対象環境で有効で、S-11のclaim/verify/complete契約を通過している。
+- [ ] `created_at + 24 hours <= DB now`の境界が、23:59:59保持・24:00以降削除として実環境で確認済みである。
+- [ ] source/raw object、active consumer、owner path、claim fencingのS-11 cleanup evidenceが現candidateに対応する。
 - [x] gate不成立時はS-12内へ代替Queue/worker/cleanupを実装せず、作業を`blocked`として終了する。
+
+S-11の正本は`rc1_local_pending_hosted_7_not_run_merge_blocked`である。S-12のローカル実装と検証はレビュー可能だが、Hosted7と対象環境のcleanup確認が完了するまでmergeしない。
 
 ## 4. 実装順序
 
@@ -296,7 +298,7 @@ flowchart TB
   - 統合完了条件: error taxonomyが色だけでなく安全な文字で区別され、accuracy/privacy/copyright警告がpreview前後で継続する。
   - 動作確認: Figmaなしのため既存UI baselineとの手動デザイン確認を行い、visual checklistの実行準備を完了する。
 
-- [x] **P6-02 E2E 7 todoを実装しvisual/accessibility checklistを実行する**
+- [ ] **P6-02 E2E 7 todoを実装しvisual/accessibility checklistを実行する**
   - 対応AC: AC-01〜08
   - 依存: P6-01
   - 想定変更ファイル: `specs/stories/S-12-ai-card-openai-generation-ui/tests/ai-card-openai-generation-ui.e2e.test.ts`、必要なS-12専用E2E testkit、`specs/stories/S-12-ai-card-openai-generation-ui/ui-design/visual-checklist.md`
@@ -306,10 +308,10 @@ flowchart TB
   - 統合完了条件: text/imageのgenerate→preview→commit→status、reload、partial、flag rollbackがユーザー操作からDB結果まで接続される。
   - 動作確認: `cd frontend && npm run test:s12:e2e`を実行し、360×800各状態、keyboard-only操作、label/error/live regionをchecklistへ記録する。
 
-- [x] **P6-03 全quality gateと既存回帰を実行し文書整合を確定する**
+- [ ] **P6-03 全quality gateと既存回帰を実行し文書整合を確定する**
   - 対応AC: AC-01〜08
   - 依存: P6-02
-  - 想定変更ファイル: S-12 test/evidence/必要なDesign Doc整合更新と、S-12追加境界に必要なS-11 test fixture/gate互換更新のみ。S-10/S-11 productionは変更しない。
+  - 想定変更ファイル: S-12 test/evidence/必要なDesign Doc整合更新、S-12を実DBへ接続するroute/action/test互換修正、forward migration。S-10/S-11の既存migration履歴とQueue/worker architectureは再構築しない。
   - Commit境界: 最終testで判明したS-12内の修正、traceability/evidence更新、不要なtodo/debug/log除去をまとめる。
   - 実装完了条件: flag enabled/disabled、source immediate/24h cleanup、token tamper/expiry/content replacement、post-expansion 50/both parity、全error taxonomyを再確認する。
   - 品質完了条件: `cd frontend && npm run check`、`npm run test:s12:inventory`、`npm run test:s10:inventory`、`npm run test:s11:inventory`がすべてpassする。
@@ -318,12 +320,14 @@ flowchart TB
 
 ### 最終Phase完了条件
 
-- [x] Unit 20件、Integration 17件、E2E 7件がpassし、S-12内todo/skip/not_runが0件である。
+- [ ] Unit 20件、Integration 17件、Hosted E2E 7件がpassし、S-12内todo/skip/not_runが0件である。
 - [x] `npm run check`とS-10/S-11 inventoryがpassする。
 - [x] 360px、keyboard、label/error、live region checklistが完了する。
-- [x] source通常即時削除、失敗時24時間cleanup、別owner/scope/active consumer保護がpassする。
+- [ ] source通常即時削除、失敗時24時間cleanup、別owner/scope/active consumer保護がhosted環境でpassする。
 - [x] token tamper/expiry/content replacement、confirmation bypass、quota二重消費が拒否される。
-- [x] flag disabledで新規AI作成だけが停止し、既存card/deck/study/batch statusが保持される。
+- [ ] flag disabledで新規AI作成だけが停止し、既存card/deck/study/batch statusがhosted環境で保持される。
+
+ローカルでは58 test files / 794 pass / 9既存skip、production build、実OpenAI text/image、実DB gate、ブラウザkeyboard flowまでpassした。`ai-card-openai-generation-ui.e2e.test.ts`の7件は現状journey contractであり、HTTP route・ブラウザ・hosted DBを接続するE2Eの代替にはしない。
 
 ## 12. AC traceability
 
@@ -372,3 +376,4 @@ flowchart TB
 |---|---|---|
 | 2026-07-18 | 1.0.0 | requirements v1.1.1、ADR-009/010 Accepted、design v1.0.1、acceptance test skeletonを基にcreate modeで初版作成 |
 | 2026-07-19 | 1.1.0 | Phase 6、実OpenAI text/image/keyboard QA、3件のQA修正、実DB・全回帰・production buildの完了結果を反映 |
+| 2026-07-19 | 1.1.1 | 独立ship監査を反映し、教材sourceの早期失敗releaseと非同期focusを修正。Hosted7/真のE2E未実行をmerge blockerへ戻した |

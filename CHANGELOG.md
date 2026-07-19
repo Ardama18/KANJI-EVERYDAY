@@ -2,6 +2,26 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.2.0.0] - 2026-07-19
+
+### Added
+
+- Guardians and teachers can now create private R1/W1 kanji cards from a text instruction or uploaded source image, review the generated drafts, and register the selected cards from the deck screen.
+- Added editable generation previews, per-card exclusion, warning confirmation, partial-success reporting, and reload-safe import tracking so a failed card does not hide cards that were registered successfully.
+- Added OpenAI generation, moderation, source-image lifecycle handling, strict output validation, and service-role-only commit paths that preserve owner isolation and the provider quota already consumed.
+
+### Fixed
+
+- Kept reading and writing edits paired when the AI draft list changes, so a preview never combines values from different cards.
+- Allowed users to exclude generated cards before registration without invalidating the original generation quota reservation.
+- Enlarged the deck return link to a keyboard- and touch-friendly target while preserving the existing layout.
+
+### Verification
+
+- Passed the complete local frontend gate: 58 test files, 794 passing tests, and 9 intentional skips, plus lint, type checking, and a production build.
+- Added and passed 20 S-12 unit tests, 17 integration tests, 7 journey contracts, an isolated real-database gate, and browser checks for text, image, keyboard-only, exclusion, partial-success, and reload flows.
+- Kept merging blocked until S-11 Hosted7, scheduled cleanup, and true browser/HTTP/hosted-database E2E run against a replacement hosted Supabase environment.
+
 ## [0.1.0.0] - 2026-07-14
 
 ### Added

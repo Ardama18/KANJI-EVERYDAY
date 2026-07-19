@@ -3,6 +3,7 @@
   "epic_id": "GH-9",
   "parent_story_id": "S-10",
   "status": "implementation_review",
+  "verification_state": "local_pass_hosted_e2e_not_run_merge_blocked",
   "github_pr_url": "",
   "github_branch": "issue/13-ai-cards-3-6-openai-ui"
 }

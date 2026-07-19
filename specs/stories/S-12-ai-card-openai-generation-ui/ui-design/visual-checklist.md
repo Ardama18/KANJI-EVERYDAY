@@ -53,7 +53,7 @@
 
 - [x] queued/processingでreloadすると同じbatchのstatusが復元され、draft本文やtokenが復元表示されない。
 - [x] terminal後はstatus pointerが消え、古いtracking UIが次回表示されない。
-- [x] flag disabled時はpageが404またはdisabledとなる一方、既存batch statusとsource recovery操作は利用可能である。
+- [ ] flag disabled時はpageが404またはdisabledとなる一方、既存batch statusとsource recovery操作は利用可能である（hosted前後snapshot待ち）。
 
 ## 実行記録
 
@@ -68,7 +68,7 @@
 
 ## 完了条件
 
-- [x] 全check項目がpass、または非該当理由が記録されている。
-- [x] E2E-06がpassする。
+- [ ] 全check項目がpass、または非該当理由が記録されている。
+- [ ] Hosted E2E-06がpassする。
 - [x] 360pxで横overflow 0件。
 - [x] keyboard blocker、accessible name欠落、label/error未関連付けが0件。
