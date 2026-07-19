@@ -1,4 +1,5 @@
 import { getDeckOverview } from "@/actions/deck-actions";
+import { isAiCardImportEnabled } from "@/lib/env";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -77,6 +78,15 @@ export default async function DeckOverviewPage({ params }: DeckOverviewPageProps
 					</Link>
 				)}
 			</div>
+
+			{isAiCardImportEnabled() ? (
+				<Link
+					href={`/decks/${overview.id}/ai/new`}
+					className="mt-4 flex min-h-11 w-full items-center justify-center rounded-xl border border-blue-600 px-4 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+				>
+					AIでカードを作る
+				</Link>
+			) : null}
 		</main>
 	);
 }

@@ -5,7 +5,7 @@ import { createBrowserClient as createBrowserClientUnderTest } from "./client";
 
 const createBrowserClientMock = vi.hoisted(() => vi.fn());
 const createServerClientMock = vi.hoisted(() => vi.fn());
-const getEnvConfigMock = vi.hoisted(() => vi.fn());
+const getPublicEnvConfigMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@supabase/ssr", () => ({
 	createBrowserClient: createBrowserClientMock,
@@ -13,19 +13,17 @@ vi.mock("@supabase/ssr", () => ({
 }));
 
 vi.mock("../env", () => ({
-	getEnvConfig: getEnvConfigMock,
+	getPublicEnvConfig: getPublicEnvConfigMock,
 }));
 
 describe("frontend/src/lib/supabase/client.ts", () => {
 	const envConfig = {
 		supabaseUrl: "https://example.supabase.co",
 		supabaseAnonKey: "anon-key",
-		supabaseServiceRoleKey: "service-role-key",
-		nodeEnv: "test",
 	};
 
 	beforeEach(() => {
-		getEnvConfigMock.mockReset().mockReturnValue(envConfig);
+		getPublicEnvConfigMock.mockReset().mockReturnValue(envConfig);
 		createBrowserClientMock.mockReset();
 		createServerClientMock.mockReset();
 	});
@@ -46,7 +44,7 @@ describe("frontend/src/lib/supabase/client.ts", () => {
 			envConfig.supabaseUrl,
 			envConfig.supabaseAnonKey
 		);
-		expect(getEnvConfigMock).toHaveBeenCalledTimes(1);
+		expect(getPublicEnvConfigMock).toHaveBeenCalledTimes(1);
 	});
 
 	it("Database 型を src/types/database.ts から import し createBrowserClient にジェネリクス適用している", () => {

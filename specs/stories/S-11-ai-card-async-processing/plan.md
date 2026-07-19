@@ -4,12 +4,12 @@ feature: ai-card-async-processing
 type: plan
 version: 2.0.17
 created: 2026-07-15
-updated: 2026-07-16
+updated: 2026-07-19
 based_on: specs/stories/S-11-ai-card-async-processing/design.md
 requirements: specs/stories/S-11-ai-card-async-processing/requirements.md
 adr: specs/adr/ADR-008-ai-card-async-queue-image-processing.md
 ui_design: none
-status: rc1_remediation
+status: accepted
 ---
 
 # 作業計画書: AIカード非同期Queue・画像処理
@@ -353,13 +353,13 @@ npx supabase functions deploy ai-card-import-cleanup --no-verify-jwt
 - [x] **T6-01L: local boundary E2E 10件を実装・実行する**
   - テスト: fixture/harnessを使うlocal boundary E2E-01〜10でworkflow契約と副作用境界を確認する。これはhosted Edge/Storage/認証を通すfull-system acceptanceではない。
   - 完了条件: local 10/10 Green、固定clock/failpoint後始末とsecret非使用を確認する。
-- [ ] **T6-01H: hosted full-system E2Eを実行する**
+- [x] **T6-01H: hosted full-system E2Eを実行する**
   - テスト: authenticated HTTP、実pgmq、hosted Edge、private Storage、owner statusを通し、providerだけbound fake serverにする。
-  - 完了条件: `test:s11:real-e2e`を含むhosted 7 gateがtarget prerequisites付きでpassする。現状は`not_run`/exit 2でmerge blocker。
-- [ ] **T6-02: 全品質ゲート、traceability、rollback/compensation rehearsalを完了する**
+  - 完了条件: `test:s11:real-e2e`を含むHosted7が候補SHA `9b95ab88239022a3e1fc03e028b8ac30b6429bae`で全件passし、release evidenceが`accepted`である。
+- [x] **T6-02: 全品質ゲート、traceability、rollback/compensation rehearsalを完了する**
   - 実装: `traceability.md`にAC↔task↔Unit/IT/E2E↔証跡を確定し、`operations.md`で新規enqueue停止、schedule deactivate、Queue保持/監査、worker rollback、orphan補償、再開順を演習する。 populated DBに破壊的down migrationを適用せず、schema/job/message/trackingを保持して旧同期経路へ自動fallbackしない。
   - 完了条件: 実装=全ACの未対応0、品質=lint/typecheck/build/Unit 15+/Integration 25+/E2E 10+全Green、統合=deactivate中も既存status取得とQueue監査が可能で、再deploy→manual smoke→schedule再開順が再現可能。
-- [ ] **T6-03: shared quality cycleを順番どおり実行し、cleanになってからcommitする**
+- [x] **T6-03: shared quality cycleを順番どおり実行し、cleanになってからcommitする**
   - 検証: `task-executor`にplan全体を一括実行させ、`code-reviewer`でDesign Doc/AC/差分をレビューする。指摘があれば`task-executor`へ戻し、`code-reviewer`がcleanになるまで反復する。その後`quality-fixer`で全品質commandを実行・修正し、最終diffへsecret/生成物/一時fileがないことを確認してcommitする。
   - 完了条件: 実装=plan全checkboxとtraceabilityが完了、品質=code-reviewer cleanかつquality-fixer Green、統合=commitにはS-11成果物だけを含み`.issue-sprint/`と`.codex/steering/implementation-flow.md`を含めない。
 
@@ -720,8 +720,8 @@ any post-cycle-8 remediation or any hosted gate.
 - [x] reviewは固定rubricの累積review 1回と、既指摘・regression・impactだけのverification 1回に有限化する。後発scope拡張はH/Mのsecurity/data loss-corruptionまたは明示AC failureだけ、ASKは凍結contractの曖昧さだけとし、review-until-clean loopを廃止する。
 - [x] H/Mはblock、LはAC/security/data-integrity failureが実証された場合だけblockし、それ以外はfollow-upとする。
 - [x] release validatorはmissing/duplicate/unknown gate、contract drift、SHA/base/evidence mismatch、unresolved local/Hosted/review/secret stateをfail closedにし、authoritative quality runnerの最終gateへ接続する。
-- [ ] RC1のstream retry taxonomy、cleanup-finally、aggregate DB scope、共通child supervisorをRed/Greenで完了する。
-- [ ] 同一candidate SHAでlocal gates、Hosted7、secret scan、累積review 1回、限定verification 1回を証跡化する。Hosted7は現在`not_run`/exit 2のため未受入・merge blockedである。
+- [x] RC1のstream retry taxonomy、cleanup-finally、aggregate DB scope、共通child supervisorをRed/Greenで完了する。
+- [x] 同一candidate SHAでlocal gates、Hosted7、secret scan、累積review 1回、限定verification 1回を証跡化し、`.codex/release-evidence.json`を`accepted`へ確定する。
 
 ## 変更履歴
 
@@ -756,3 +756,4 @@ any post-cycle-8 remediation or any hosted gate.
 | 2026-07-16 | 2.0.15 | implementation_review | cycle 17、case-insensitive service credential pair、explicit apikey保持、spoof/missing/mismatch拒否、hosted merge-blocked SSOTを反映 |
 | 2026-07-16 | 2.0.16 | implementation_review | cycle 18、bounded S-10 DB test settlement、marker cleanup直列化、reservation/date scoped snapshot、hosted merge-blocked SSOTを反映 |
 | 2026-07-16 | 2.0.17 | rc1_remediation | 固定release contract、有限review policy、candidate-bound evidenceとHosted7 merge blockerを導入。RC1実装・local/hosted evidenceはpending |
+| 2026-07-19 | 2.0.17 | accepted | candidate `9b95ab88239022a3e1fc03e028b8ac30b6429bae`のlocal gates、Hosted7、secret scans、累積review、限定verificationが全件passし、release evidenceをacceptedへ同期 |

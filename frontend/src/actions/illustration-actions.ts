@@ -105,7 +105,7 @@ type TriggerSupabaseClient = {
 		insert: (values: {
 			owner_user_id: string;
 			illustration_key: string;
-			status: "pending";
+			status?: "pending";
 		}) => {
 			select: (columns: "id") => {
 				single: () => Promise<QueryResult<MutationIdRow | null>>;
@@ -298,7 +298,6 @@ const insertPendingIllustration = async (params: {
 		.insert({
 			owner_user_id: params.ownerUserId,
 			illustration_key: params.illustrationKey,
-			status: "pending",
 		})
 		.select("id")
 		.single();
@@ -445,6 +444,7 @@ export async function getIllustrationUrl(illustrationKey: string): Promise<strin
 	if (!latestReadyIllustration?.storage_path) {
 		return null;
 	}
+	if (!latestReadyIllustration.storage_path.startsWith(`${authData.user.id}/`)) return null;
 
 	return getSignedUrl(latestReadyIllustration.storage_path, SIGNED_URL_EXPIRES_IN_SECONDS);
 }

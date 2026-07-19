@@ -102,7 +102,7 @@ describe("project-scaffolding 統合テスト", () => {
     const browserSource = readTextFile(PROJECT_FILES.browserClient)
 
     expect(serverSource).toContain("getEnvConfig(")
-    expect(browserSource).toContain("getEnvConfig(")
+    expect(browserSource).toContain("getPublicEnvConfig(")
     expect(serverSource).toMatch(/createSupabaseServerClient(?:<[^>]+>)?\(/)
     expect(browserSource).toMatch(/createSupabaseBrowserClient(?:<[^>]+>)?\(/)
     expect(serverSource).not.toContain("SUPABASE_SERVICE_ROLE_KEY")

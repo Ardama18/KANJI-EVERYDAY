@@ -148,6 +148,7 @@ vi.mock("@/lib/supabase/server", () => ({
 }));
 
 beforeEach(() => {
+	process.env.AI_CARD_IMPORT_ENABLED = "true";
 	routeBoundary.userId = OWNER_ID;
 	routeBoundary.rpc.mockReset();
 	routeBoundary.from.mockReset();
@@ -218,6 +219,7 @@ describe("S-11 commit and queue integration", () => {
 					importRequestHash,
 					cardReservationKey,
 					previewToken,
+					confirmedWarnings: true,
 					request,
 				}),
 			})
@@ -801,6 +803,7 @@ describe("S-11 commit and queue integration", () => {
 				raw_storage_path: rawPath,
 				mime_type: "image/png",
 				byte_size: png.byteLength,
+				usage_scope: "generation_source",
 			},
 			error: null,
 		});
@@ -1091,7 +1094,8 @@ describe("S-11 commit and queue integration", () => {
 			["blank-secret", "   "],
 		] as const) {
 			const request = await validCommitRequest(suffix);
-			if (configuredSecret === undefined) delete process.env.AI_PREVIEW_HMAC_SECRET;
+			if (configuredSecret === undefined)
+				Reflect.deleteProperty(process.env, "AI_PREVIEW_HMAC_SECRET");
 			else process.env.AI_PREVIEW_HMAC_SECRET = configuredSecret;
 			const response = await POST(request);
 			expect(response.status).toBe(500);
@@ -1164,13 +1168,13 @@ describe("S-11 commit and queue integration", () => {
 		const parsedMeta = JSON.parse(meta) as Record<string, unknown>;
 		expect(parsedMeta.remediation_cycle).toBe(19);
 		expect(parsedMeta.ssot_version).toBe("2.0.17");
-		expect(parsedMeta.verification_state).toBe("rc1_local_pending_hosted_7_not_run_merge_blocked");
-		expect(meta).not.toMatch(/ready_for_commit|zero_findings|approved/u);
+		expect(parsedMeta.verification_state).toBe("accepted_hosted_7_passed");
+		expect(parsedMeta.status).toBe("accepted");
 		expect(plan).toContain("version: 2.0.17");
 		expect(traceability).toContain("version: 2.0.17");
 		expect(plan).toContain("[x] **T6-01L: local boundary E2E");
-		expect(plan).toContain("[ ] **T6-01H: hosted full-system E2E");
-		expect(operations).toContain("Current cycle-19 verification state: `RC1 local evidence pending; hosted 7 not_run; merge blocked`");
+		expect(plan).toContain("[x] **T6-01H: hosted full-system E2E");
+		expect(operations).toContain("Current cycle-19 verification state: `accepted; local gates、Hosted7、secret scans、2 reviews passed`");
 		expect(traceability).not.toMatch(/\bcurrent\s+R12\b/iu);
 		expect(JSON.parse(releaseContract)).toMatchObject({ issue: 12, story: "S-11" });
 		const parsedEvidence = JSON.parse(releaseEvidence) as {
@@ -1180,15 +1184,13 @@ describe("S-11 commit and queue integration", () => {
 				readonly exitCode?: unknown;
 			}[];
 		};
-		expect(["pending_hosted", "accepted"]).toContain(parsedEvidence.state);
-		if (parsedEvidence.state === "accepted") {
-			expect(parsedEvidence.hostedGates).toHaveLength(7);
-			expect(
-				parsedEvidence.hostedGates?.every(
-					(gate) => gate.status === "passed" && gate.exitCode === 0
-				)
-			).toBe(true);
-		}
+		expect(parsedEvidence.state).toBe("accepted");
+		expect(parsedEvidence.hostedGates).toHaveLength(7);
+		expect(
+			parsedEvidence.hostedGates?.every(
+				(gate) => gate.status === "passed" && gate.exitCode === 0
+			)
+		).toBe(true);
 	});
 
 	it("R13-F3 schedule migration denies PUBLIC before creating SECURITY DEFINER functions", async () => {
@@ -3593,6 +3595,7 @@ describe("S-11 reviewer regression boundaries", () => {
 				raw_storage_path: rawPath,
 				mime_type: "image/png",
 				byte_size: input.byteLength,
+				usage_scope: "generation_source",
 			},
 			error: null,
 		});
@@ -3655,6 +3658,7 @@ describe("S-11 reviewer regression boundaries", () => {
 				raw_storage_path: rawPath,
 				mime_type: "image/png",
 				byte_size: png.byteLength,
+				usage_scope: "generation_source",
 			},
 			error: null,
 		});
@@ -3742,6 +3746,7 @@ describe("S-11 reviewer regression boundaries", () => {
 				raw_storage_path: rawPath,
 				mime_type: "image/png",
 				byte_size: 1,
+				usage_scope: "generation_source",
 			},
 			error: null,
 		});
@@ -4383,6 +4388,7 @@ async function validCommitRequest(suffix: string): Promise<Request> {
 			importRequestHash,
 			cardReservationKey,
 			previewToken,
+			confirmedWarnings: true,
 			request,
 		}),
 	});

@@ -27,6 +27,7 @@ type DeckRow = {
 
 type ReviewStateRow = {
 	user_id: string;
+	card_id: string;
 	level: number;
 	due_date: string;
 	last_rating: "good" | "hard" | "again" | null;
@@ -37,7 +38,6 @@ type ReviewStateRow = {
 type DeckCardRow = {
 	deck_id: string;
 	card_id: string;
-	review_states: ReviewStateRow[] | ReviewStateRow | null;
 };
 
 type SetupOptions = {
@@ -45,6 +45,7 @@ type SetupOptions = {
 	decksList?: DeckRow[];
 	deckOverview?: DeckRow | null;
 	deckCards?: DeckCardRow[];
+	reviewStates?: ReviewStateRow[];
 };
 
 const setupClient = (options: SetupOptions = {}) => {
@@ -65,6 +66,10 @@ const setupClient = (options: SetupOptions = {}) => {
 	});
 	const deckCardsInMock = vi.fn().mockResolvedValue({
 		data: options.deckCards ?? [],
+		error: null,
+	});
+	const reviewStatesInMock = vi.fn().mockResolvedValue({
+		data: options.reviewStates ?? [],
 		error: null,
 	});
 
@@ -91,6 +96,11 @@ const setupClient = (options: SetupOptions = {}) => {
 	const deckCardsSelectMock = vi.fn().mockReturnValue({
 		in: deckCardsInMock,
 	});
+	const reviewStatesSelectMock = vi.fn().mockReturnValue({
+		eq: vi.fn().mockReturnValue({
+			in: reviewStatesInMock,
+		}),
+	});
 
 	const fromMock = vi.fn((table: string) => {
 		if (table === "decks") {
@@ -99,6 +109,10 @@ const setupClient = (options: SetupOptions = {}) => {
 
 		if (table === "deck_cards") {
 			return { select: deckCardsSelectMock };
+		}
+
+		if (table === "review_states") {
+			return { select: reviewStatesSelectMock };
 		}
 
 		throw new Error(`Unsupported table: ${table}`);
@@ -119,6 +133,7 @@ const setupClient = (options: SetupOptions = {}) => {
 		decksMaybeSingleMock,
 		deckCardsSelectMock,
 		deckCardsInMock,
+		reviewStatesInMock,
 	};
 };
 
@@ -160,52 +175,38 @@ describe("frontend/src/actions/deck-actions.ts", () => {
 				{ id: "deck-2", name: "小学4年生", new_limit_per_day: 20 },
 			],
 			deckCards: [
+				{ deck_id: "deck-1", card_id: "card-new" },
+				{ deck_id: "deck-1", card_id: "card-learn" },
+				{ deck_id: "deck-1", card_id: "card-due" },
+				{ deck_id: "deck-2", card_id: "card-future" },
+			],
+			reviewStates: [
 				{
-					deck_id: "deck-1",
-					card_id: "card-new",
-					review_states: null,
-				},
-				{
-					deck_id: "deck-1",
+					user_id: "user-1",
 					card_id: "card-learn",
-					review_states: [
-						{
-							user_id: "user-1",
-							level: 1,
-							due_date: "1900-01-01",
-							last_rating: "hard",
-							retry_today_count: 0,
-							last_reviewed_at: "2026-01-01T00:00:00.000Z",
-						},
-					],
+					level: 1,
+					due_date: "1900-01-01",
+					last_rating: "hard",
+					retry_today_count: 0,
+					last_reviewed_at: "2026-01-01T00:00:00.000Z",
 				},
 				{
-					deck_id: "deck-1",
+					user_id: "user-1",
 					card_id: "card-due",
-					review_states: [
-						{
-							user_id: "user-1",
-							level: 3,
-							due_date: "1900-01-01",
-							last_rating: "good",
-							retry_today_count: 0,
-							last_reviewed_at: "2026-01-01T00:00:00.000Z",
-						},
-					],
+					level: 3,
+					due_date: "1900-01-01",
+					last_rating: "good",
+					retry_today_count: 0,
+					last_reviewed_at: "2026-01-01T00:00:00.000Z",
 				},
 				{
-					deck_id: "deck-2",
+					user_id: "user-1",
 					card_id: "card-future",
-					review_states: [
-						{
-							user_id: "user-1",
-							level: 5,
-							due_date: "2999-01-01",
-							last_rating: "good",
-							retry_today_count: 0,
-							last_reviewed_at: "2026-01-01T00:00:00.000Z",
-						},
-					],
+					level: 5,
+					due_date: "2999-01-01",
+					last_rating: "good",
+					retry_today_count: 0,
+					last_reviewed_at: "2026-01-01T00:00:00.000Z",
 				},
 			],
 		});
@@ -242,7 +243,7 @@ describe("frontend/src/actions/deck-actions.ts", () => {
 	});
 
 	it("UT-AC10-OVERVIEW-TOTAL: getDeckOverview は total=new+learn+due を返す", async () => {
-		const { deckCardsInMock } = setupClient({
+		const { deckCardsInMock, reviewStatesInMock } = setupClient({
 			userId: "user-1",
 			deckOverview: {
 				id: "deck-1",
@@ -250,18 +251,18 @@ describe("frontend/src/actions/deck-actions.ts", () => {
 				new_limit_per_day: 15,
 			},
 			deckCards: [
-				{ deck_id: "deck-1", card_id: "new-card", review_states: null },
+				{ deck_id: "deck-1", card_id: "new-card" },
+				{ deck_id: "deck-1", card_id: "learn-card" },
+			],
+			reviewStates: [
 				{
-					deck_id: "deck-1",
+					user_id: "user-1",
 					card_id: "learn-card",
-					review_states: {
-						user_id: "user-1",
-						level: 1,
-						due_date: "1900-01-01",
-						last_rating: "hard",
-						retry_today_count: 0,
-						last_reviewed_at: null,
-					},
+					level: 1,
+					due_date: "1900-01-01",
+					last_rating: "hard",
+					retry_today_count: 0,
+					last_reviewed_at: null,
 				},
 			],
 		});
@@ -269,6 +270,7 @@ describe("frontend/src/actions/deck-actions.ts", () => {
 		const overview = await getDeckOverview("deck-1");
 
 		expect(deckCardsInMock).toHaveBeenCalledWith("deck_id", ["deck-1"]);
+		expect(reviewStatesInMock).toHaveBeenCalledWith("card_id", ["new-card", "learn-card"]);
 		expect(overview).toEqual({
 			id: "deck-1",
 			name: "小学3年生",

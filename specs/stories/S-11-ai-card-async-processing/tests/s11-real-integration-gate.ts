@@ -155,7 +155,7 @@ await db.execute(`
 				storage_path='16000000-0000-4000-8000-00000000000a/resurrected.png'
 			WHERE id='16000000-0000-4000-8000-000000000030';
 			RAISE EXCEPTION 'owner resurrected cleanup-deleted illustration';
-		EXCEPTION WHEN SQLSTATE 'P1008' THEN NULL; END;
+		EXCEPTION WHEN SQLSTATE 'P1008' OR SQLSTATE '42501' THEN NULL; END;
 		-- deleted-attach-rejected: direct card illustration-key mutation is also DB-fenced.
 		BEGIN
 			UPDATE public.cards SET illustration_key='s11-deleted-attach'

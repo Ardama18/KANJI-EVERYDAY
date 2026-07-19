@@ -5,10 +5,11 @@ import { hashImportRequest } from "@/lib/ai-import/canonical-request";
 import { mapAiImportError } from "@/lib/ai-import/errors";
 import { PreviewTokenError, verifyPreviewToken } from "@/lib/ai-import/preview-token";
 import { validateImportRequest } from "@/lib/ai-import/schema";
-import { getAiPreviewHmacSecret } from "@/lib/env";
+import { getAiPreviewHmacSecret, isAiCardImportEnabled } from "@/lib/env";
 import { createServerClient, createServiceRoleClient } from "@/lib/supabase/server";
 
 export async function POST(request: Request): Promise<Response> {
+	if (!isAiCardImportEnabled()) return safeError("FEATURE_DISABLED", 404);
 	const correlationId = crypto.randomUUID();
 	try {
 		const authClient = createServerClient();
@@ -21,6 +22,7 @@ export async function POST(request: Request): Promise<Response> {
 			return safeError("VALIDATION_ERROR", 400);
 		}
 		if (!isRecord(body)) return safeError("VALIDATION_ERROR", 400);
+		if (body.confirmedWarnings !== true) return safeError("CONFIRMATION_REQUIRED", 400);
 		const idempotencyKey = boundedString(body.idempotencyKey, 128);
 		const importRequestHash = hexHash(body.importRequestHash);
 		const cardReservationKey = boundedString(body.cardReservationKey, 128);
@@ -54,9 +56,8 @@ export async function POST(request: Request): Promise<Response> {
 		const service = createServiceRoleClient();
 		let result: Awaited<ReturnType<typeof service.rpc>>;
 		try {
-			result = await service.rpc("commit_import_async", {
+			result = await service.rpc("commit_generated_import_async", {
 				p_actor_user_id: authData.user.id,
-				p_source: "app_ai",
 				p_idempotency_key: idempotencyKey,
 				p_import_request_hash: importRequestHash,
 				p_request: normalizedRequestToJson(validated.data),

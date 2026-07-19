@@ -459,6 +459,7 @@ export type Database = {
 					status: string;
 					storage_path: string;
 					upload_key: string;
+					usage_scope: string;
 					width: number | null;
 				};
 				Insert: {
@@ -488,6 +489,7 @@ export type Database = {
 					status?: string;
 					storage_path: string;
 					upload_key: string;
+					usage_scope?: string;
 					width?: number | null;
 				};
 				Update: {
@@ -517,6 +519,7 @@ export type Database = {
 					status?: string;
 					storage_path?: string;
 					upload_key?: string;
+					usage_scope?: string;
 					width?: number | null;
 				};
 				Relationships: [];
@@ -921,6 +924,16 @@ export type Database = {
 				};
 				Returns: Json;
 			};
+			commit_generated_import_async: {
+				Args: {
+					p_actor_user_id: string;
+					p_card_reservation_key: string;
+					p_idempotency_key: string;
+					p_import_request_hash: string;
+					p_request: Json;
+				};
+				Returns: Json;
+			};
 			get_ai_import_status: {
 				Args: {
 					p_actor_user_id: string;
@@ -935,6 +948,46 @@ export type Database = {
 					p_upload_key: string;
 					p_declared_mime: string;
 					p_byte_size: number;
+				};
+				Returns: Json;
+			};
+			prepare_ai_source_upload_scoped: {
+				Args: {
+					p_owner_user_id: string;
+					p_upload_key: string;
+					p_declared_mime: string;
+					p_byte_size: number;
+					p_usage_scope?: string;
+				};
+				Returns: Json;
+			};
+			get_ai_generation_sources: {
+				Args: { p_owner_user_id: string; p_upload_ids: string[] };
+				Returns: Json;
+			};
+			release_ai_generation_source: {
+				Args: { p_owner_user_id: string; p_upload_id: string };
+				Returns: Json;
+			};
+			complete_ai_generation_source_release: {
+				Args: {
+					p_owner_user_id: string;
+					p_upload_id: string;
+					p_kind: string;
+					p_bucket: string;
+					p_path: string;
+					p_deleted: boolean;
+				};
+				Returns: Json;
+			};
+			validate_ai_import_preview: {
+				Args: {
+					p_owner_user_id: string;
+					p_deck_id: string;
+					p_reservation_key: string;
+					p_import_request_hash: string;
+					p_upload_ids?: string[];
+					p_items?: Json;
 				};
 				Returns: Json;
 			};

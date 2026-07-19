@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { createSourceImageCodec } from "@/lib/ai-import/source-image-codec";
 import { getEnvConfig } from "@/lib/env";
+import { isAiCardImportEnabled } from "@/lib/env";
 import { createServerClient, createServiceRoleClient } from "@/lib/supabase/server";
 import type { NormalizedImage } from "../../../../../../../supabase/functions/_shared/ai-card-import/image-codec";
 import { sanitizeSourceImage } from "../../../../../../../supabase/functions/_shared/ai-card-import/image-codec";
@@ -14,12 +15,14 @@ interface UploadRow {
 	raw_storage_path: string | null;
 	mime_type: string;
 	byte_size: number;
+	usage_scope: string;
 }
 
 const MAX_SOURCE_BYTES = 10 * 1024 * 1024;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 export async function POST(request: Request): Promise<Response> {
+	if (!isAiCardImportEnabled()) return error("FEATURE_DISABLED", 404);
 	const authClient = createServerClient();
 	const { data: authData } = await authClient.auth.getUser();
 	if (authData.user === null) return error("UNAUTHORIZED", 401);
@@ -35,7 +38,7 @@ export async function POST(request: Request): Promise<Response> {
 	const service = createServiceRoleClient();
 	const { data: rowData, error: lookupError } = await service
 		.from("ai_uploads")
-		.select("id,owner_user_id,status,raw_storage_path,mime_type,byte_size")
+		.select("id,owner_user_id,status,raw_storage_path,mime_type,byte_size,usage_scope")
 		.eq("id", uploadId)
 		.eq("owner_user_id", authData.user.id)
 		.maybeSingle();
@@ -44,7 +47,8 @@ export async function POST(request: Request): Promise<Response> {
 		lookupError !== null ||
 		row === null ||
 		row.status !== "prepared" ||
-		row.raw_storage_path === null
+		row.raw_storage_path === null ||
+		(row.usage_scope !== "generation_source" && row.usage_scope !== "card_illustration")
 	)
 		return error("NOT_FOUND", 404);
 	const bucket = service.storage.from("ai-card-sources");

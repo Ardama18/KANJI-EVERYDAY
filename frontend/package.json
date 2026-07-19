@@ -29,7 +29,12 @@
     "test:s11:local-real-integration": "vite-node -c vitest.config.ts ../specs/stories/S-11-ai-card-async-processing/tests/s11-local-real-integration-gate.ts",
     "test:s11:real-e2e": "vite-node -c vitest.config.ts ../specs/stories/S-11-ai-card-async-processing/tests/s11-real-e2e-gate.ts",
     "test:s11:deno": "vite-node -c vitest.config.ts ../specs/stories/S-11-ai-card-async-processing/tests/s11-deno-gate.ts",
-    "test:s11:inventory": "vitest run ../specs/stories/S-11-ai-card-async-processing/tests/ai-card-async-processing.test.ts ../specs/stories/S-11-ai-card-async-processing/tests/ai-card-async-processing.int.test.ts ../specs/stories/S-11-ai-card-async-processing/tests/ai-card-async-processing.e2e.test.ts"
+    "test:s11:inventory": "vitest run ../specs/stories/S-11-ai-card-async-processing/tests/ai-card-async-processing.test.ts ../specs/stories/S-11-ai-card-async-processing/tests/ai-card-async-processing.int.test.ts ../specs/stories/S-11-ai-card-async-processing/tests/ai-card-async-processing.e2e.test.ts",
+    "test:s12:unit": "vitest run ../specs/stories/S-12-ai-card-openai-generation-ui/tests/ai-card-openai-generation-ui.test.ts",
+    "test:s12:integration": "vitest run ../specs/stories/S-12-ai-card-openai-generation-ui/tests/ai-card-openai-generation-ui.int.test.ts",
+    "test:s12:e2e": "vitest run ../specs/stories/S-12-ai-card-openai-generation-ui/tests/ai-card-openai-generation-ui.e2e.test.ts",
+    "test:s12:real-db": "vite-node -c vitest.config.ts ../specs/stories/S-12-ai-card-openai-generation-ui/tests/s12-local-real-db-gate.ts",
+    "test:s12:inventory": "vitest run ../specs/stories/S-12-ai-card-openai-generation-ui/tests/ai-card-openai-generation-ui.test.ts ../specs/stories/S-12-ai-card-openai-generation-ui/tests/ai-card-openai-generation-ui.int.test.ts ../specs/stories/S-12-ai-card-openai-generation-ui/tests/ai-card-openai-generation-ui.e2e.test.ts"
   },
   "dependencies": {
     "@imagemagick/magick-wasm": "0.0.35",

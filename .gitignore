@@ -8,3 +8,4 @@ coverage/
 supabase/.temp/
 *.log
 .DS_Store
+.gstack/

@@ -1,7 +1,7 @@
 # S-11 root-resolution RC1 remediation cycle 19
 
-- Status: `rc1_remediation`
-- Verification: `local evidence pending; hosted 7 not_run/exit 2; merge blocked`
+- Status: `accepted`
+- Verification: `local gates、Hosted7、secret scans、2 reviews passed; release evidence accepted`
 - Frozen scope: Issue #12, S-11 AC-01..AC-09, base `45969b140d1817be143fe6331159b88b647c2e29`
 
 ## Release contract first
@@ -25,13 +25,13 @@
 
 Targeted RC1 evidence before candidate commit: release validator 5/5, quality database 35/35,
 S-10 UT-DB 6/6, and S-11 R23-F1 6/6 passed; typecheck passed. These are working-tree
-results, not candidate-bound release evidence, and do not change the Hosted7 blocker.
+results, not candidate-bound release evidence. Final results are recorded separately in `.codex/release-evidence.json`.
 - [x] Correct the ordinary Vitest concurrency explanation against `fileParallelism:false`, remove redundant CLI worker flags, and retain an executable deterministic-runner assertion.
 - [x] Fixed cumulative review M1 / R23-F3: codec setup failure is a safe retryable 503 that leaves prepared/raw state untouched; rejected initialization cache is cleared, while successful concurrent initialization remains singleton. This remediation does not expand the frozen rubric.
 
-## Evidence pending
+## Evidence complete
 
-- [ ] Run all fixed local gates on one final candidate SHA and record commands/exits/counts/residue/source results.
-- [ ] Run all Hosted7 commands on that same SHA; `not_run`/exit 2 is not a pass.
-- [ ] Run redacted secret scans, one cumulative review, and one limited verification on that same SHA.
-- [ ] Keep merge blocked until the validator accepts the complete evidence set.
+- [x] Run all fixed local gates on one final candidate SHA and record commands/exits/counts/residue/source results.
+- [x] Run all Hosted7 commands on that same SHA; all seven passed with exit 0.
+- [x] Run redacted secret scans, one cumulative review, and one limited verification on that same SHA.
+- [x] Confirm the complete evidence set is `accepted` for candidate SHA `9b95ab88239022a3e1fc03e028b8ac30b6429bae`.

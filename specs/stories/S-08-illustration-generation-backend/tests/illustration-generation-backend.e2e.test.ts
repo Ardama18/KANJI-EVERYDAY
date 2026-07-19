@@ -388,7 +388,6 @@ describe("illustration-generation-backend E2Eテスト", () => {
 		expect(spies.insertMock).toHaveBeenCalledWith({
 			owner_user_id: "user-1",
 			illustration_key: "kanji-key-1",
-			status: "pending",
 		});
 		expect(processMock).toHaveBeenCalledTimes(1);
 	});

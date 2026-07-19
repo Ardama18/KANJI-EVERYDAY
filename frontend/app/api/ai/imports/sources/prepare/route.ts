@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { isAiCardImportEnabled } from "@/lib/env";
 import { createServerClient, createServiceRoleClient } from "@/lib/supabase/server";
 
 const MAX_SOURCE_COUNT = 5;
@@ -13,7 +14,10 @@ interface SourceMetadata {
 	readonly byteSize: number;
 }
 
+type UsageScope = "generation_source" | "card_illustration";
+
 export async function POST(request: Request): Promise<Response> {
+	if (!isAiCardImportEnabled()) return error("FEATURE_DISABLED", 404);
 	const authClient = createServerClient();
 	const { data: authData } = await authClient.auth.getUser();
 	if (authData.user === null) return error("UNAUTHORIZED", 401);
@@ -23,16 +27,17 @@ export async function POST(request: Request): Promise<Response> {
 	} catch {
 		return error("VALIDATION_ERROR", 400);
 	}
-	const sources = parseSources(body);
-	if (sources === undefined) return error("VALIDATION_ERROR", 400);
+	const parsed = parseSources(body);
+	if (parsed === undefined) return error("VALIDATION_ERROR", 400);
 	const service = createServiceRoleClient();
 	const uploads: { uploadId: string; path: string; token: string }[] = [];
-	for (const source of sources) {
-		const { data, error: rpcError } = await service.rpc("prepare_ai_source_upload", {
+	for (const source of parsed.sources) {
+		const { data, error: rpcError } = await service.rpc("prepare_ai_source_upload_scoped", {
 			p_owner_user_id: authData.user.id,
 			p_upload_key: source.uploadKey,
 			p_declared_mime: source.declaredMime,
 			p_byte_size: source.byteSize,
+			p_usage_scope: parsed.usageScope,
 		});
 		if (rpcError !== null || !isPrepared(data)) return error("SOURCE_PREPARE_FAILED", 503);
 		const { data: signed, error: signedError } = await service.storage
@@ -44,7 +49,9 @@ export async function POST(request: Request): Promise<Response> {
 	return NextResponse.json({ uploads }, { status: 201 });
 }
 
-function parseSources(value: unknown): readonly SourceMetadata[] | undefined {
+function parseSources(
+	value: unknown
+): { readonly sources: readonly SourceMetadata[]; readonly usageScope: UsageScope } | undefined {
 	if (
 		!isRecord(value) ||
 		!Array.isArray(value.sources) ||
@@ -52,6 +59,8 @@ function parseSources(value: unknown): readonly SourceMetadata[] | undefined {
 		value.sources.length > MAX_SOURCE_COUNT
 	)
 		return undefined;
+	const usageScope = value.usageScope === undefined ? "card_illustration" : value.usageScope;
+	if (usageScope !== "generation_source" && usageScope !== "card_illustration") return undefined;
 	const result: SourceMetadata[] = [];
 	let total = 0;
 	for (const entry of value.sources) {
@@ -75,7 +84,7 @@ function parseSources(value: unknown): readonly SourceMetadata[] | undefined {
 			byteSize: entry.byteSize,
 		});
 	}
-	return total <= MAX_TOTAL_BYTES ? result : undefined;
+	return total <= MAX_TOTAL_BYTES ? { sources: result, usageScope } : undefined;
 }
 
 function isPrepared(value: unknown): value is { readonly uploadId: string; readonly path: string } {

@@ -1,8 +1,8 @@
 # S-11 operations and rollback runbook
 
-Current cycle-19 verification state: `RC1 local evidence pending; hosted 7 not_run; merge blocked`.
-Cycle-18 local results below are historical. They do not accept the RC1 candidate,
-complete hosted full-system E2E, or authorize merge.
+Current cycle-19 verification state: `accepted; local gates、Hosted7、secret scans、2 reviews passed`.
+Cycle-18 local results below are historical. Final acceptance is bound to candidate
+`9b95ab88239022a3e1fc03e028b8ac30b6429bae` in `.codex/release-evidence.json`.
 
 The release decision is finite and machine-readable in `.codex/release-contract.json`.
 Run exactly one cumulative fixed-rubric review and then exactly one verification
@@ -307,7 +307,7 @@ Age cleanup is exact: source/orphan rows are protected through 23:59:59 and beco
 - Ref inputs are resolved first with Git symbolic-full-name semantics and must produce one existing full `refs/...` name. `HEAD`, local branches, remote-tracking branches, and full ref names are supported; revision expressions, object names, blank/shell-like input, ambiguous/unresolved refs, and detached non-ref names fail closed.
 - Default selection remains deterministic `origin/main` then `main`. The committed diff still runs as `git diff --check <resolved-sha>...HEAD`, followed by an independent worktree check.
 - Red reproduced four failing safety contracts; Green passed DB safety 27/27. The explicit-`main` root runner passed fresh/upgrade/failure/local-real, lint 97 files, typecheck, configured build with existing warnings, ordinary Vitest 672 passed/8 conditional skips of 680 definitions, S-11 inventory 233/233, focused 53/53, committed diff, and worktree diff. The real concurrent lifecycle harness passed and final strict-prefix database residue was 0.
-- Hosted real integration/E2E, resource, Deno, and three direct database prerequisite gates remain `not_run`/exit 2 until their explicit prerequisites are supplied. Verification remains `hosted 7 not_run; merge blocked`.
+- Final candidate-bound acceptance supersedes this cycle-18 pending state: all Hosted7 gates passed with exit 0 and release evidence is `accepted`.
 
 ## Final ship review remediation cycle 14 (2026-07-16)
 

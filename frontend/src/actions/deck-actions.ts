@@ -17,7 +17,13 @@ type DeckRow = Pick<
 
 type ReviewStateRow = Pick<
 	Database["public"]["Tables"]["review_states"]["Row"],
-	"user_id" | "level" | "due_date" | "last_rating" | "retry_today_count" | "last_reviewed_at"
+	| "user_id"
+	| "card_id"
+	| "level"
+	| "due_date"
+	| "last_rating"
+	| "retry_today_count"
+	| "last_reviewed_at"
 >;
 
 type DeckCardQueryRow = {
@@ -86,7 +92,8 @@ const requireAuthenticatedUserId = async (
 
 const fetchDeckCardRows = async (
 	supabase: ReturnType<typeof createServerClient>,
-	deckIds: string[]
+	deckIds: string[],
+	userId: string
 ): Promise<DeckCardQueryRow[]> => {
 	if (deckIds.length === 0) {
 		return [];
@@ -94,16 +101,37 @@ const fetchDeckCardRows = async (
 
 	const { data, error } = await supabase
 		.from("deck_cards")
-		.select(
-			"deck_id, card_id, review_states!left(user_id, level, due_date, last_rating, retry_today_count, last_reviewed_at)"
-		)
+		.select("deck_id, card_id")
 		.in("deck_id", deckIds);
 
 	if (error) {
 		throw new Error(`Failed to fetch deck cards: ${error.message}`);
 	}
 
-	return (data ?? []) as DeckCardQueryRow[];
+	const deckCards = (data ?? []) as Pick<DeckCardQueryRow, "deck_id" | "card_id">[];
+	const cardIds = [...new Set(deckCards.map((row) => row.card_id))];
+	if (cardIds.length === 0) {
+		return [];
+	}
+
+	const { data: reviewData, error: reviewError } = await supabase
+		.from("review_states")
+		.select("user_id, card_id, level, due_date, last_rating, retry_today_count, last_reviewed_at")
+		.eq("user_id", userId)
+		.in("card_id", cardIds);
+
+	if (reviewError) {
+		throw new Error(`Failed to fetch review states: ${reviewError.message}`);
+	}
+
+	const reviewStatesByCardId = new Map(
+		((reviewData ?? []) as ReviewStateRow[]).map((row) => [row.card_id, row] as const)
+	);
+
+	return deckCards.map((row) => ({
+		...row,
+		review_states: reviewStatesByCardId.get(row.card_id) ?? null,
+	}));
 };
 
 const buildCardsByDeck = (
@@ -158,7 +186,7 @@ export async function getDecksWithCounts(): Promise<DeckWithCounts[]> {
 	}
 
 	const deckIds = decks.map((deck) => deck.id);
-	const deckCardRows = await fetchDeckCardRows(supabase, deckIds);
+	const deckCardRows = await fetchDeckCardRows(supabase, deckIds, userId);
 	const cardsByDeck = buildCardsByDeck(deckCardRows, deckIds, userId);
 	const today = getTodayJST();
 
@@ -188,7 +216,7 @@ export async function getDeckOverview(deckId: string): Promise<DeckOverview | nu
 		return null;
 	}
 
-	const deckCardRows = await fetchDeckCardRows(supabase, [deck.id]);
+	const deckCardRows = await fetchDeckCardRows(supabase, [deck.id], userId);
 	const cardsByDeck = buildCardsByDeck(deckCardRows, [deck.id], userId);
 	const today = getTodayJST();
 	const counts = countByCategory(cardsByDeck.get(deck.id) ?? [], today);
