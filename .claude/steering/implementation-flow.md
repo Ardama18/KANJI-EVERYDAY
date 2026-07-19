@@ -30,6 +30,13 @@
 
 既存 steering とコードが食い違う場合は、`frontend/package.json`、現在のコード、`specs/` の順で実態を確認し、矛盾を報告する。別プロジェクトの構成を推測で適用しない。
 
+### Codex 実行時の運用制約
+
+- このリポジトリでは、ユーザーが明示的に要求した場合にのみサブエージェントを使う。skill や共通既定がサブエージェント利用を示していても、明示要求がない場合は primary agent がローカルに実行する。
+- GitHub issue / PR / comment 操作は GitHub Connector/MCP を優先する。Codex sandbox で GitHub CLI が必要な場合は bare `gh` ではなく `GH_PAGER=cat gh ...` を使う。
+- bare `gh` または network command が `api.github.com` の DNS / 接続エラーを返した場合、同じコマンドを繰り返さない。Connector/MCP、`GH_PAGER=cat` 付き CLI、またはユーザー側 local terminal 実行へ切り替える。
+- `gh pr merge` が non-zero を返しても、server-side merge が完了している場合がある。再試行前に `gh pr view --json state,mergeCommit,url`、base branch の `git log`、PR close 状態を確認し、重複 merge 操作を避ける。
+
 ## 3. 入力解決
 
 ### ストーリーディレクトリ
