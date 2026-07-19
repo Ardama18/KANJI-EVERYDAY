@@ -37,6 +37,7 @@
 - Server Component を標準とし、必要最小限の境界だけ Client Component にする。
 - render 中に副作用を起こさない。
 - list key に不安定な index を使わない（静的で並び替えのない一覧を除く）。
+- `defaultValue` / `defaultChecked`は初回mount時だけ反映される。同じkeyのままserver DTOを再取得する編集UIでは、controlled stateにするか、`updatedAt`と編集対象relationを含む同期keyでremountし、dirty入力が最新server値へ戻ることをinteraction testで固定する。
 - button の type、form の pending、二重送信防止、error message を明示する。
 - `redirect` / `notFound` の制御フローを generic catch で潰さない。
 

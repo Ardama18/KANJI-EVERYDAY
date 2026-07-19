@@ -185,6 +185,8 @@ task-executor 完了後は、共通既定に従い次を必ず行う。
 6. `git diff` と `git status` で変更範囲を確認して commit する。
 7. 完了内容、実行したテスト、未実行項目、残課題を報告する。
 
+最終レビューや実DB・実ブラウザ検証で認証claims、lock順、状態遷移、error contractなどの設計上の不変条件を変更した場合は、実装だけを直して完了しない。同じ変更内で対象Storyの`requirements.md` / `design.md` / `plan.md`と関連ADRを再照合し、実装済み契約へ更新する。
+
 task-executor の構造化レスポンスには、少なくとも `status`、`changeSummary`、`filesModified`、`testsAdded`、`checksRun` を含める。`taskFilePath` や tasks ファイルの更新結果は要求しない。
 
 ## 10. CHECKPOINT
@@ -211,4 +213,3 @@ PR merge 後にストーリーを完了扱いにする場合は、既存スト�
 - code-reviewer の指摘が解消済みである。
 - `$ar-core:quality-fixer` が approved を返している。
 - `tasks/` や個別 task ファイルを新規生成・更新していない。
-

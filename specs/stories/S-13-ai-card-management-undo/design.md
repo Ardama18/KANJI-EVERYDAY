@@ -64,7 +64,7 @@ public Seed、直接作成private card、別owner、failed/deleted/undone item�
 
 ### 3.2 RPC security
 
-public wrapperは`request.jwt.claim.role = authenticated`と`request.jwt.claim.sub`からactorを導出し、caller指定のowner IDは受理しない。SECURITY DEFINER internalはmigration owner、`SET search_path = pg_catalog, pg_temp`、完全修飾名を使用する。PUBLIC/anon/authenticated/service_roleからinternal EXECUTEをrevokeし、authenticatedにはwrapperだけをgrantする。
+public wrapperはPostgREST v14が設定するpacked `request.jwt.claims` JSONの`role = authenticated`とUUID形式の`sub`からactorを導出し、caller指定のowner IDは受理しない。missing / malformed claims、role不一致、UUIDでない`sub`は未認証として拒否する。SECURITY DEFINER internalはmigration owner、`SET search_path = pg_catalog, pg_temp`、完全修飾名を使用する。PUBLIC/anon/authenticated/service_roleからinternal EXECUTEをrevokeし、authenticatedにはwrapperだけをgrantする。
 
 既存管理RPCはAI itemの存在を必須化していない経路があるため、新規RPCだけを追加しない。forward migrationで既存wrapper/internalを置換して上記predicateを共有し、非AI private cardを管理できる旧経路を残さない。個別削除もbulk primitiveの1件呼び出しに収束させる。
 
@@ -144,13 +144,13 @@ illustration付け替え、個別/複数DELETE、undoは常に次の集合lock�
 
 `undo_import_internal`をforward migrationで置換し、既存のowner、監査、冪等result、auto deck契約を保ちながらS-11 lock順を追加する。
 
-1. owner batchをlockし、既にundoneなら保存済み`undo_result`を返す。
-2. tombstone itemを除く現存cardを確定する。tombstoneは拒否・削除対象外でskip件数へ含める。
-3. `user_edited_at IS NOT NULL`のitemが1件でもあれば`CARD_MODIFIED`で全体拒否する。
+1. owner/sourceを確認後、S-11 workerと同じく対象batchの`ai_import_concept_jobs`を最初にlockする。`queued` / `processing` jobが1件でもあれば副作用0のconflictとして全体拒否する。
+2. tombstone itemを除く現存cardを確定し、cards→illustrations→trackingの集合lockを取得した後にbatch/itemsをlockして対象集合を再検証する。既にundoneなら保存済み`undo_result`を返す。
+3. tombstoneは拒否・削除対象外でskip件数へ含める。`user_edited_at IS NOT NULL`のitemが1件でもあれば`CARD_MODIFIED`で全体拒否する。
 4. 現存cardがactive session対象なら`ACTIVE_SESSION`で全体拒否する。
-5. cards→illustrations→trackingの集合lockを取得し、cardと関連を削除する。
-6. owner内で不要になったtagを整理し、auto-created deckは空の場合だけ削除する。手動deckや他batch利用deckは保持する。
-7. item/batchをundoneとして監査保持し、結果を保存する。
+5. cardとbatch由来の関連を削除し、owner内で不要になったtagを整理する。auto-created deckは空の場合だけ削除し、手動deckや他batch利用deckは保持する。
+6. non-deleted itemとterminal `succeeded` / `failed` jobを同一transactionで`undone`へ遷移させ、claim / terminal fieldsを解放する。
+7. batchをundoneとして監査保持し、冪等な結果を保存する。
 
 `review_states`が存在するだけでは拒否しない。本文編集時のreview reset契約は別途維持する。
 
@@ -198,7 +198,7 @@ Vitest contract testでServer境界からDB RPC/DTO/error mappingまでをfaked 
 | AC-3 contentだけNew | 5, 3.3 | 4 content列reset、no-op/image/tag/deck keep、直接DML |
 | AC-4 active session guard | 6 | current+4 queues、全mutation rollback、安全detail |
 | AC-5 未編集batch undo | 8, 9 | card/relation/tag、last reference、auto deck、cleanup handoff |
-| AC-6 edited/active拒否 | 6, 9 | `user_edited_at`とactive各1件で全snapshot不変。review_statesのみは拒否しない |
+| AC-6 edited/active/job拒否 | 6, 9 | `user_edited_at`、active、queued/processing jobで全snapshot不変。review_statesのみは拒否しない |
 | AC-7 再送・削除skip | 7, 9 | tombstone skip、保存result同値、副作用増分0 |
 | AC-8 存在秘匿 | 3, 10 | card/deck/tag/illustration/batchのunknown/other/public同形 |
 
