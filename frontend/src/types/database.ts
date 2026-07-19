@@ -924,6 +924,16 @@ export type Database = {
 				};
 				Returns: Json;
 			};
+			commit_generated_import_async: {
+				Args: {
+					p_actor_user_id: string;
+					p_card_reservation_key: string;
+					p_idempotency_key: string;
+					p_import_request_hash: string;
+					p_request: Json;
+				};
+				Returns: Json;
+			};
 			get_ai_import_status: {
 				Args: {
 					p_actor_user_id: string;

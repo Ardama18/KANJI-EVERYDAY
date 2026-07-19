@@ -56,9 +56,8 @@ export async function POST(request: Request): Promise<Response> {
 		const service = createServiceRoleClient();
 		let result: Awaited<ReturnType<typeof service.rpc>>;
 		try {
-			result = await service.rpc("commit_import_async", {
+			result = await service.rpc("commit_generated_import_async", {
 				p_actor_user_id: authData.user.id,
-				p_source: "app_ai",
 				p_idempotency_key: idempotencyKey,
 				p_import_request_hash: importRequestHash,
 				p_request: normalizedRequestToJson(validated.data),
