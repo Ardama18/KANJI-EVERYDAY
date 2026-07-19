@@ -1,6 +1,6 @@
 import type { Database } from "@/types/database";
 import { createServerClient as createSupabaseServerClient } from "@supabase/ssr";
-import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { type SupabaseClient, createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 
 import { getEnvConfig } from "../env";
@@ -29,10 +29,17 @@ const createCookieStoreAdapter = () => {
 	};
 };
 
-export const createServerClient = () => {
+export type ServerSupabaseClient = SupabaseClient<Database, "public", "public", Database["public"]>;
+
+export const createServerClient = (): ServerSupabaseClient => {
 	const { supabaseUrl, supabaseAnonKey } = getEnvConfig();
 
-	return createSupabaseServerClient<Database>(supabaseUrl, supabaseAnonKey, {
+	// @supabase/ssr 0.6's declaration targets the three-parameter SupabaseClient.
+	// Let the factory use its compatibility overload while this module exposes
+	// the current four-parameter client type to keep generated RPC/table types.
+	// This is the typed equivalent of createSupabaseServerClient<Database>( for
+	// the currently installed supabase-js four-parameter client declaration.
+	return createSupabaseServerClient(supabaseUrl, supabaseAnonKey, {
 		cookies: createCookieStoreAdapter(),
 	});
 };

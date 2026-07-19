@@ -34,7 +34,10 @@
     "test:s12:integration": "vitest run ../specs/stories/S-12-ai-card-openai-generation-ui/tests/ai-card-openai-generation-ui.int.test.ts",
     "test:s12:e2e": "vitest run ../specs/stories/S-12-ai-card-openai-generation-ui/tests/ai-card-openai-generation-ui.e2e.test.ts",
     "test:s12:real-db": "vite-node -c vitest.config.ts ../specs/stories/S-12-ai-card-openai-generation-ui/tests/s12-local-real-db-gate.ts",
-    "test:s12:inventory": "vitest run ../specs/stories/S-12-ai-card-openai-generation-ui/tests/ai-card-openai-generation-ui.test.ts ../specs/stories/S-12-ai-card-openai-generation-ui/tests/ai-card-openai-generation-ui.int.test.ts ../specs/stories/S-12-ai-card-openai-generation-ui/tests/ai-card-openai-generation-ui.e2e.test.ts"
+    "test:s12:inventory": "vitest run ../specs/stories/S-12-ai-card-openai-generation-ui/tests/ai-card-openai-generation-ui.test.ts ../specs/stories/S-12-ai-card-openai-generation-ui/tests/ai-card-openai-generation-ui.int.test.ts ../specs/stories/S-12-ai-card-openai-generation-ui/tests/ai-card-openai-generation-ui.e2e.test.ts",
+    "test:s13:database": "vite-node -c vitest.config.ts ../specs/stories/S-13-ai-card-management-undo/tests/s13-database-gate.ts all",
+    "test:s13:fresh": "vite-node -c vitest.config.ts ../specs/stories/S-13-ai-card-management-undo/tests/s13-database-gate.ts fresh",
+    "test:s13:upgrade": "vite-node -c vitest.config.ts ../specs/stories/S-13-ai-card-management-undo/tests/s13-database-gate.ts upgrade"
   },
   "dependencies": {
     "@imagemagick/magick-wasm": "0.0.35",

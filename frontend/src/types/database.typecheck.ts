@@ -26,8 +26,11 @@ type RequiredPublicWrapper =
 	| "delete_private_card"
 	| "set_card_decks"
 	| "set_card_tags"
+	| "set_card_tag_names"
 	| "set_card_illustration"
-	| "undo_import";
+	| "undo_import"
+	| "list_ai_managed_cards"
+	| "bulk_delete_imported_cards";
 
 type Assert<T extends true> = T;
 type AllTablesPresent = Assert<
