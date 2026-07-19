@@ -65,3 +65,6 @@ schema 変更は `supabase/migrations/` の新規 SQL migration として追加�
 - PostgREST v14経由のpublic wrapperでJWT actorを直接検証する場合は、packed `request.jwt.claims` JSONの`role`と`sub`を正本とし、単独の`request.jwt.claim.role` / `request.jwt.claim.sub`だけに依存しない。malformed、role不一致、UUIDでない`sub`を未認証として扱い、packed claimsを設定した実RPCで検証する。
 - RPCの必須引数は`NULL`を明示的に拒否する。`NOT BETWEEN`、`<>`、正規表現などの比較だけではSQLの三値論理により`NULL`が`UNKNOWN`となり、validationを通過し得る。
 - S-11 workerと交差するbatch lifecycle mutationは、workerと同じ`ai_import_concept_jobs`先行のlock順を守る。`queued` / `processing` jobがあれば副作用0で全体拒否し、terminal job、item、batchの状態変更は同一transactionで整合させる。
+- Hosted Supabase で application secret を SQL から参照する場合、`ALTER ROLE SET app.*` だけに依存しない。Management API / migration role で role GUC が設定できない環境では、private schema の runtime config table、RLS なしの locked-down table、`SECURITY DEFINER` helper、限定 grant を組み合わせる。
+- `pg_cron` を導入する migration は、local isolated DB でも常に動くとは限らない。`cron.database_name` と対象 DB 名が一致しない場合は extension 作成が失敗するため、検証計画で local `postgres` / Hosted と disposable DB の適用範囲を分ける。
+- S-10 / S-14 のように複数 story の MCP / AI import contract が同じ table 群を使う場合、migration、seed、worker lock、RPC wrapper、RLS actor matrix を story 単位で分断せず、共有した isolated DB gate で交差影響を確認する。

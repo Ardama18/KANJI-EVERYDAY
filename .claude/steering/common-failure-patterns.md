@@ -38,3 +38,15 @@
     - `*.e2e.test.*` の名称ではなく、実HTTP、実ブラウザ、実provider、Hosted DB、worker / cron のどこまで接続したかを記録する。未接続の境界は別gateとして残す。
 19. **公開したsecretをローカルから消して解決したことにする**
     - chat、issue、PR、ログへ出たsecretはprovider側で失効・再発行する。新しい値を再び記録へ残さず、旧credentialが無効になったことまで確認する。
+20. **Codex sandbox の GitHub API / DNS 失敗を同じ形で繰り返す**
+    - sandbox 内で bare `gh` が DNS / `api.github.com` 接続失敗を返したら3回再試行しない。GitHub Connector/MCP、または `GH_PAGER=cat gh ...` に切り替える。
+21. **`gh pr merge` の終了コードだけで未マージと判断する**
+    - local worktree の branch checkout 制約などで CLI が non-zero でも、GitHub 側の merge は成功している場合がある。再実行前に PR の `state`、`mergeCommit`、base branch の履歴を read-only で確認する。
+22. **Vercel Preview を monorepo root と同じ実行環境だと考える**
+    - `frontend/` を Vercel project root にすると、preview build は frontend 配下だけをアップロードする。runtime code が `../supabase/functions/_shared` など repo 外相対 import に依存すると deploy で壊れる。
+23. **Vercel project env だけで branch preview の環境変数が入ると仮定する**
+    - Git 連携なしの Vercel project では、branch-specific Preview env が期待どおり効かないことがある。preview 検証では `vercel build --target preview` と `vercel deploy --prebuilt -e ...` の deployment-scoped env を選択肢に入れる。
+24. **Hosted Supabase と local isolated DB の gate を混同する**
+    - local isolated DB は migration / RLS / contract の再現性確認、Hosted は OAuth、実provider、Edge Function、cron、secret、CORS の接続確認。片方の成功をもう片方の成功として報告しない。
+25. **AI / MCP 用 secret を永続ログへ残す**
+    - OpenAI API key、Supabase secret、MCP token、HMAC secret は貼り付けられた時点で漏えい扱い。テスト後は provider 側で rotate し、docs や steering にはキー名と運用だけを残す。

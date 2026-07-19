@@ -47,6 +47,21 @@ public card、deck membership、join table、study session は親 row を含む 
 - server-only env が client chunk に入っていない。
 - required env 欠損時は安全に fail-fast する。ただし optional な Gemini key 欠損は仕様どおり生成 failure に劣化する。
 - `npm run build` が対象環境の env contract で成功する。
+- Next.js middleware、auth layout、status route は build / static prerender 時に server-only env を強制しない。公開可能な Supabase URL / anon key は public env、service role / provider key / HMAC secret は server-only env として分離する。
+- Vercel project root が `frontend/` の場合、preview build に repo root や `supabase/` 配下は含まれない。production runtime から参照する shared code は `frontend/` 内へ配置するか、明示的に package する。
+
+## Local isolated DB gate
+
+- 使い捨て DB（例: `s14_gate_*`）では、空 DB への全 migration 適用だけでなく、Supabase local が提供する system schema の不足も検証対象になる。
+- Storage を使う migration / seed を流す場合、`storage.buckets` は Supabase 互換の列を bootstrap する。最低限の helper schema だけでは `file_size_limit`、`allowed_mime_types` などの列不足で後続 migration が失敗する。
+- `pg_cron` を作る migration は、対象 DB が `cron.database_name` と一致する場合だけ local isolated gate で適用する。Supabase local の default は `postgres` なので、別名の使い捨て DB では schedule control migration を除外し、Hosted / local `postgres` 側の gate と区別する。
+- S-10 と S-14 の contract test が同じ schema 前提を共有する場合は、`S10_TEST_DATABASE_URL` と `S14_TEST_DATABASE_URL` を同じ isolated DB に向けてよい。ただし検証結果には DB 名、適用した migration 範囲、除外した migration を残す。
+
+## Hosted Supabase gate
+
+- Hosted Supabase の migration runner / Management API role では `ALTER ROLE SET app.*` が許可されない場合がある。runtime secret は role GUC だけを前提にせず、private schema の config table と `SECURITY DEFINER` helper で取得する設計を検討する。
+- Hosted gate では local contract test と同じ成功を前提にしない。OAuth provider、Claude / ChatGPT MCP client、Edge Function deploy、worker / cron active、CORS、redirect URL、secret presence を read-only で確認し、必要最小の test data だけで smoke する。
+- GitHub / Vercel 連携がない Preview では branch-specific project env が入らないことがある。必要なら `vercel build --target preview` と `vercel deploy --prebuilt -e KEY=VALUE` で deployment-scoped env を使い、使用した env 名だけを evidence に残す。
 
 ## 実行時の注意
 
