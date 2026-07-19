@@ -1,0 +1,10 @@
+{
+  "story_id": "S-15",
+  "epic_id": "GH-9",
+  "parent_story_id": "S-10",
+  "status": "verification_review",
+  "github_issue": 15,
+  "github_pr_url": "",
+  "github_branch": "issue/15-ai-cards-6-6-e2e",
+  "verification_scope": "final release verification only; no product feature implementation"
+}
