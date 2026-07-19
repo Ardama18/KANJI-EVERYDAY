@@ -2,7 +2,7 @@
   "story_id": "S-12",
   "epic_id": "GH-9",
   "parent_story_id": "S-10",
-  "status": "design_review",
+  "status": "implementation_review",
   "github_pr_url": "",
   "github_branch": "issue/13-ai-cards-3-6-openai-ui"
 }

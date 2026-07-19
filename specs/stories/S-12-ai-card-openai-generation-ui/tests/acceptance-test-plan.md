@@ -71,3 +71,12 @@
 
 ユーザー確認は不要。Design Docがテスト境界、safe code、件数、cleanup、rollbackを測定可能に定義している。実行環境上の必須確認は、S-11 hosted acceptanceとconfigured OpenAI model capability gateであり、未成立時は実装・E2Eをblockedとする。
 
+## 実行結果（2026-07-19）
+
+- Unit 20件、Integration 17件、E2E 7件、合計44件がpassし、S-12内todo/skip/not_runは0件。
+- QA回帰test 5件（paired edit 3件、partial表示1件、除外後commit 1件）がpass。
+- `npm run check`: 56 test files、790 pass、既存9 skip。lint・typecheckもpass。
+- `npm run test:s12:real-db`: illustration列権限/RLS、failed→pending限定遷移、preview既存重複検査がpass。
+- production buildがローカルSupabase環境変数をprocess内だけで与えた状態でpass。
+- 実OpenAI text/image生成、source即時削除、360px横overflow 0、reload復元、partial表示、keyboard-only生成→除外→再preview→確認→commitをブラウザで確認。
+- 除外後commitは生成時quota 2 unitsを保持したまま最終batch 1枚を202で受理し、reservationとbatchの紐付けを実DBで確認。

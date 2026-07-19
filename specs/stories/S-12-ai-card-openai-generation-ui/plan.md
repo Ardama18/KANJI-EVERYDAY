@@ -2,10 +2,10 @@
 id: S-12
 feature: ai-card-openai-generation-ui
 type: plan
-version: 1.0.0
+version: 1.1.0
 created: 2026-07-18
-updated: 2026-07-18
-status: planned
+updated: 2026-07-19
+status: implemented
 mode: create
 based_on: specs/stories/S-12-ai-card-openai-generation-ui/design.md
 requirements: specs/stories/S-12-ai-card-openai-generation-ui/requirements.md
@@ -36,7 +36,7 @@ related_issue: https://github.com/Ardama18/KANJI-EVERYDAY/issues/13
 - ADR: `specs/adr/ADR-009-openai-card-generation-safety-boundary.md`
 - ADR: `specs/adr/ADR-010-ai-card-preview-source-status-ui-boundary.md`
 - Design Doc: `specs/stories/S-12-ai-card-openai-generation-ui/design.md`
-- Unit計画: `specs/stories/S-12-ai-card-openai-generation-ui/tests/acceptance-test-plan.md`
+- Unit/受入結果: `specs/stories/S-12-ai-card-openai-generation-ui/tests/acceptance-test-plan.md`
 - Integration skeleton: `specs/stories/S-12-ai-card-openai-generation-ui/tests/ai-card-openai-generation-ui.int.test.ts`
 - E2E skeleton: `specs/stories/S-12-ai-card-openai-generation-ui/tests/ai-card-openai-generation-ui.e2e.test.ts`
 - Visual/accessibility checklist: `specs/stories/S-12-ai-card-openai-generation-ui/ui-design/visual-checklist.md`
@@ -49,7 +49,7 @@ related_issue: https://github.com/Ardama18/KANJI-EVERYDAY/issues/13
 - Integration skeleton 15件はPhase 2〜5に割り当て、最終Phase開始時点でtodo 0件とする。
 - E2E skeleton 7件はPhase 6まで`it.todo`のまま維持し、全実装後にだけ実装・実行する。
 - Visual/accessibility checklistはPhase 6だけで実行する。Figma比較ではなく既存UI baselineと360px/keyboard/label-error契約を確認する。
-- S-10/S-11 testは変更せず、最終回帰としてinventoryを実行する。
+- S-10/S-11 production契約は変更せず、S-12の追加列・公開RPCに追随する互換fixture/gateだけを最小更新し、最終回帰としてinventoryを実行する。
 
 ## 3. 開始前ハードゲート
 
@@ -286,7 +286,7 @@ flowchart TB
 
 ### タスク
 
-- [ ] **P6-01 360px・keyboard・label/error/live regionを完成させる**
+- [x] **P6-01 360px・keyboard・label/error/live regionを完成させる**
   - 対応AC: AC-03、AC-04、AC-07
   - 依存: Phase 5
   - 想定変更ファイル: `frontend/app/(auth)/decks/[deckId]/ai/new/AiCardImportClient.tsx`、`frontend/src/components/ai-card-import/*`、UI tests
@@ -296,7 +296,7 @@ flowchart TB
   - 統合完了条件: error taxonomyが色だけでなく安全な文字で区別され、accuracy/privacy/copyright警告がpreview前後で継続する。
   - 動作確認: Figmaなしのため既存UI baselineとの手動デザイン確認を行い、visual checklistの実行準備を完了する。
 
-- [ ] **P6-02 E2E 7 todoを実装しvisual/accessibility checklistを実行する**
+- [x] **P6-02 E2E 7 todoを実装しvisual/accessibility checklistを実行する**
   - 対応AC: AC-01〜08
   - 依存: P6-01
   - 想定変更ファイル: `specs/stories/S-12-ai-card-openai-generation-ui/tests/ai-card-openai-generation-ui.e2e.test.ts`、必要なS-12専用E2E testkit、`specs/stories/S-12-ai-card-openai-generation-ui/ui-design/visual-checklist.md`
@@ -306,10 +306,10 @@ flowchart TB
   - 統合完了条件: text/imageのgenerate→preview→commit→status、reload、partial、flag rollbackがユーザー操作からDB結果まで接続される。
   - 動作確認: `cd frontend && npm run test:s12:e2e`を実行し、360×800各状態、keyboard-only操作、label/error/live regionをchecklistへ記録する。
 
-- [ ] **P6-03 全quality gateと既存回帰を実行し文書整合を確定する**
+- [x] **P6-03 全quality gateと既存回帰を実行し文書整合を確定する**
   - 対応AC: AC-01〜08
   - 依存: P6-02
-  - 想定変更ファイル: S-12 test/evidence/必要なDesign Doc整合更新のみ。S-10/S-11 production/testは変更しない。
+  - 想定変更ファイル: S-12 test/evidence/必要なDesign Doc整合更新と、S-12追加境界に必要なS-11 test fixture/gate互換更新のみ。S-10/S-11 productionは変更しない。
   - Commit境界: 最終testで判明したS-12内の修正、traceability/evidence更新、不要なtodo/debug/log除去をまとめる。
   - 実装完了条件: flag enabled/disabled、source immediate/24h cleanup、token tamper/expiry/content replacement、post-expansion 50/both parity、全error taxonomyを再確認する。
   - 品質完了条件: `cd frontend && npm run check`、`npm run test:s12:inventory`、`npm run test:s10:inventory`、`npm run test:s11:inventory`がすべてpassする。
@@ -318,12 +318,12 @@ flowchart TB
 
 ### 最終Phase完了条件
 
-- [ ] Unit 16件以上、Integration 15件、E2E 7件がpassし、todo/skip/not_runが0件である。
-- [ ] `npm run check`とS-10/S-11 inventoryがpassする。
-- [ ] 360px、keyboard、label/error、live region checklistが完了する。
-- [ ] source通常即時削除、失敗時24時間cleanup、別owner/scope/active consumer保護がpassする。
-- [ ] token tamper/expiry/content replacement、confirmation bypass、quota二重消費が拒否される。
-- [ ] flag disabledで新規AI作成だけが停止し、既存card/deck/study/batch statusが保持される。
+- [x] Unit 20件、Integration 17件、E2E 7件がpassし、S-12内todo/skip/not_runが0件である。
+- [x] `npm run check`とS-10/S-11 inventoryがpassする。
+- [x] 360px、keyboard、label/error、live region checklistが完了する。
+- [x] source通常即時削除、失敗時24時間cleanup、別owner/scope/active consumer保護がpassする。
+- [x] token tamper/expiry/content replacement、confirmation bypass、quota二重消費が拒否される。
+- [x] flag disabledで新規AI作成だけが停止し、既存card/deck/study/batch statusが保持される。
 
 ## 12. AC traceability
 
@@ -371,3 +371,4 @@ flowchart TB
 | 日付 | 版 | 変更内容 |
 |---|---|---|
 | 2026-07-18 | 1.0.0 | requirements v1.1.1、ADR-009/010 Accepted、design v1.0.1、acceptance test skeletonを基にcreate modeで初版作成 |
+| 2026-07-19 | 1.1.0 | Phase 6、実OpenAI text/image/keyboard QA、3件のQA修正、実DB・全回帰・production buildの完了結果を反映 |
