@@ -52,6 +52,10 @@ export interface CanonicalImportRequestInput {
 	}[];
 }
 
+const REMOTE_GENERATION_HASH_DOMAIN = "kanji-everyday:remote-mcp:generation:v1";
+const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/u;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+
 export function canonicalizeGenerationRequest(request: GenerationRequestInput): string {
 	return JSON.stringify(
 		canonicalizeJsonObject({
@@ -87,6 +91,31 @@ export function canonicalizeImportRequest(request: CanonicalImportRequestInput):
 
 export async function hashImportRequest(request: CanonicalImportRequestInput): Promise<string> {
 	return await sha256Hex(canonicalizeImportRequest(request));
+}
+
+export async function deriveRemoteGenerationRequestHash(
+	importRequestHash: string,
+	clientId: string
+): Promise<string> {
+	const normalizedClientId = clientId.toLowerCase();
+	if (!SHA256_HEX_PATTERN.test(importRequestHash) || !UUID_PATTERN.test(normalizedClientId)) {
+		throw new Error("Remote generation hash input is invalid");
+	}
+	const parts = [REMOTE_GENERATION_HASH_DOMAIN, importRequestHash, normalizedClientId].map(
+		(value) => new TextEncoder().encode(value)
+	);
+	const length = parts.reduce((total, part) => total + 4 + part.length, 0);
+	const canonicalBytes = new Uint8Array(length);
+	const view = new DataView(canonicalBytes.buffer);
+	let offset = 0;
+	for (const part of parts) {
+		view.setUint32(offset, part.length, false);
+		offset += 4;
+		canonicalBytes.set(part, offset);
+		offset += part.length;
+	}
+	const digest = await globalThis.crypto.subtle.digest("SHA-256", canonicalBytes);
+	return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function canonicalizeJsonObject(value: CanonicalJsonObject): CanonicalJsonObject {

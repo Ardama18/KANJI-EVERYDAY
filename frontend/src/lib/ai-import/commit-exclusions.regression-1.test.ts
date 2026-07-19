@@ -4,8 +4,8 @@ import { describe, expect, it } from "vitest";
 
 describe("ISSUE-003 regression: committing after generated-card exclusions", () => {
 	it("uses the S-12 atomic commit RPC and preserves the originally charged units", async () => {
-		const [route, migration] = await Promise.all([
-			readFile(new URL("../../../app/api/ai/imports/commit/route.ts", import.meta.url), "utf8"),
+		const [repository, migration] = await Promise.all([
+			readFile(new URL("./app-ai-repository.ts", import.meta.url), "utf8"),
 			readFile(
 				new URL(
 					"../../../../supabase/migrations/20260718000006_commit_generated_import_after_exclusions.sql",
@@ -15,7 +15,7 @@ describe("ISSUE-003 regression: committing after generated-card exclusions", () 
 			),
 		]);
 
-		expect(route).toContain('service.rpc("commit_generated_import_async"');
+		expect(repository).toContain('client.rpc("commit_generated_import_async"');
 		expect(migration).toContain("charged_units < final_card_count");
 		expect(migration).toContain("SET units=final_card_count");
 		expect(migration).toContain("SET units=charged_units");

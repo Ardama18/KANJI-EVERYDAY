@@ -3,7 +3,7 @@ import { createServerClient as createSupabaseServerClient } from "@supabase/ssr"
 import { type SupabaseClient, createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 
-import { getEnvConfig } from "../env";
+import { getEnvConfig, getPublicEnvConfig } from "../env";
 
 const createCookieStoreAdapter = () => {
 	const cookieStore = cookies();
@@ -31,8 +31,10 @@ const createCookieStoreAdapter = () => {
 
 export type ServerSupabaseClient = SupabaseClient<Database, "public", "public", Database["public"]>;
 
+export type JwtScopedSupabaseClient = ServerSupabaseClient;
+
 export const createServerClient = (): ServerSupabaseClient => {
-	const { supabaseUrl, supabaseAnonKey } = getEnvConfig();
+	const { supabaseUrl, supabaseAnonKey } = getPublicEnvConfig();
 
 	// @supabase/ssr 0.6's declaration targets the three-parameter SupabaseClient.
 	// Let the factory use its compatibility overload while this module exposes
@@ -51,6 +53,21 @@ export const createServiceRoleClient = () => {
 		auth: {
 			persistSession: false,
 			autoRefreshToken: false,
+		},
+	});
+};
+
+export const createJwtScopedClient = (accessToken: string): JwtScopedSupabaseClient => {
+	if (accessToken.trim().length === 0)
+		throw new Error("JWT-scoped Supabase client requires a token");
+	const { supabaseUrl, supabaseAnonKey } = getPublicEnvConfig();
+
+	return createSupabaseClient<Database>(supabaseUrl, supabaseAnonKey, {
+		accessToken: async () => accessToken,
+		auth: {
+			persistSession: false,
+			autoRefreshToken: false,
+			detectSessionInUrl: false,
 		},
 	});
 };

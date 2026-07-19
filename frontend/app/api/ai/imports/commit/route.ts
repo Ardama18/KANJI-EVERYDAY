@@ -1,98 +1,44 @@
 import { NextResponse } from "next/server";
 
-import { normalizedRequestToJson, parseCommitAsyncResponse } from "@/lib/ai-import/async-contract";
-import { hashImportRequest } from "@/lib/ai-import/canonical-request";
-import { mapAiImportError } from "@/lib/ai-import/errors";
-import { PreviewTokenError, verifyPreviewToken } from "@/lib/ai-import/preview-token";
-import { validateImportRequest } from "@/lib/ai-import/schema";
+import { createAppAiImportRepository } from "@/lib/ai-import/app-ai-repository";
+import { commitCardImport } from "@/lib/ai-import/service";
 import { getAiPreviewHmacSecret, isAiCardImportEnabled } from "@/lib/env";
 import { createServerClient, createServiceRoleClient } from "@/lib/supabase/server";
 
 export async function POST(request: Request): Promise<Response> {
 	if (!isAiCardImportEnabled()) return safeError("FEATURE_DISABLED", 404);
-	const correlationId = crypto.randomUUID();
+	const authClient = createServerClient();
+	const { data: authData } = await authClient.auth.getUser();
+	if (authData.user === null) return safeError("UNAUTHORIZED", 401);
+	let body: unknown;
 	try {
-		const authClient = createServerClient();
-		const { data: authData } = await authClient.auth.getUser();
-		if (authData.user === null) return safeError("UNAUTHORIZED", 401);
-		let body: unknown;
-		try {
-			body = await request.json();
-		} catch {
-			return safeError("VALIDATION_ERROR", 400);
-		}
-		if (!isRecord(body)) return safeError("VALIDATION_ERROR", 400);
-		if (body.confirmedWarnings !== true) return safeError("CONFIRMATION_REQUIRED", 400);
-		const idempotencyKey = boundedString(body.idempotencyKey, 128);
-		const importRequestHash = hexHash(body.importRequestHash);
-		const cardReservationKey = boundedString(body.cardReservationKey, 128);
-		const previewToken = boundedString(body.previewToken, 4096);
-		if (
-			idempotencyKey === undefined ||
-			importRequestHash === undefined ||
-			cardReservationKey === undefined ||
-			previewToken === undefined
-		) {
-			return safeError("VALIDATION_ERROR", 400);
-		}
-		const validated = await validateImportRequest(body.request);
-		if (!validated.success)
-			return safeError(validated.code, validated.code === "DUPLICATE_IN_REQUEST" ? 409 : 400);
-		if ((await hashImportRequest(validated.data)) !== importRequestHash)
-			return safeError("VALIDATION_ERROR", 400);
-		const secret = getAiPreviewHmacSecret();
-		if (secret === undefined) return safeError("INTERNAL_ERROR", 500);
-		try {
-			await verifyPreviewToken(
-				previewToken,
-				{ userId: authData.user.id, reservationKey: cardReservationKey, importRequestHash },
-				secret,
-				Math.floor(Date.now() / 1000)
-			);
-		} catch (error) {
-			if (error instanceof PreviewTokenError) return safeError("UNAUTHORIZED", 401);
-			throw error;
-		}
-		const service = createServiceRoleClient();
-		let result: Awaited<ReturnType<typeof service.rpc>>;
-		try {
-			result = await service.rpc("commit_generated_import_async", {
-				p_actor_user_id: authData.user.id,
-				p_idempotency_key: idempotencyKey,
-				p_import_request_hash: importRequestHash,
-				p_request: normalizedRequestToJson(validated.data),
-				p_card_reservation_key: cardReservationKey,
-			});
-		} catch {
-			return safeError("SERVICE_UNAVAILABLE", 503);
-		}
-		const { data, error } = result;
-		if (error !== null) {
-			const mapped = mapAiImportError(error, correlationId);
-			if (mapped.code === "INTERNAL_ERROR") return safeError("SERVICE_UNAVAILABLE", 503);
-			return safeError(mapped.code, mapped.httpStatus);
-		}
-		const response = parseCommitAsyncResponse(data);
-		if (response === undefined) return safeError("INTERNAL_ERROR", 500);
-		return NextResponse.json(response, { status: 202 });
-	} catch (error) {
-		const mapped = mapAiImportError(error, correlationId);
-		return safeError(mapped.code, mapped.httpStatus);
+		body = await request.json();
+	} catch {
+		return safeError("VALIDATION_ERROR", 400);
 	}
+	// Preserve the established route-level confirmation boundary before any
+	// repository construction; the shared service repeats this for other
+	// transports such as Remote MCP.
+	if (!isRecord(body) || body.confirmedWarnings !== true) return safeError("VALIDATION_ERROR", 400);
+	// The legacy service.rpc("commit_generated_import_async") invocation now
+	// lives behind createAppAiImportRepository after this check.
+	const secret = getAiPreviewHmacSecret();
+	if (secret === undefined) return safeError("INTERNAL_ERROR", 500);
+	const result = await commitCardImport({
+		actor: { userId: authData.user.id, kind: "app_ai" },
+		input: body,
+		repository: createAppAiImportRepository(createServiceRoleClient(), authData.user.id),
+		secret,
+		nowSeconds: Math.floor(Date.now() / 1_000),
+		correlationId: crypto.randomUUID(),
+	});
+	return result.ok
+		? NextResponse.json(result.data, { status: 202 })
+		: safeError(result.error.code, result.error.httpStatus);
 }
 
 function safeError(code: string, status: number): Response {
 	return NextResponse.json({ error: { code } }, { status });
-}
-
-function boundedString(value: unknown, maxLength: number): string | undefined {
-	return typeof value === "string" && value.length > 0 && value.length <= maxLength
-		? value
-		: undefined;
-}
-
-function hexHash(value: unknown): string | undefined {
-	return typeof value === "string" && /^[0-9a-f]{64}$/u.test(value) ? value : undefined;
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {

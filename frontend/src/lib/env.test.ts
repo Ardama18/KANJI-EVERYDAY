@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+	getMcpEnvConfig,
 	getOpenAiCardGenerationConfig,
 	getPublicEnvConfig,
 	isAiCardImportEnabled,
@@ -18,10 +19,59 @@ const keys = [
 	"OPENAI_MODERATION_TIMEOUT_MS",
 	"NEXT_PUBLIC_SUPABASE_URL",
 	"NEXT_PUBLIC_SUPABASE_ANON_KEY",
+	"MCP_ENABLED",
+	"MCP_PUBLIC_ORIGIN",
+	"MCP_OAUTH_ISSUER",
+	"MCP_ALLOWED_ORIGIN",
 ] as const;
 
 afterEach(() => {
 	for (const key of keys) Reflect.deleteProperty(process.env, key);
+});
+
+describe("S-14 MCP server config", () => {
+	function setValidMcpEnv(): void {
+		process.env.MCP_PUBLIC_ORIGIN = "https://cards.example.test";
+		process.env.MCP_OAUTH_ISSUER = "https://project.supabase.co/auth/v1";
+		process.env.MCP_ALLOWED_ORIGIN = "https://chat.example.test";
+	}
+
+	it("enables only trimmed exact true", () => {
+		setValidMcpEnv();
+		for (const value of [undefined, "", "false", "TRUE", "1"]) {
+			if (value === undefined) Reflect.deleteProperty(process.env, "MCP_ENABLED");
+			else process.env.MCP_ENABLED = value;
+			expect(getMcpEnvConfig().enabled).toBe(false);
+		}
+		process.env.MCP_ENABLED = " true ";
+		expect(getMcpEnvConfig().enabled).toBe(true);
+	});
+
+	it("normalizes strict HTTPS origins and the Supabase issuer", () => {
+		setValidMcpEnv();
+		expect(getMcpEnvConfig()).toMatchObject({
+			publicOrigin: "https://cards.example.test",
+			oauthIssuer: "https://project.supabase.co/auth/v1",
+			allowedOrigin: "https://chat.example.test",
+		});
+	});
+
+	it("rejects missing, non-HTTPS, credentialed, path-bearing, or malformed values", () => {
+		setValidMcpEnv();
+		for (const [key, value] of [
+			["MCP_PUBLIC_ORIGIN", ""],
+			["MCP_PUBLIC_ORIGIN", "http://cards.example.test"],
+			["MCP_PUBLIC_ORIGIN", "https://user@cards.example.test"],
+			["MCP_PUBLIC_ORIGIN", "https://cards.example.test/path"],
+			["MCP_ALLOWED_ORIGIN", "not a url"],
+			["MCP_OAUTH_ISSUER", "https://project.supabase.co"],
+			["MCP_OAUTH_ISSUER", "https://project.supabase.co/auth/v1?x=1"],
+		] as const) {
+			process.env[key] = value;
+			expect(() => getMcpEnvConfig()).toThrow();
+			setValidMcpEnv();
+		}
+	});
 });
 
 describe("S-12 typed server config", () => {

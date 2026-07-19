@@ -29,6 +29,13 @@ export interface PublicEnvConfig {
 	readonly supabaseAnonKey: string;
 }
 
+export interface McpEnvConfig {
+	readonly enabled: boolean;
+	readonly publicOrigin: string;
+	readonly oauthIssuer: string;
+	readonly allowedOrigin: string;
+}
+
 const REQUIRED_ENV_KEYS: RequiredEnvKey[] = [
 	"NEXT_PUBLIC_SUPABASE_URL",
 	"NEXT_PUBLIC_SUPABASE_ANON_KEY",
@@ -57,6 +64,19 @@ const getRouteSecret = (key: RouteSecretEnvKey): string | undefined => {
 
 export function getAiPreviewHmacSecret(): string | undefined {
 	return getRouteSecret("AI_PREVIEW_HMAC_SECRET");
+}
+
+export function getMcpEnvConfig(): McpEnvConfig {
+	return {
+		enabled: isMcpEnabled(),
+		publicOrigin: parseMcpOrigin("MCP_PUBLIC_ORIGIN", process.env.MCP_PUBLIC_ORIGIN),
+		oauthIssuer: parseMcpIssuer(process.env.MCP_OAUTH_ISSUER),
+		allowedOrigin: parseMcpOrigin("MCP_ALLOWED_ORIGIN", process.env.MCP_ALLOWED_ORIGIN),
+	};
+}
+
+export function isMcpEnabled(): boolean {
+	return process.env.MCP_ENABLED?.trim() === "true";
 }
 
 export function isAiCardImportEnabled(): boolean {
@@ -148,6 +168,37 @@ function parseIntegerEnv(
 
 function isOpenAiImageDetail(value: string): value is OpenAiImageDetail {
 	return value === "low" || value === "high" || value === "auto";
+}
+
+function parseMcpOrigin(key: string, value: string | undefined): string {
+	const parsed = parseMcpUrl(key, value);
+	if (parsed.pathname !== "/" || parsed.search.length > 0 || parsed.hash.length > 0) {
+		throw new Error(`Invalid ${key}`);
+	}
+	return parsed.origin;
+}
+
+function parseMcpIssuer(value: string | undefined): string {
+	const parsed = parseMcpUrl("MCP_OAUTH_ISSUER", value);
+	if (parsed.pathname !== "/auth/v1" || parsed.search.length > 0 || parsed.hash.length > 0) {
+		throw new Error("Invalid MCP_OAUTH_ISSUER");
+	}
+	return parsed.href;
+}
+
+function parseMcpUrl(key: string, value: string | undefined): URL {
+	const trimmed = value?.trim();
+	if (trimmed === undefined || trimmed.length === 0) throw new Error(`Missing ${key}`);
+	let parsed: URL;
+	try {
+		parsed = new URL(trimmed);
+	} catch {
+		throw new Error(`Invalid ${key}`);
+	}
+	if (parsed.protocol !== "https:" || parsed.username.length > 0 || parsed.password.length > 0) {
+		throw new Error(`Invalid ${key}`);
+	}
+	return parsed;
 }
 
 export function getEnvConfig(): EnvConfig {

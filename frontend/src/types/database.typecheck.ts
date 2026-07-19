@@ -30,7 +30,14 @@ type RequiredPublicWrapper =
 	| "set_card_illustration"
 	| "undo_import"
 	| "list_ai_managed_cards"
-	| "bulk_delete_imported_cards";
+	| "bulk_delete_imported_cards"
+	| "s14_remote_validate_import_preview"
+	| "s14_create_oauth_consent_state"
+	| "s14_consume_oauth_consent_state"
+	| "s14_remote_commit_import"
+	| "s14_remote_get_import_status"
+	| "s14_remote_update_imported_card"
+	| "s14_remote_update_ai_card";
 
 type Assert<T extends true> = T;
 type AllTablesPresent = Assert<

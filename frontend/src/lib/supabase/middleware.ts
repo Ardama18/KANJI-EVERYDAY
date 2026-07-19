@@ -2,10 +2,10 @@ import type { Database } from "@/types/database";
 import { createServerClient as createSupabaseServerClient } from "@supabase/ssr";
 import type { NextRequest, NextResponse } from "next/server";
 
-import { getEnvConfig } from "../env";
+import { getPublicEnvConfig } from "../env";
 
 export const createMiddlewareClient = (request: NextRequest, response: NextResponse) => {
-	const { supabaseUrl, supabaseAnonKey } = getEnvConfig();
+	const { supabaseUrl, supabaseAnonKey } = getPublicEnvConfig();
 
 	return createSupabaseServerClient<Database>(supabaseUrl, supabaseAnonKey, {
 		cookies: {

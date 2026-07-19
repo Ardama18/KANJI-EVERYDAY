@@ -40,12 +40,15 @@
     "test:s13:upgrade": "vite-node -c vitest.config.ts ../specs/stories/S-13-ai-card-management-undo/tests/s13-database-gate.ts upgrade"
   },
   "dependencies": {
+    "@cfworker/json-schema": "4.1.1",
     "@imagemagick/magick-wasm": "0.0.35",
+    "@modelcontextprotocol/sdk": "1.29.0",
     "@supabase/ssr": "^0.6.0",
     "@supabase/supabase-js": "^2.47.16",
     "next": "^14.2.5",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

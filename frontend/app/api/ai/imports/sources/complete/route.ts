@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
 
+import type { NormalizedImage } from "@/lib/ai-import/source-image";
+import { sanitizeSourceImage, sha256Hex } from "@/lib/ai-import/source-image";
 import { createSourceImageCodec } from "@/lib/ai-import/source-image-codec";
 import { getEnvConfig } from "@/lib/env";
 import { isAiCardImportEnabled } from "@/lib/env";
 import { createServerClient, createServiceRoleClient } from "@/lib/supabase/server";
-import type { NormalizedImage } from "../../../../../../../supabase/functions/_shared/ai-card-import/image-codec";
-import { sanitizeSourceImage } from "../../../../../../../supabase/functions/_shared/ai-card-import/image-codec";
-import { sha256Hex } from "../../../../../../../supabase/functions/_shared/ai-card-import/storage";
 
 interface UploadRow {
 	id: string;

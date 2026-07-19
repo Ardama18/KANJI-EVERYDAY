@@ -1,5 +1,4 @@
 import type { Json } from "@/types/database";
-import { SAFE_IMPORT_ERROR_CODES } from "../../../../supabase/functions/_shared/ai-card-import/contracts";
 import type { NormalizedImportRequest } from "./schema";
 import { isCanonicalUuid } from "./uuid";
 
@@ -26,6 +25,23 @@ export type ImportBatchStatus =
 	| "failed"
 	| "undone";
 export type ImportItemStatus = "queued" | "processing" | "succeeded" | "failed" | "undone";
+
+export const SAFE_IMPORT_ERROR_CODES = [
+	"INVALID_QUEUE_MESSAGE",
+	"CLAIM_LOST",
+	"PROVIDER_CONFIG_ERROR",
+	"PROVIDER_TRANSIENT_ERROR",
+	"PROVIDER_PERMANENT_ERROR",
+	"IMAGE_FORMAT_INVALID",
+	"IMAGE_TOO_LARGE",
+	"IMAGE_DIMENSIONS_INVALID",
+	"IMAGE_DECODE_FAILED",
+	"OBJECT_CONFLICT",
+	"STORAGE_TRANSIENT_ERROR",
+	"STORAGE_PERMANENT_ERROR",
+	"DUPLICATE_EXISTING",
+	"INTERNAL_ERROR",
+] as const;
 
 export interface ImportStatusResponse {
 	readonly batchId: string;

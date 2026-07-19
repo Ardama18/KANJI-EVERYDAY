@@ -74,6 +74,30 @@ describe("frontend/middleware.ts", () => {
 		}
 	);
 
+	it.each(["/login", "/signup"])(
+		"UT-S14-MW-AUTH-SETUP-FAIL-GUEST: 認証初期化失敗時も guest route %s は 500 にしない",
+		async (pathname) => {
+			createMiddlewareClientMock.mockImplementation(() => {
+				throw new Error("Missing required environment variables");
+			});
+
+			const response = await middleware(createRequest(pathname));
+
+			expect(response.headers.get("x-middleware-next")).toBe("1");
+		}
+	);
+
+	it("UT-S14-MW-AUTH-SETUP-FAIL-PROTECTED: 認証初期化失敗時の protected route は /login に逃がす", async () => {
+		createMiddlewareClientMock.mockImplementation(() => {
+			throw new Error("Missing required environment variables");
+		});
+
+		const response = await middleware(createRequest("/decks"));
+
+		expect(response.status).toBe(307);
+		expect(response.headers.get("location")).toBe("https://example.com/login");
+	});
+
 	it("UT-AC17-MW-PUBLIC-PASS: 公開ルート / は認証有無に関係なく通過する", async () => {
 		const request = createRequest("/");
 		const response = await middleware(request);

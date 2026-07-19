@@ -1,6 +1,10 @@
 import { PREVIEW_WARNINGS, type PreviewEnvelope } from "../ai-card-generation/contracts";
 import { hashImportRequest } from "./canonical-request";
-import { PREVIEW_TOKEN_TTL_SECONDS, signPreviewToken } from "./preview-token";
+import {
+	PREVIEW_TOKEN_TTL_SECONDS,
+	signPreviewToken,
+	signRemotePreviewToken,
+} from "./preview-token";
 import { type ClientImportRequestInput, validateImportRequest } from "./schema";
 
 export interface PreviewServiceDependencies {
@@ -20,6 +24,31 @@ export async function createImportPreview(
 	request: unknown,
 	cardReservationKey: string,
 	dependencies: PreviewServiceDependencies
+): Promise<PreviewEnvelope> {
+	return await createPreview(actorUserId, request, cardReservationKey, dependencies, undefined);
+}
+
+export async function createRemoteImportPreview(
+	actor: Readonly<{ userId: string; clientId: string }>,
+	request: unknown,
+	cardReservationKey: string,
+	dependencies: PreviewServiceDependencies
+): Promise<PreviewEnvelope> {
+	return await createPreview(
+		actor.userId,
+		request,
+		cardReservationKey,
+		dependencies,
+		actor.clientId
+	);
+}
+
+async function createPreview(
+	actorUserId: string,
+	request: unknown,
+	cardReservationKey: string,
+	dependencies: PreviewServiceDependencies,
+	remoteClientId: string | undefined
 ): Promise<PreviewEnvelope> {
 	const validated = await validateImportRequest(request);
 	if (!validated.success || !("id" in validated.data.deck))
@@ -53,11 +82,19 @@ export async function createImportPreview(
 			cardKey: item.cardKey,
 		})),
 	});
-	const previewToken = await signPreviewToken(
-		{ userId: actorUserId, reservationKey: cardReservationKey, importRequestHash },
-		dependencies.secret,
-		dependencies.nowSeconds
-	);
+	const tokenInput = {
+		userId: actorUserId,
+		reservationKey: cardReservationKey,
+		importRequestHash,
+	};
+	const previewToken =
+		remoteClientId === undefined
+			? await signPreviewToken(tokenInput, dependencies.secret, dependencies.nowSeconds)
+			: await signRemotePreviewToken(
+					{ ...tokenInput, clientId: remoteClientId },
+					dependencies.secret,
+					dependencies.nowSeconds
+				);
 	return {
 		request: normalized,
 		importRequestHash,
