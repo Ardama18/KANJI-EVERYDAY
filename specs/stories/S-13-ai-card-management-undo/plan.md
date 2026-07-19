@@ -48,10 +48,11 @@ parent_story: S-10
 4. 個別削除を同じprimitiveの1件処理へ収束させ、既存`delete_private_card[_internal]`の弱い経路を残さない。
 5. `update_imported_card`、`set_card_decks`、`set_card_tags`、`set_card_illustration`の既存wrapper/internalをforward replacementし、全経路でAI由来predicateを必須化する。
 6. `undo_import_internal`をforward replacementする。
+   - S-11 workerと同じくconcept jobsを先にlockし、`queued` / `processing` jobがあれば全snapshot不変で拒否する。
    - tombstone itemは拒否・削除対象外としてskipする。
-   - 拒否は非tombstone itemの`user_edited_at`と現存cardのactive sessionだけに限定する。
+   - それ以外の拒否は非tombstone itemの`user_edited_at`と現存cardのactive sessionに限定する。
    - `review_states`の存在確認を追加しない。
-   - 保存済みresult再送、監査保持、auto-created deckを空のときだけ削除する既存契約を維持する。
+   - terminal jobとnon-deleted itemを同一transactionで`undone`へ揃え、保存済みresult再送、監査保持、auto-created deckを空のときだけ削除する既存契約を維持する。
 7. active guardをcontent/illustration/tag/deck/個別・複数DELETE/undoの全経路へ適用する。
    - `current_card_id`と`queue_due/learn/new/retry`を確認する。
    - existence/owner確認後に判定し、safe detailはsession ID/deck IDだけにする。
@@ -193,7 +194,7 @@ parent_story: S-10
 5. direct DML: active guard、content reset、編集印、DELETE tombstone非編集例外、relation direct write拒否。
 6. active: current + due/learn/new/retry、invalid queue値、単独/bulk/undo全snapshot不変。
 7. bulk: 1件/100件、重複、missing、owner、AI、timestamp、active失敗、成功件数、全件原子性。
-8. undo: edited拒否、active拒否、`review_states`だけでは許可、tombstone skip、同一result再送、auto deck empty/retained、不要tag。
+8. undo: queued/processing job拒否と全snapshot不変、terminal job/itemのundone整合、edited拒否、active拒否、`review_states`だけでは許可、tombstone skip、同一result再送、auto deck empty/retained、不要tag。
 9. illustration: 2→1 ready、1→0 delete_pending、cleanup前reattach、cleaning/deleted attach拒否。
 10. concurrency: edit/delete/undo/cleanup交差でcards→illustrations→tracking順、deadlockなし、reference count非負、部分commitなし。
 
@@ -238,7 +239,7 @@ Playwrightを仮定せず、`frontend/`の既存dev serverを実ブラウザで�
 2. content編集でNew、illustration/tag/deck編集でreview維持。
 3. active current/queue cardの編集・削除拒否とsafe detail。
 4. 複数選択削除の成功と1件失敗時の全体不変。
-5. 未編集batch undo、edited/active拒否、tombstone skip、再送同値。
+5. 未編集かつ稼働中jobなしのbatch undo、edited/active/queued/processing拒否、tombstone skip、再送同値。
 6. public/cross-owner/unknown card/deck/tag/illustration/batchの同じ404体験。
 7. 共有画像2→1/1→0のDB statusとcleanup handoff。Storage物理削除未確認をDB成功だけで完了扱いにしない。
 8. keyboard、focus、touch target、mobile横scroll、pending二重送信防止。
@@ -255,8 +256,8 @@ Playwrightを仮定せず、`frontend/`の既存dev serverを実ブラウザで�
 | AC-2 cursor pagination | 1, 3, 4 | cursor/filter unit、DB同一timestamp union | 複合filterと追加読込 |
 | AC-3 contentだけNew | 1, 3, 4 | DB trigger/直接DML、action/component | contentとrelation各編集 |
 | AC-4 active guard | 1, 3, 4 | current+4 queues、全mutation rollback | safe conflict表示 |
-| AC-5 未編集undo | 1, 3, 4 | DB card/relation/tag/image/auto deck | undo確認とcleanup handoff |
-| AC-6 edited/active拒否 | 1, 3 | `user_edited_at`/active snapshot不変。review_statesのみは成功 | 拒否理由と副作用0 |
+| AC-5 未編集undo | 1, 3, 4 | DB job/item/card/relation/tag/image/auto deck | undo確認とcleanup handoff |
+| AC-6 edited/active/job拒否 | 1, 3 | `user_edited_at`/active/queued/processing snapshot不変。review_statesのみは成功 | 拒否理由と副作用0 |
 | AC-7 再送・削除skip | 1, 3, 4 | tombstone skip、保存result同値 | 個別削除後undo再送 |
 | AC-8 存在秘匿 | 1, 3, 4 | ID種別ごとのunknown/other/public同形 | route/actionの同じ404 |
 

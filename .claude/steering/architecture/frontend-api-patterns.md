@@ -36,6 +36,8 @@ parse input
 - インフラ障害や契約違反はログに安全な context を残して失敗させる。
 - Supabase / Gemini の生エラー、SQL、secret、内部 object path をそのまま利用者へ表示しない。
 - 空結果と通信失敗を同じ `null` に潰さない。仕様上 `null` が契約の場合はテストで固定する。
+- deck、tag、illustrationなど既存relationを置換する選択肢の取得失敗を空集合へ変換しない。明示的なerrorと再試行を表示し、誤って全解除し得るmutationを無効化する。
+- mutation成功後に一覧や選択肢の再取得が失敗した場合は、成功表示だけを残さない。server stateと`updatedAt`を再同期できるまで追加mutationを停止し、再取得操作を提供する。
 
 ## テスト
 
@@ -43,3 +45,4 @@ parse input
 - 未認証時に DML / 外部 API が 0 回であることを検証する。
 - owner 外 ID、存在しない ID、Supabase error、二重送信・再実行可能性を含める。
 - mock は production の chain と戻り値を過不足なく表現し、`as any` で契約不整合を隠さない。
+- 選択肢取得失敗時のrelation不変、mutation後再取得失敗時の追加操作停止、再同期成功後の復旧を検証する。

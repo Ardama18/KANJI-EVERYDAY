@@ -25,6 +25,7 @@ AI_CARD_IMPORT_ENABLED=true   # AIカード作成経路を有効化する場合�
 - 複数 worktree で同時起動する場合は port を明示的に分け、実際に使用した URL を検証記録へ残す。
 - 起動前に予定 port の使用状況を確認し、既存プロセスを所有者確認なしに停止しない。
 - `.next` や test cache による誤判定が疑われる場合も、対象 worktree を確認してから再生成する。
+- 同じworktreeで`next dev`を起動したまま`next build`を実行しない。両者は`.next`を共有するため、build後の開発serverでchunk 404、hydration消失、通常formのGET送信などの偽障害が起こり得る。build前にdev serverを停止し、再開時はserverを再起動してconsole / networkをクリアしてから確認する。
 
 ## 起動
 

@@ -62,3 +62,6 @@ schema 変更は `supabase/migrations/` の新規 SQL migration として追加�
 - `SECURITY DEFINER` 関数を作成・置換する migration は、固定 `search_path`、完全な function signature を使った `ALTER FUNCTION ... OWNER TO s10_migration_owner`、不要 role からの revoke、必要 role への grant を同じ migration に含める。
 - function owner は SQL 本文の静的確認だけで合格にしない。隔離 local DB と適用対象 Hosted Supabase の `pg_proc` / `pg_roles` を照合し、許可 owner 以外の `SECURITY DEFINER` 関数が0件であることを確認する。
 - local migration ledger と実 schema がずれている場合、関数やtableの存在だけを根拠に適用済みと判断しない。対象 migration の効果を確認し、隔離DBに限ってledger修復または再構築を行い、共有環境では勝手に履歴を編集しない。
+- PostgREST v14経由のpublic wrapperでJWT actorを直接検証する場合は、packed `request.jwt.claims` JSONの`role`と`sub`を正本とし、単独の`request.jwt.claim.role` / `request.jwt.claim.sub`だけに依存しない。malformed、role不一致、UUIDでない`sub`を未認証として扱い、packed claimsを設定した実RPCで検証する。
+- RPCの必須引数は`NULL`を明示的に拒否する。`NOT BETWEEN`、`<>`、正規表現などの比較だけではSQLの三値論理により`NULL`が`UNKNOWN`となり、validationを通過し得る。
+- S-11 workerと交差するbatch lifecycle mutationは、workerと同じ`ai_import_concept_jobs`先行のlock順を守る。`queued` / `processing` jobがあれば副作用0で全体拒否し、terminal job、item、batchの状態変更は同一transactionで整合させる。

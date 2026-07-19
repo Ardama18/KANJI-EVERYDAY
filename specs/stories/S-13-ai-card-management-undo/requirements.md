@@ -32,7 +32,7 @@ AI importで確定した本人所有のprivate cardを、owner境界、学習ses
 
 1. owner限定一覧、cursor pagination、deck/tag/source/登録日filterを提供する。
 2. content、illustration、tag、所属deckを検証済み管理境界から編集する。
-3. 個別・複数削除と、未編集でactive session対象でないbatchの冪等undoを提供する。
+3. 個別・複数削除と、未編集でactive session対象ではなく`queued` / `processing` concept jobもないbatchの冪等undoを提供する。
 4. content実変更時だけreview stateをresetし、全管理変更をactive-session guardで保護する。
 5. 公開Seedとcross-owner IDを404相当で存在秘匿し、Server境界とRLSを併用する。
 6. 管理による実変更の `user_edited_at`、個別削除で編集印を付けないtombstone例外、S-11共有画像reference lifecycleを全管理経路で一貫させる。
@@ -129,14 +129,15 @@ AI importで確定した本人所有のprivate cardを、owner境界、学習ses
 ### REQ-UNDO-01 実行条件
 
 - Ownerだけが本人所有batchをundoできる。別ownerまたは存在しないbatchは同じ404相当とする。
+- batchに`queued` / `processing`の`ai_import_concept_jobs`が1件でもある場合、THE SYSTEM SHALL workerと競合する状態を変更せずbatch全体を安全なconflictで拒否する。
 - deleted tombstoneを除くbatch itemに `user_edited_at` が1件でも設定済みなら、THE SYSTEM SHALL batch全体を `CARD_MODIFIED` で拒否する。
 - batchの現存cardがactive session対象なら、THE SYSTEM SHALL REQ-GUARD-01でbatch全体を拒否する。
-- 拒否時はcard、item、batch、relation、tag、deck、illustration trackingを一切変更しない。
+- 拒否時はconcept job、claim、card、item、batch、relation、tag、deck、illustration trackingを一切変更しない。
 - undo前に個別削除済みでtombstone化されたitemは、undo拒否判定と削除対象から除外してskip件数へ含める。
 
 ### REQ-UNDO-02 成功・冪等性
 
-- 条件を満たすundoは、batch由来の現存card、deck/card/tag/review関連、不要になったowner tagを原子的に削除し、itemとbatchを `undone` として監査可能に保持する。
+- 条件を満たすundoは、batch由来の現存card、deck/card/tag/review関連、不要になったowner tagを原子的に削除し、non-deleted item、terminal concept job、batchを `undone` として監査可能に保持する。terminal jobのclaim / retry / terminal fieldsは同じtransactionで解放する。
 - `auto_created_deck_id` はundo後に空の場合だけ削除し、他cardが残る場合は保持する。手動選択deck、他batch、公開Seed、quota/reservationは変更しない。
 - 既にundoneの同一owner batchへの再送は、保存済みの同じ成功結果を返し追加削除を行わない。
 - 成功結果は少なくともbatch ID、status、削除card件数、個別削除skip件数、自動deckの結果を含む。

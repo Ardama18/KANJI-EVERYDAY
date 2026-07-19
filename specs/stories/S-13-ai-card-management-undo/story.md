@@ -14,7 +14,7 @@ parent_story: S-10
 
 ## ユーザーストーリー
 
-保護者・先生として、AIで登録した自分のカードを後から探して修正・削除し、誤って登録した未編集でactive session対象でないbatchを安全に取り消したい。なぜなら、子どもの学習状態や他のカード、共有イラストを壊さずに登録ミスを訂正したいから。
+保護者・先生として、AIで登録した自分のカードを後から探して修正・削除し、誤って登録した未編集でactive session対象ではなく稼働中concept jobもないbatchを安全に取り消したい。なぜなら、子どもの学習状態や他のカード、共有イラスト、非同期workerを壊さずに登録ミスを訂正したいから。
 
 ## 解決する課題
 
@@ -49,8 +49,8 @@ parent_story: S-10
 2. 一覧は既定20件、最大100件で、cardの `(created_at, id)` cursorにより同一時刻を含め重複・欠落なくページングできる。
 3. front/back/skill/patternの実値変更だけで対象cardの `review_states` が削除されNewへ戻り、illustration/tag/deckだけの変更では学習状態が残る。
 4. active sessionに含まれるcardへの全変更を副作用なしで拒否し、安全なsession IDとdeck IDを返す。
-5. 未編集でactive session対象でないbatchのundoで現存cardと関連を削除し、最後の参照を失った共有画像をS-11 cleanupへ渡し、空になった自動作成deckだけを削除する。
-6. batch内に `user_edited_at` 設定済みitemが1件でもあるか、現存cardがactive session対象ならbatch全体のundoを副作用なしで拒否する。
+5. 未編集でactive session対象ではなく、`queued` / `processing` concept jobもないbatchのundoで現存cardと関連を削除し、最後の参照を失った共有画像をS-11 cleanupへ渡し、空になった自動作成deckだけを削除する。
+6. batch内に `user_edited_at` 設定済みitemが1件でもあるか、現存cardがactive session対象か、`queued` / `processing` concept jobが残る場合はbatch全体のundoを副作用なしで拒否する。
 7. undo再送は同じ成功結果を返し、undo前に個別削除済みのcardは安全に無視する。
 8. 公開Seed、別owner、存在しないcard/deck/tag/illustration/batch IDは同じ404相当とし、存在を漏らさない。
 
