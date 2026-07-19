@@ -20,7 +20,7 @@ All notable changes to this project are documented in this file.
 
 - Passed the complete local frontend gate: 58 test files, 794 passing tests, and 9 intentional skips, plus lint, type checking, and a production build.
 - Added and passed 20 S-12 unit tests, 17 integration tests, 7 journey contracts, an isolated real-database gate, and browser checks for text, image, keyboard-only, exclusion, partial-success, and reload flows.
-- Kept merging blocked until S-11 Hosted7, scheduled cleanup, and true browser/HTTP/hosted-database E2E run against a replacement hosted Supabase environment.
+- Recorded S-11 Hosted7 and scheduled-cleanup acceptance from the candidate-bound release evidence; S-12 browser/HTTP/hosted-database E2E remains a separate gate.
 
 ## [0.1.0.0] - 2026-07-14
 

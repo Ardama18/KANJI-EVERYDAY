@@ -2,7 +2,7 @@
 id: S-12
 feature: ai-card-openai-generation-ui
 type: design
-version: 1.0.1
+version: 1.0.2
 created: 2026-07-18
 updated: 2026-07-18
 status: design_review
@@ -385,7 +385,7 @@ Quota不変条件:
 
 実装済み`claim_ai_import_cleanup`と`verify_ai_import_cleanup`は、source/rawについて`created_at + interval '24 hours' <= db_now`を両方で再確認する。この比較により23:59:59は保護、24:00:00でeligibleである。`delete_due_at`が23時間45分でも、24時間条件とのANDで早期削除されない。active `queued/processing` consumer、owner prefix不一致、stale claimは削除しない。
 
-ただしS-11 `meta.json`は`rc1_local_pending_hosted_7_not_run_merge_blocked`である。以下を実装開始前hard gateとする。
+S-11のcandidate-bound release evidenceは`accepted`でHosted7が全件passしている。以下を実装開始前hard gateとする。
 
 - S-11 migration/RPC/routesが対象hosted環境へ反映済み。
 - Hosted7とcleanup schedule/resource gateがcurrent candidateで成功。
@@ -767,3 +767,4 @@ OpenAI Developer Docs MCP/OpenAPI toolは当セッションに存在しなかっ
 |---|---|---|
 | 2026-07-18 | 1.0.0 | Issue #13、S-10/S-11実装、OpenAI公式仕様を統合した初版 |
 | 2026-07-18 | 1.0.1 | 第三者reviewでOpenAI moderation cardinality、Responses reasoning item、source read失敗時release契約を修正し、ADR-009/010 Acceptedを反映 |
+| 2026-07-19 | 1.0.2 | S-11のcandidate-bound accepted evidenceを反映し、過去のHosted7 pending記録をS-12の現行blockerから除外 |

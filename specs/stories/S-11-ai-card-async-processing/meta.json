@@ -2,12 +2,12 @@
   "story_id": "S-11",
   "epic_id": "GH-9",
   "parent_story_id": "S-10",
-  "status": "rc1_remediation",
+  "status": "accepted",
   "ssot_version": "2.0.17",
   "requirements_version": "2.0.5",
   "remediation_cycle": 19,
-  "review_attempt": 0,
-  "verification_state": "rc1_local_pending_hosted_7_not_run_merge_blocked",
-  "github_pr_url": "",
+  "review_attempt": 2,
+  "verification_state": "accepted_hosted_7_passed",
+  "github_pr_url": "https://github.com/Ardama18/KANJI-EVERYDAY/pull/18",
   "github_branch": "issue/12-ai-cards-2-6"
 }

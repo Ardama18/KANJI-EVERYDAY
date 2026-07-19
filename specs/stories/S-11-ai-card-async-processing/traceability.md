@@ -4,8 +4,8 @@ feature: ai-card-async-processing
 type: traceability
 version: 2.0.17
 created: 2026-07-15
-updated: 2026-07-17
-status: rc1_remediation
+updated: 2026-07-19
+status: accepted
 requirements: specs/stories/S-11-ai-card-async-processing/requirements.md@2.0.5
 adr: specs/adr/ADR-008-ai-card-async-queue-image-processing.md@2.0.5
 design: specs/stories/S-11-ai-card-async-processing/design.md@2.0.5
@@ -28,7 +28,7 @@ plan: specs/stories/S-11-ai-card-async-processing/plan.md@2.0.17
 
 Integration includes authenticated routes, service-role RPC, provider HTTP, private Storage, recorded legacy/fresh buckets, shared-source ordering, cleanup lease recovery, pinned ImageMagick one-pass transcode, and finalize/failure reconciliation. `test:s11:real-integration`, `test:s11:real-e2e`, and `test:s11:resource` are fail-closed gates: missing real environment/fixtures produce `not_run` and exit 2, never a mock pass. Configured real E2E obtains owner A/B through Supabase password login, sends package-generated SSR cookies to Next routes, and uses access-token Authorization only for PostgREST RPC/RLS; rejection scenarios require the exact Next 404/`NOT_FOUND`, service-only PostgREST anon 401 or authenticated 403 with code `42501`, or Storage 400/`404`/`not_found` contract. The resource gate directly serves the exact self-contained local bundle plus pinned WASM, independently hashes/sizes both, runs each case in a fresh Deno process, measures spawned PID CPU/runtime-baseline-adjusted RSS and codec peak RSS, enforces request abort/process kill at 1.6 CPU seconds/248MiB request RSS/120 seconds, and exercises PNG/JPEG/WebP 10MiB・1,048,576 pixels（PNG 8-bit RGB）、dimension rejection, independent decode failure, OpenAI-adapter 4MiB/1024px maximum response, and 110-second timeout cases.
 
-Fresh/upgrade/failure database jobs are also fail-closed when invoked directly: absent or non-distinct database URLs emit structured `not_run` and exit 2. The repository quality runner now provisions three distinct disposable databases and executes local core fresh/upgrade/failure plus the real two-session completion/cleanup race. Current inventory is Unit 27/27, Integration 223/223, E2E 10/10. Hosted `pg_cron`, real integration/E2E, resource artifact, and Deno gates remain explicit `not_run`/exit 2 until their target prerequisites exist; no local result promotes them to pass.
+Fresh/upgrade/failure database jobs are also fail-closed when invoked directly: absent or non-distinct database URLs emit structured `not_run` and exit 2. The repository quality runner provisions three distinct disposable databases and executes local core fresh/upgrade/failure plus the real two-session completion/cleanup race. Final candidate evidence records Unit 27/27, Integration 223/223, E2E 10/10 and all Hosted7 gates passed with exit 0; earlier local `not_run` records remain historical and were not promoted to passes.
 
 Fresh bounded remediation cycle 7 corrects only the three stale plan SSOT labels to current v2.0.5 and resets the independent review counter to attempt 1/3. Its repeatable documentation-consistency and unchanged-code regression evidence is recorded in `tasks/remediation-cycle-7.md`; the subsequent independent review outcome is recorded below.
 
@@ -36,7 +36,7 @@ Repository-owned quality cycle 8 adds no production or AC contract. `.codex/qual
 
 Historical cycle 8 independent review attempt 3/3 returned zero findings and `approved` for that cycle's diff. The installed root quality-fixer then returned exit 0 through the then-current isolated S-10 lifecycle. This historical record does not approve any post-cycle-8 remediation and does not establish hosted AC acceptance.
 
-Historical R12 remediation introduced five boundaries: ready rows cannot be downgraded by stale cleanup, malformed JSON and status identifiers fail before side effects, expand/backfill/validate are bounded stages, resource-only authorization rejects blank secrets, and the repository runner owns three isolated disposable databases. This is historical implementation evidence, not current hosted acceptance. Current cycle-19 RC1 remains local-evidence pending with all Hosted7 commands `not_run`/exit 2 and merge blocked.
+Historical R12 remediation introduced five boundaries: ready rows cannot be downgraded by stale cleanup, malformed JSON and status identifiers fail before side effects, expand/backfill/validate are bounded stages, resource-only authorization rejects blank secrets, and the repository runner owns three isolated disposable databases. This is historical implementation evidence. Current cycle-19 acceptance is the candidate-bound `.codex/release-evidence.json`, which records local gates、Hosted7、secret scans、累積review、限定verificationすべてpassで`accepted`である。
 
 Cycle 7 independent review attempt 1 returned `changes_requested`. Its four authorized corrections now distinguish an empty Queue result from malformed RPC output at the real handler boundary, validate outbox error codes against `SAFE_IMPORT_ERROR_CODES`, directly check the corrected confirmed-poison `worker_poison` task evidence, and map provider selection/concept isolation to IT-16, local E2E-04, and the fail-closed F-08 PostgreSQL pair-failure/sibling-success gate. Independent review attempt 2/3 remains the next gate.
 
@@ -157,8 +157,8 @@ Fresh remediation cycle 3 adds P3-01/P3-02 focused evidence: `worker_failure` is
 | R22-F3 | cycle-18 readiness SSOT | v2.0.16/cycle 18 retains hosted 7 not_run/exit 2 and merge blocked; S-11 is 27/223/10 and focused 77, S-10 Unit is 36, and two final-diff isolated runners each pass ordinary 703/8 of 711 plus DB4 with residue/source synthetic counts zero |
 | R22-R1-F1 | real process-timeout boundary | injectable runtime launches three real hanging Node children; 75ms timeout sends SIGTERM and runS10Psql/captureError/settle preserve exit→reject→next-snapshot order with no process residue while default psql remains 12s |
 | R23-F0 | fixed release and evidence contract | `.codex/release-contract.json` pins issue 12/story S-11/base/AC9/OOS/exact local+Hosted7+secret gates and finite review policy; validator fails closed on drift, gate-set errors, unresolved state, or candidate mismatch and is wired to authoritative quality |
-| R23-F1 | RC1 stream/process remediation | provider/Storage mid-stream retry, source cancel-finally, aggregate DB settlement and TERM→KILL child supervision are pending Red/Green evidence; no acceptance is claimed |
-| R23-F2 | candidate-bound acceptance | `.codex/release-evidence.json` is redacted and currently pending; Hosted7 are all not_run/exit 2 on the pre-RC1 candidate, so merge remains blocked |
+| R23-F1 | RC1 stream/process remediation | provider/Storage mid-stream retry、source cancel-finally、aggregate DB settlement、TERM→KILL child supervisionをRed/Greenで完了 |
+| R23-F2 | candidate-bound acceptance | redacted `.codex/release-evidence.json`がcandidate `9b95ab88239022a3e1fc03e028b8ac30b6429bae`のlocal/Hosted7/secret/review全gate passと`accepted`を記録 |
 | R22-R1-F2 | scoped usage ledger delta | IT-COMMIT-01/03 capture ai_usage_daily by reservation owner/date/kind, require reservation units as the exact delta, and require commit/parallel/idempotent retry to add zero; IT-QUOTA-06 requires remote_mcp/upload exempt delta zero without owner-wide sums |
 
 ## Change history
@@ -195,3 +195,4 @@ Fresh remediation cycle 3 adds P3-01/P3-02 focused evidence: `worker_failure` is
 | 2026-07-16 | 2.0.15 | implementation_review | Cycle 17 normalizes service snapshot credentials case-insensitively, preserves explicit service apikey, and rejects missing/spoofed/mismatched pairs before fetch with current 27/223/10 inventory; hosted 7 remain not_run/exit 2 and merge blocked |
 | 2026-07-16 | 2.0.16 | implementation_review | Cycle 18 bounds S-10 DB test settlement, serializes marker cleanup, scopes usage snapshots by reservation/date, and retains hosted 7 not_run/exit 2 and merge blocked |
 | 2026-07-16 | 2.0.17 | rc1_remediation | Fixed release/finite-review/evidence contract added; RC1 local evidence and all Hosted7 acceptance remain pending/merge blocked |
+| 2026-07-19 | 2.0.17 | accepted | Candidate-bound local、Hosted7、secret scan、cumulative review、verification evidence passed and release state synchronized to accepted |

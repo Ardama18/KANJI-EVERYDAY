@@ -2,7 +2,7 @@
 id: S-12
 feature: ai-card-openai-generation-ui
 type: plan
-version: 1.1.1
+version: 1.1.2
 created: 2026-07-18
 updated: 2026-07-19
 status: implementation_review
@@ -55,13 +55,13 @@ related_issue: https://github.com/Ardama18/KANJI-EVERYDAY/issues/13
 
 以下がすべてpassするまでPhase 0へ進まない。`not_run`、資格情報不足、古いcandidateの結果をpassとして扱わない。
 
-- [ ] S-11 current candidateでHosted7がすべてpassしている。
-- [ ] scheduled cleanupが対象環境で有効で、S-11のclaim/verify/complete契約を通過している。
-- [ ] `created_at + 24 hours <= DB now`の境界が、23:59:59保持・24:00以降削除として実環境で確認済みである。
-- [ ] source/raw object、active consumer、owner path、claim fencingのS-11 cleanup evidenceが現candidateに対応する。
+- [x] S-11 current candidateでHosted7がすべてpassしている。
+- [x] scheduled cleanupが対象環境で有効で、S-11のclaim/verify/complete契約を通過している。
+- [x] `created_at + 24 hours <= DB now`の境界が、23:59:59保持・24:00以降削除として実環境で確認済みである。
+- [x] source/raw object、active consumer、owner path、claim fencingのS-11 cleanup evidenceが現candidateに対応する。
 - [x] gate不成立時はS-12内へ代替Queue/worker/cleanupを実装せず、作業を`blocked`として終了する。
 
-S-11の正本は`rc1_local_pending_hosted_7_not_run_merge_blocked`である。S-12のローカル実装と検証はレビュー可能だが、Hosted7と対象環境のcleanup確認が完了するまでmergeしない。
+S-11のcandidate `9b95ab88239022a3e1fc03e028b8ac30b6429bae`はHosted7を含むrelease evidenceが`accepted`である。S-12固有のHosted E2Eは別gateとして扱い、S-11の過去の`not_run`記録を現行blockerへ戻さない。
 
 ## 4. 実装順序
 
@@ -376,4 +376,5 @@ flowchart TB
 |---|---|---|
 | 2026-07-18 | 1.0.0 | requirements v1.1.1、ADR-009/010 Accepted、design v1.0.1、acceptance test skeletonを基にcreate modeで初版作成 |
 | 2026-07-19 | 1.1.0 | Phase 6、実OpenAI text/image/keyboard QA、3件のQA修正、実DB・全回帰・production buildの完了結果を反映 |
-| 2026-07-19 | 1.1.1 | 独立ship監査を反映し、教材sourceの早期失敗releaseと非同期focusを修正。Hosted7/真のE2E未実行をmerge blockerへ戻した |
+| 2026-07-19 | 1.1.1 | 独立ship監査を反映し、教材sourceの早期失敗releaseと非同期focusを修正。後続訂正でS-11 Hosted7のaccepted evidenceを反映し、S-12 Hosted E2Eだけを未完了gateとして分離 |
+| 2026-07-19 | 1.1.2 | S-11 Hosted7のcandidate-bound accepted evidenceへ正本を同期し、S-12固有Hosted E2Eのみを未完了gateとして明示 |

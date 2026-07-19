@@ -1,7 +1,7 @@
 # S-12 受入テスト計画
 
 - 対象: `S-12-ai-card-openai-generation-ui`
-- 正本: `../design.md` v1.0.1、`../requirements.md` v1.1.1
+- 正本: `../design.md` v1.0.2、`../requirements.md` v1.1.1
 - 生成日: 2026-07-18
 - planning gate制約: skeletonは`it.todo`・コメント・importのみ。assertion、mock、fixture、helper、production実装は後続実装gateまで作成しない。
 - 既存境界: S-10/S-11のmigration履歴とQueue/worker architectureは再構築しない。S-12を実DBへ接続するためのroute/action/test互換修正とforward migrationは許容し、差分理由をPRへ記録する。
@@ -81,4 +81,4 @@
 - production buildがローカルSupabase環境変数をprocess内だけで与えた状態でpass。
 - 実OpenAI text/image生成、source即時削除、360px横overflow 0、reload復元、partial表示、keyboard-only生成→除外→再preview→確認→commitをブラウザで確認。
 - 除外後commitは生成時quota 2 unitsを保持したまま最終batch 1枚を202で受理し、reservationとbatchの紐付けを実DBで確認。
-- S-11 Hosted7、scheduled cleanup、flag-off前後snapshot、HTTP route・ブラウザ・hosted DBを接続する自動E2Eは未実行。新しいhosted Supabase対象が用意されるまでmerge blockedとする。
+- S-11 Hosted7とscheduled cleanupはcandidate-bound release evidenceで全件pass。S-12のflag-off前後snapshotとHTTP route・ブラウザ・hosted DBを接続する自動E2Eは未実行であり、S-11 acceptanceとは分離して記録する。
