@@ -246,7 +246,7 @@ describe("S-12 provider, route-service, and S-10/S-11 integration contracts", ()
 		);
 		expect(source).toContain("body.confirmedWarnings !== true");
 		expect(source.indexOf("body.confirmedWarnings !== true")).toBeLessThan(
-			source.indexOf('service.rpc("commit_import_async"')
+			source.indexOf('service.rpc("commit_generated_import_async"')
 		);
 	});
 
