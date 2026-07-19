@@ -21,6 +21,7 @@ import {
 
 const SIGN_UP_REDIRECT_PATH = "/decks";
 const SIGN_IN_REDIRECT_PATH = "/decks";
+const OAUTH_CONSENT_CONTINUATION = "oauth-consent";
 const SIGN_OUT_REDIRECT_PATH = "/login";
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -307,7 +308,11 @@ export async function signIn(
 		};
 	}
 
-	redirect(SIGN_IN_REDIRECT_PATH);
+	redirect(
+		getFormValue(formData, "continuation") === OAUTH_CONSENT_CONTINUATION
+			? "/oauth/consent/continue"
+			: SIGN_IN_REDIRECT_PATH
+	);
 }
 
 export async function signOut(): Promise<void> {

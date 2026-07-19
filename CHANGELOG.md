@@ -2,6 +2,33 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.3.0.0] - 2026-07-19
+
+### Added
+
+- Added an OAuth-protected Remote MCP endpoint so external AI clients can connect with user consent and operate only through an authenticated, owner-scoped card workflow.
+- Added Japanese consent and connection-management screens for reviewing, approving, denying, and revoking external AI access.
+- Added eight fixed MCP tools for deck listing, AI card preview/commit/status, AI card listing, editing, deletion, and import undo.
+- Added S-14 Supabase forward migrations for authenticated Remote MCP wrappers, preview-token verification, private runtime config, and isolated real-database contract coverage.
+
+### Changed
+
+- Shared AI import and AI card management orchestration now runs through transport-independent application services used by both existing UI routes/actions and Remote MCP adapters.
+- Hardened Supabase server-client construction so public auth routes and build-time rendering do not require server-only environment variables.
+
+### Fixed
+
+- Preserved existing app AI preview-token compatibility while adding Remote MCP preview tokens bound to the verified owner and OAuth client.
+- Made MCP metadata and route handling fail closed when Remote MCP configuration is disabled or incomplete.
+- Kept Vercel frontend deployment self-contained by removing runtime imports from repository paths outside the frontend package.
+
+### Verification
+
+- Passed `npm run lint`, `npm run typecheck`, and `npm run build` from `frontend/`.
+- Passed `npm run check` from `frontend/` against disposable isolated DB `s14_gate_ship_*`: 83 files, 947 tests passed, 9 intentional skips.
+- Confirmed linked Hosted Supabase staging migrations are up to date with `npx supabase db push --dry-run --linked`.
+- Confirmed the current Vercel preview smoke for `/login`, MCP protected-resource metadata, unauthenticated MCP 401, GET 405, and invalid Origin 403. Claude and ChatGPT live-client gates remain separate release checks.
+
 ## [0.2.0.0] - 2026-07-19
 
 ### Added

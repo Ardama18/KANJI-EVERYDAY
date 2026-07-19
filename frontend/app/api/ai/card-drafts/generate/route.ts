@@ -12,8 +12,10 @@ import {
 import { moderate } from "@/lib/ai-card-generation/moderation";
 import { requestOpenAiConcepts } from "@/lib/ai-card-generation/openai-adapter";
 import { validateGenerationInput } from "@/lib/ai-card-generation/output-mapper";
+import { createAppAiImportRepository } from "@/lib/ai-import/app-ai-repository";
 import { mapAiImportError } from "@/lib/ai-import/errors";
-import { PreviewValidationError, createImportPreview } from "@/lib/ai-import/preview-service";
+import { PreviewValidationError } from "@/lib/ai-import/preview-service";
+import { previewCardImport } from "@/lib/ai-import/service";
 import {
 	getAiPreviewHmacSecret,
 	getOpenAiCardGenerationConfig,
@@ -80,22 +82,20 @@ export async function POST(request: Request): Promise<Response> {
 			},
 			requestConcepts: async (input, images) =>
 				await requestOpenAiConcepts({ config, input, images }),
-			createPreview: async (importRequest, reservationKey) =>
-				await createImportPreview(authData.user.id, importRequest, reservationKey, {
+			createPreview: async (importRequest, reservationKey) => {
+				const preview = await previewCardImport({
+					actor: { userId: authData.user.id, kind: "app_ai" },
+					request: importRequest,
+					cardReservationKey: reservationKey,
+					repository: createAppAiImportRepository(service, authData.user.id),
 					secret,
 					nowSeconds: Math.floor(Date.now() / 1_000),
-					validateDatabase: async (value) => {
-						const { error } = await service.rpc("validate_ai_import_preview", {
-							p_owner_user_id: authData.user.id,
-							p_deck_id: value.deckId,
-							p_reservation_key: value.reservationKey,
-							p_import_request_hash: value.importRequestHash,
-							p_upload_ids: [...value.uploadIds],
-							p_items: value.items.map((item) => ({ ...item })),
-						});
-						if (error !== null) throw mappedPreviewError(error);
-					},
-				}),
+				});
+				if (!preview.ok) {
+					throw new PreviewValidationError(preview.error.code, preview.error.httpStatus);
+				}
+				return preview.data;
+			},
 		});
 		return NextResponse.json(preview);
 	} catch (error) {

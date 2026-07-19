@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+	createJwtScopedClient as createJwtScopedClientUnderTest,
 	createServerClient as createServerClientUnderTest,
 	createServiceRoleClient as createServiceRoleClientUnderTest,
 } from "./server";
@@ -9,6 +10,7 @@ import {
 const createServerClientMock = vi.hoisted(() => vi.fn());
 const createClientMock = vi.hoisted(() => vi.fn());
 const getEnvConfigMock = vi.hoisted(() => vi.fn());
+const getPublicEnvConfigMock = vi.hoisted(() => vi.fn());
 
 const cookieGetMock = vi.hoisted(() => vi.fn());
 const cookieSetMock = vi.hoisted(() => vi.fn());
@@ -34,6 +36,7 @@ vi.mock("@supabase/supabase-js", () => ({
 
 vi.mock("../env", () => ({
 	getEnvConfig: getEnvConfigMock,
+	getPublicEnvConfig: getPublicEnvConfigMock,
 }));
 
 describe("frontend/src/lib/supabase/server.ts", () => {
@@ -46,6 +49,10 @@ describe("frontend/src/lib/supabase/server.ts", () => {
 
 	beforeEach(() => {
 		getEnvConfigMock.mockReset().mockReturnValue(envConfig);
+		getPublicEnvConfigMock.mockReset().mockReturnValue({
+			supabaseUrl: envConfig.supabaseUrl,
+			supabaseAnonKey: envConfig.supabaseAnonKey,
+		});
 		createServerClientMock.mockReset();
 		createClientMock.mockReset();
 		cookieGetMock.mockReset();
@@ -62,7 +69,8 @@ describe("frontend/src/lib/supabase/server.ts", () => {
 		expect(createServerClientMock).toHaveBeenCalledTimes(1);
 		expect(actual).toBe(fakeClient);
 		expect(cookiesMock).toHaveBeenCalledTimes(1);
-		expect(getEnvConfigMock).toHaveBeenCalledTimes(1);
+		expect(getEnvConfigMock).not.toHaveBeenCalled();
+		expect(getPublicEnvConfigMock).toHaveBeenCalledTimes(1);
 
 		const [url, anonKey, options] = createServerClientMock.mock.calls[0];
 		expect(url).toBe(envConfig.supabaseUrl);
@@ -132,5 +140,34 @@ describe("frontend/src/lib/supabase/server.ts", () => {
 				},
 			}
 		);
+	});
+
+	it("createJwtScopedClient uses only the anon key and a request token callback", async () => {
+		const fakeClient = { id: "jwt-scoped-client" };
+		createClientMock.mockReturnValue(fakeClient);
+
+		const actual = createJwtScopedClientUnderTest("header.payload.signature");
+
+		expect(actual).toBe(fakeClient);
+		expect(createClientMock).toHaveBeenCalledTimes(1);
+		const [url, key, options] = createClientMock.mock.calls[0];
+		expect(url).toBe(envConfig.supabaseUrl);
+		expect(key).toBe(envConfig.supabaseAnonKey);
+		expect(key).not.toBe(envConfig.supabaseServiceRoleKey);
+		expect(await options.accessToken()).toBe("header.payload.signature");
+		expect(options.auth).toMatchObject({
+			persistSession: false,
+			autoRefreshToken: false,
+			detectSessionInUrl: false,
+		});
+		expect(options.global).toBeUndefined();
+		expect(cookiesMock).not.toHaveBeenCalled();
+	});
+
+	it("createJwtScopedClient rejects an empty token before client creation", () => {
+		expect(() => createJwtScopedClientUnderTest("  ")).toThrow(
+			"JWT-scoped Supabase client requires a token"
+		);
+		expect(createClientMock).not.toHaveBeenCalled();
 	});
 });

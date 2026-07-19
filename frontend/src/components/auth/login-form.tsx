@@ -9,11 +9,14 @@ import { AUTH_ACTION_INITIAL_STATE } from "@/actions/auth-types";
 import { AuthErrorBanner } from "./auth-error-banner";
 import { SubmitButton } from "./submit-button";
 
-export function LoginForm() {
+export function LoginForm(props: Readonly<{ continuation?: "oauth-consent" }>) {
 	const [state, formAction] = useFormState(signIn, AUTH_ACTION_INITIAL_STATE);
 
 	return (
 		<form action={formAction} noValidate className="flex w-full max-w-[28rem] flex-col gap-4">
+			{props.continuation === "oauth-consent" ? (
+				<input type="hidden" name="continuation" value="oauth-consent" />
+			) : null}
 			<AuthErrorBanner message={state.message} />
 
 			<div className="flex flex-col gap-1.5">

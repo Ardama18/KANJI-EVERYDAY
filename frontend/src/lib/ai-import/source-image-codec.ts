@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import * as magickModule from "@imagemagick/magick-wasm";
 
-import type { ImageCodec } from "../../../../supabase/functions/_shared/ai-card-import/image-codec";
+import type { ImageCodec } from "./source-image";
 
 type MagickModule = typeof magickModule;
 

@@ -954,6 +954,68 @@ export type Database = {
 				};
 				Returns: Json;
 			};
+			s14_remote_validate_import_preview: {
+				Args: {
+					p_client_id: string;
+					p_session_id: string;
+					p_deck_id: string;
+					p_reservation_key: string;
+					p_import_request_hash: string;
+					p_upload_ids: string[];
+					p_items: Json;
+				};
+				Returns: undefined;
+			};
+			s14_create_oauth_consent_state: {
+				Args: { p_state_id: string; p_authorization_id: string };
+				Returns: undefined;
+			};
+			s14_consume_oauth_consent_state: {
+				Args: { p_state_id: string };
+				Returns: string | null;
+			};
+			s14_remote_commit_import: {
+				Args: {
+					p_client_id: string;
+					p_session_id: string;
+					p_idempotency_key: string;
+					p_import_request_hash: string;
+					p_generation_request_hash: string;
+					p_preview_token: string;
+					p_request: Json;
+					p_card_reservation_key: string;
+				};
+				Returns: Json;
+			};
+			s14_remote_get_import_status: {
+				Args: {
+					p_client_id: string;
+					p_session_id: string;
+					p_batch_id?: string | null;
+					p_idempotency_key?: string | null;
+				};
+				Returns: Json;
+			};
+			s14_remote_update_imported_card: {
+				Args: {
+					p_client_id: string;
+					p_session_id: string;
+					p_card_id: string;
+					p_patch: Json;
+					p_expected_updated_at: string;
+				};
+				Returns: Json;
+			};
+			s14_remote_update_ai_card: {
+				Args: {
+					p_client_id: string;
+					p_session_id: string;
+					p_card_id: string;
+					p_expected_updated_at: string;
+					p_patch: Json;
+				};
+				Returns: Json;
+			};
 			list_ai_managed_cards: {
 				Args: {
 					p_limit?: number;

@@ -1,0 +1,9 @@
+{
+  "story_id": "S-14",
+  "epic_id": "GH-9",
+  "parent_story_id": "S-10",
+  "status": "implementation_review",
+  "github_issue": 11,
+  "github_pr_url": "https://github.com/Ardama18/KANJI-EVERYDAY/pull/25",
+  "github_branch": "issue/11-ai-cards-4-6-supabase-oauth-remote-mcp"
+}
