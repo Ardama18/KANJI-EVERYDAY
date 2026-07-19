@@ -63,6 +63,10 @@ export function isAiCardImportEnabled(): boolean {
 	return process.env.AI_CARD_IMPORT_ENABLED?.trim() === "true";
 }
 
+export function isAiCardManagementEnabled(): boolean {
+	return process.env.AI_CARD_MANAGEMENT_ENABLED === "true";
+}
+
 export function getOpenAiCardGenerationConfig(): OpenAiCardGenerationConfig | undefined {
 	const apiKey = getRouteSecret("OPENAI_API_KEY");
 	const model = process.env.OPENAI_CARD_GENERATION_MODEL?.trim() || "gpt-5.6-luna";

@@ -44,7 +44,7 @@ describe("frontend/middleware.ts", () => {
 		createMiddlewareClientMock.mockReset();
 	});
 
-	it.each(["/decks", "/decks/unit-1"])(
+	it.each(["/decks", "/decks/unit-1", "/ai", "/ai/cards"])(
 		"UT-AC15-MW-UNAUTH-PROTECTED: 未認証 %s は /login へリダイレクトする",
 		async (pathname) => {
 			const authClient = createAuthClient(null);

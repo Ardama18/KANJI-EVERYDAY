@@ -1,0 +1,9 @@
+{
+  "story_id": "S-13",
+  "epic_id": "GH-9",
+  "parent_story_id": "S-10",
+  "status": "implementation_review",
+  "github_issue": 14,
+  "github_pr_url": "",
+  "github_branch": "issue/14-ai-card-management"
+}

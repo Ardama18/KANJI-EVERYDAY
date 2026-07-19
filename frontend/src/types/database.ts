@@ -873,6 +873,18 @@ export type Database = {
 			[_ in never]: never;
 		};
 		Functions: {
+			ai_s13_assert_managed_card: {
+				Args: { p_owner_user_id: string; p_card_id: string };
+				Returns: string;
+			};
+			bulk_delete_imported_cards: {
+				Args: { p_cards: Json };
+				Returns: Json;
+			};
+			bulk_delete_imported_cards_internal: {
+				Args: { p_owner_user_id: string; p_cards: Json };
+				Returns: Json;
+			};
 			claim_ai_import_concept: {
 				Args: { p_job_id: string; p_message_id: number; p_claim_token: string };
 				Returns: Json;
@@ -939,6 +951,19 @@ export type Database = {
 					p_actor_user_id: string;
 					p_batch_id?: string | null;
 					p_idempotency_key?: string | null;
+				};
+				Returns: Json;
+			};
+			list_ai_managed_cards: {
+				Args: {
+					p_limit?: number;
+					p_cursor_created_at?: string | null;
+					p_cursor_id?: string | null;
+					p_deck_id?: string | null;
+					p_tag_id?: string | null;
+					p_source?: string | null;
+					p_created_from?: string | null;
+					p_created_to?: string | null;
 				};
 				Returns: Json;
 			};
@@ -1208,19 +1233,27 @@ export type Database = {
 				Returns: Json;
 			};
 			set_card_illustration: {
-				Args: { p_card_id: string; p_illustration_id?: string };
+				Args: { p_card_id: string; p_illustration_id?: string | null };
 				Returns: Json;
 			};
 			set_card_illustration_internal: {
 				Args: {
 					p_card_id: string;
-					p_illustration_id?: string;
+					p_illustration_id?: string | null;
 					p_owner_user_id: string;
 				};
 				Returns: Json;
 			};
 			set_card_tags: {
 				Args: { p_card_id: string; p_tag_ids: string[] };
+				Returns: Json;
+			};
+			set_card_tag_names: {
+				Args: { p_card_id: string; p_tag_names: string[] };
+				Returns: Json;
+			};
+			set_card_tag_names_internal: {
+				Args: { p_owner_user_id: string; p_card_id: string; p_tag_names: string[] };
 				Returns: Json;
 			};
 			set_card_tags_internal: {
