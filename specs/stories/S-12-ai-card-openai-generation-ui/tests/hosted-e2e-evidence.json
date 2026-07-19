@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 1,
+  "story": "S-12",
+  "issue": 13,
+  "testedSourceSha": "a3394a7615e5aeff29e1880a5ea1d12ac874c3b7",
+  "executedAt": "2026-07-19T11:07:40+09:00",
+  "state": "accepted",
+  "environment": {
+    "application": "Next.js HTTP server using the tested source SHA",
+    "database": "KANJI-EVERYDAY-staging hosted Supabase",
+    "projectRef": "wolwkdvvosfxgxoosgjw",
+    "browser": "persistent headless Chromium",
+    "viewport": "360x800"
+  },
+  "hostedGates": [
+    {
+      "id": "E2E-01-text-edit-commit",
+      "status": "passed",
+      "summary": {
+        "generationHttpStatus": 200,
+        "previewHttpStatus": 200,
+        "commitHttpStatus": 202,
+        "terminalStatus": "completed",
+        "succeeded": 1,
+        "failed": 0,
+        "editRequiredRepreview": true,
+        "warningConfirmationRequired": true
+      }
+    },
+    {
+      "id": "E2E-02-source-both-shared-upload",
+      "status": "passed",
+      "summary": {
+        "sourceUploadPrepared": true,
+        "sourceUploadCompleted": true,
+        "patterns": ["R1", "W1"],
+        "conceptCount": 1,
+        "sharedIllustrationKeyCount": 1,
+        "terminalStatus": "completed",
+        "succeeded": 2,
+        "failed": 0,
+        "generationSourceRowsDeleted": 1,
+        "generationSourcePathsCleared": 1
+      }
+    },
+    {
+      "id": "E2E-03-reload-pointer-restoration",
+      "status": "passed",
+      "summary": {
+        "persistedFields": ["version", "deckId", "batchId"],
+        "draftPersisted": false,
+        "previewTokenPersisted": false,
+        "sourceBytesPersisted": false,
+        "restoredStatus": "queued"
+      }
+    },
+    {
+      "id": "E2E-04-partial-result",
+      "status": "passed",
+      "summary": {
+        "terminalStatus": "partial",
+        "succeeded": 1,
+        "failed": 1,
+        "safeFailureCode": "DUPLICATE_EXISTING",
+        "successfulCardPreserved": true
+      }
+    },
+    {
+      "id": "E2E-05-safe-error-contract",
+      "status": "passed",
+      "summary": {
+        "liveValidationCase": "both_odd_count",
+        "invalidControlFocused": true,
+        "ariaInvalid": true,
+        "ariaDescribedBy": true,
+        "rawProviderBodyDisplayed": false
+      }
+    },
+    {
+      "id": "E2E-06-mobile-keyboard-accessibility",
+      "status": "passed",
+      "summary": {
+        "viewportWidth": 360,
+        "scrollWidth": 360,
+        "clientWidth": 360,
+        "horizontalOverflow": false,
+        "keyboardJourneyCompleted": true,
+        "accessibleNamesPresent": true,
+        "focusRecoveryPassed": true
+      }
+    },
+    {
+      "id": "E2E-07-rollback-and-owner-boundary",
+      "status": "passed",
+      "summary": {
+        "flagOffCreatePageHttpStatus": 404,
+        "flagOffMutationHttpStatuses": [404, 404, 404, 404, 404],
+        "existingStatusHttpStatus": 200,
+        "existingStatus": "partial",
+        "ownerBDeckHttpStatus": 404,
+        "ownerBBatchHttpStatus": 404,
+        "before": { "decks": 1, "cards": 5, "batches": 3, "items": 5 },
+        "after": { "decks": 1, "cards": 5, "batches": 3, "items": 5 }
+      }
+    }
+  ],
+  "inheritedHostedGate": {
+    "source": ".codex/release-evidence.json",
+    "story": "S-11",
+    "state": "accepted",
+    "covers": [
+      "24-hour cleanup boundary",
+      "other-owner protection",
+      "active-reference protection",
+      "served worker and cleanup"
+    ]
+  },
+  "hostedDatabaseSecurity": {
+    "migration": "20260719000000_s12_fix_generation_source_function_ownership.sql",
+    "securityDefinerCatalogViolations": 0,
+    "fixedOwner": "s10_migration_owner",
+    "serviceRoleOnlyHelpers": 4
+  },
+  "redaction": {
+    "containsSecrets": false,
+    "containsCredentials": false,
+    "containsCardText": false,
+    "containsSourceBytes": false,
+    "containsRawProviderResponses": false,
+    "containsEntityIds": false
+  }
+}

@@ -53,7 +53,7 @@
 
 - [x] queued/processingでreloadすると同じbatchのstatusが復元され、draft本文やtokenが復元表示されない。
 - [x] terminal後はstatus pointerが消え、古いtracking UIが次回表示されない。
-- [ ] flag disabled時はpageが404またはdisabledとなる一方、既存batch statusとsource recovery操作は利用可能である（hosted前後snapshot待ち）。
+- [x] flag disabled時はpageと新規mutation 5経路が404となる一方、既存batch statusは200で利用でき、前後のdeck/card/batch/item件数が一致する。
 
 ## 実行記録
 
@@ -65,10 +65,12 @@
 - [x] keyboard-only操作記録（2026-07-19: text生成→card除外→再preview→警告確認→commit 202→status復元）
 - [x] accessibility tree/自動scan結果（accessible name、label、error関連、live region、focusを確認）
 - [x] 既存deck detail baseline比較 (`deck-detail.png`、`deck-detail-mobile.png`)
+- [x] Hosted 360×800 validation状態（`/tmp/s12-mobile-validation.png`、`scrollWidth === clientWidth === 360`）
+- [x] Hosted flag rollback（AI導線なし、作成page 404、mutation 5経路404、既存status 200、owner B境界404）
 
 ## 完了条件
 
-- [ ] 全check項目がpass、または非該当理由が記録されている。
-- [ ] Hosted E2E-06がpassする。
+- [x] 全check項目がpass、または非該当理由が記録されている。
+- [x] Hosted E2E-06がpassする。
 - [x] 360pxで横overflow 0件。
 - [x] keyboard blocker、accessible name欠落、label/error未関連付けが0件。

@@ -65,7 +65,7 @@ export default function SourceUploadList({
 			<ul className="mt-2 space-y-2">
 				{files.map((file, index) => (
 					<li
-						key={`${file.name}-${file.size}`}
+						key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
 						className="flex min-w-0 items-center justify-between gap-2 rounded-lg bg-slate-50 p-2 text-sm"
 					>
 						<span className="min-w-0 break-all">{file.name}</span>

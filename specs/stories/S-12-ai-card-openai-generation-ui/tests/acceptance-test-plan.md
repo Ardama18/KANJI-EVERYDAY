@@ -12,7 +12,8 @@
 |---|---|---:|---|
 | Unit | 本書のケース一覧のみ | 16 | pure contract実装と同時。現gateでは実装ファイルを作らない |
 | Integration | `ai-card-openai-generation-ui.int.test.ts` | 15 todo | provider/route/S-10/S-11接続実装と同時 |
-| Journey contract | `ai-card-openai-generation-ui.e2e.test.ts` | 7実装済み | pure service/static contract。Hosted E2Eの代替にはしない |
+| Journey contract | `ai-card-openai-generation-ui.e2e.test.ts` | 7実装済み | pure service/static contract |
+| Hosted E2E | `hosted-e2e-evidence.json` | 7実行済み | 実HTTP・Chromium・OpenAI・Hosted Supabaseを接続し、tested source SHAへ束縛 |
 | Visual/accessibility | `../ui-design/visual-checklist.md` | 2ページ/状態群 | UIが機能的に動作した後 |
 
 ## Unit test計画（16件、実装ファイルは作成しない）
@@ -73,12 +74,14 @@
 
 ## 実行結果（2026-07-19）
 
-- Unit 20件、Integration 17件、journey contract 7件、合計44件がpassし、S-12内todo/skipは0件。Hosted E2Eは未実行。
+- Unit 20件、Integration 18件、journey contract 7件、合計45件がpassし、S-12内todo/skipは0件。
+- Hosted E2E 7件がtested source SHA `a3394a7615e5aeff29e1880a5ea1d12ac874c3b7`でpass。実行結果は`hosted-e2e-evidence.json`へ本文・画像・資格情報を含めず記録した。
 - QA回帰test 5件（paired edit 3件、partial表示1件、除外後commit 1件）がpass。
 - ship監査回帰test 4件（早期失敗source release 2件、非同期focus target 2件）がpass。
-- `npm run check`: 58 test files、794 pass、既存9 skip。lint・typecheckもpass。
+- `npm run check`: 58 test files、795 pass、既存9 skip。lint・typecheckもpass。
 - `npm run test:s12:real-db`: illustration列権限/RLS、failed→pending限定遷移、preview既存重複検査がpass。
 - production buildがローカルSupabase環境変数をprocess内だけで与えた状態でpass。
-- 実OpenAI text/image生成、source即時削除、360px横overflow 0、reload復元、partial表示、keyboard-only生成→除外→再preview→確認→commitをブラウザで確認。
+- 実OpenAI text/image生成、source即時削除、360px横overflow 0、reload復元、partial表示、keyboard-only生成→編集→再preview→確認→commitをChromiumで確認。
 - 除外後commitは生成時quota 2 unitsを保持したまま最終batch 1枚を202で受理し、reservationとbatchの紐付けを実DBで確認。
-- S-11 Hosted7とscheduled cleanupはcandidate-bound release evidenceで全件pass。S-12のflag-off前後snapshotとHTTP route・ブラウザ・hosted DBを接続する自動E2Eは未実行であり、S-11 acceptanceとは分離して記録する。
+- S-11 Hosted7と24時間cleanupはcandidate-bound release evidenceで全件pass。S-12では同じstagingへ7本のforward migrationを適用し、flag-off前後snapshot、owner境界、HTTP route、Chromium、OpenAI、Hosted DB、workerを接続した7シナリオがpassした。
+- 最終inventoryで検出したS-12 source helper 4関数のSECURITY DEFINER owner逸脱をforward migrationで修正し、ローカルS-10 security testとHosted catalog queryがともに違反0でpassした。

@@ -298,7 +298,7 @@ flowchart TB
   - 統合完了条件: error taxonomyが色だけでなく安全な文字で区別され、accuracy/privacy/copyright警告がpreview前後で継続する。
   - 動作確認: Figmaなしのため既存UI baselineとの手動デザイン確認を行い、visual checklistの実行準備を完了する。
 
-- [ ] **P6-02 E2E 7 todoを実装しvisual/accessibility checklistを実行する**
+- [x] **P6-02 E2E 7 todoを実装しvisual/accessibility checklistを実行する**
   - 対応AC: AC-01〜08
   - 依存: P6-01
   - 想定変更ファイル: `specs/stories/S-12-ai-card-openai-generation-ui/tests/ai-card-openai-generation-ui.e2e.test.ts`、必要なS-12専用E2E testkit、`specs/stories/S-12-ai-card-openai-generation-ui/ui-design/visual-checklist.md`
@@ -308,7 +308,7 @@ flowchart TB
   - 統合完了条件: text/imageのgenerate→preview→commit→status、reload、partial、flag rollbackがユーザー操作からDB結果まで接続される。
   - 動作確認: `cd frontend && npm run test:s12:e2e`を実行し、360×800各状態、keyboard-only操作、label/error/live regionをchecklistへ記録する。
 
-- [ ] **P6-03 全quality gateと既存回帰を実行し文書整合を確定する**
+- [x] **P6-03 全quality gateと既存回帰を実行し文書整合を確定する**
   - 対応AC: AC-01〜08
   - 依存: P6-02
   - 想定変更ファイル: S-12 test/evidence/必要なDesign Doc整合更新、S-12を実DBへ接続するroute/action/test互換修正、forward migration。S-10/S-11の既存migration履歴とQueue/worker architectureは再構築しない。
@@ -320,14 +320,14 @@ flowchart TB
 
 ### 最終Phase完了条件
 
-- [ ] Unit 20件、Integration 17件、Hosted E2E 7件がpassし、S-12内todo/skip/not_runが0件である。
+- [x] Unit 20件、Integration 18件、Hosted E2E 7件がpassし、S-12内todo/skip/not_runが0件である。
 - [x] `npm run check`とS-10/S-11 inventoryがpassする。
 - [x] 360px、keyboard、label/error、live region checklistが完了する。
-- [ ] source通常即時削除、失敗時24時間cleanup、別owner/scope/active consumer保護がhosted環境でpassする。
+- [x] source通常即時削除、失敗時24時間cleanup、別owner/scope/active consumer保護がhosted環境でpassする。
 - [x] token tamper/expiry/content replacement、confirmation bypass、quota二重消費が拒否される。
-- [ ] flag disabledで新規AI作成だけが停止し、既存card/deck/study/batch statusがhosted環境で保持される。
+- [x] flag disabledで新規AI作成だけが停止し、既存card/deck/study/batch statusがhosted環境で保持される。
 
-ローカルでは58 test files / 794 pass / 9既存skip、production build、実OpenAI text/image、実DB gate、ブラウザkeyboard flowまでpassした。`ai-card-openai-generation-ui.e2e.test.ts`の7件は現状journey contractであり、HTTP route・ブラウザ・hosted DBを接続するE2Eの代替にはしない。
+ローカルでは58 test files / 795 pass / 9既存skip、production build、実OpenAI text/image、実DB gate、ブラウザkeyboard flowまでpassした。`ai-card-openai-generation-ui.e2e.test.ts`のjourney contract 7件に加え、HTTP route・Chromium・OpenAI・hosted DB・workerを接続したHosted E2E 7件を`hosted-e2e-evidence.json`へ記録した。
 
 ## 12. AC traceability
 
@@ -378,3 +378,4 @@ flowchart TB
 | 2026-07-19 | 1.1.0 | Phase 6、実OpenAI text/image/keyboard QA、3件のQA修正、実DB・全回帰・production buildの完了結果を反映 |
 | 2026-07-19 | 1.1.1 | 独立ship監査を反映し、教材sourceの早期失敗releaseと非同期focusを修正。後続訂正でS-11 Hosted7のaccepted evidenceを反映し、S-12 Hosted E2Eだけを未完了gateとして分離 |
 | 2026-07-19 | 1.1.2 | S-11 Hosted7のcandidate-bound accepted evidenceへ正本を同期し、S-12固有Hosted E2Eのみを未完了gateとして明示 |
+| 2026-07-19 | 1.1.3 | S-12 Hosted E2E 7件、source即時削除、reload、partial、360px、owner境界、flag rollbackのcandidate-bound evidenceを反映。最終inventoryで検出したsource helper 4関数のowner逸脱をforward migrationで修正 |

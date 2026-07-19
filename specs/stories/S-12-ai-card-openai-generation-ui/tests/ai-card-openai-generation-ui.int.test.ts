@@ -439,4 +439,25 @@ describe("S-12 provider, route-service, and S-10/S-11 integration contracts", ()
 		expect(migration).toContain("TO service_role");
 		expect(migration).toContain("FROM PUBLIC,anon,authenticated");
 	});
+
+	it("INT-18: generation source SECURITY DEFINER helpers use the fixed migration owner", async () => {
+		const migration = await readFile(
+			new URL(
+				"../../../../supabase/migrations/20260719000000_s12_fix_generation_source_function_ownership.sql",
+				import.meta.url
+			),
+			"utf8"
+		);
+		for (const signature of [
+			"prepare_ai_source_upload_scoped(uuid,text,text,bigint,text)",
+			"get_ai_generation_sources(uuid,uuid[])",
+			"release_ai_generation_source(uuid,uuid)",
+			"complete_ai_generation_source_release(uuid,uuid,text,text,text,boolean)",
+		]) {
+			expect(migration).toContain(`public.${signature}`);
+		}
+		expect(migration.match(/OWNER TO s10_migration_owner/gu)).toHaveLength(4);
+		expect(migration).toContain("FROM PUBLIC,anon,authenticated");
+		expect(migration).toContain("TO service_role");
+	});
 });
