@@ -18,6 +18,34 @@ describe("S-13 forward migration contract", () => {
 		expect(migration).toContain("batches.source IN ('app_ai', 'remote_mcp')");
 	});
 
+	it("uses one packed-claims actor helper for every public management RPC", () => {
+		expect(migration).toContain("CREATE OR REPLACE FUNCTION public.ai_s13_authenticated_actor()");
+		expect(migration).toContain("current_setting('request.jwt.claims',true)");
+		expect(migration).not.toContain("current_setting('request.jwt.claim.role'");
+		expect(migration).not.toContain("current_setting('request.jwt.claim.sub'");
+		expect(
+			migration.match(/actor_id\s*:?=\s*public\.ai_s13_authenticated_actor\(\)/gu)
+		).toHaveLength(9);
+		expect(migration).toContain("REVOKE ALL ON FUNCTION public.ai_s13_authenticated_actor()");
+		for (const signature of [
+			"public.list_ai_managed_cards",
+			"public.update_imported_card(uuid,jsonb,timestamptz)",
+			"public.delete_private_card(uuid,timestamptz)",
+			"public.set_card_decks(uuid,uuid[])",
+			"public.set_card_tags(uuid,uuid[])",
+			"public.set_card_tag_names(uuid,text[])",
+			"public.set_card_illustration(uuid,uuid)",
+			"public.bulk_delete_imported_cards(jsonb)",
+			"public.undo_import(uuid)",
+		]) {
+			expect(migration).toContain(signature);
+		}
+	});
+
+	it("rejects an explicit null list limit before executing the query", () => {
+		expect(migration).toContain("IF p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 100");
+	});
+
 	it("bulk validates and locks all cards before active and lifecycle checks", () => {
 		const cardsLock = migration.indexOf("FOREACH target_id IN ARRAY target_ids LOOP");
 		const active = migration.indexOf(
@@ -61,6 +89,21 @@ describe("S-13 forward migration contract", () => {
 		expect(undo).toContain("locked_card_ids IS DISTINCT FROM candidate_card_ids");
 	});
 
+	it("rejects active S-11 jobs and terminalizes completed jobs during undo", () => {
+		const undo = migration.slice(migration.indexOf("CREATE FUNCTION public.undo_import_internal"));
+		const jobLock = undo.indexOf("FROM public.ai_import_concept_jobs AS jobs");
+		const cardLock = undo.indexOf("FROM public.cards AS cards");
+		const activeCheck = undo.indexOf("jobs.state IN ('queued','processing')");
+		const itemUndo = undo.indexOf("SET status='undone',result_card_id=NULL");
+		const jobUndo = undo.indexOf("SET state='undone',claim_token=NULL");
+		expect(jobLock).toBeGreaterThan(-1);
+		expect(jobLock).toBeLessThan(cardLock);
+		expect(activeCheck).toBeGreaterThan(jobLock);
+		expect(activeCheck).toBeLessThan(itemUndo);
+		expect(jobUndo).toBeGreaterThan(itemUndo);
+		expect(undo).toContain("jobs.state IN ('succeeded','failed')");
+	});
+
 	it("locks import items before deck and tag relation targets", () => {
 		const decks = migration.slice(
 			migration.indexOf("CREATE OR REPLACE FUNCTION public.set_card_decks_internal"),
@@ -86,7 +129,12 @@ describe("S-13 forward migration contract", () => {
 	});
 
 	it("does not grant internal helpers to application roles", () => {
-		expect(migration).toContain("REVOKE ALL ON FUNCTION public.ai_s13_assert_managed_card");
+		const revoke = migration.slice(
+			migration.indexOf("REVOKE ALL ON FUNCTION public.ai_s13_authenticated_actor()"),
+			migration.indexOf("FROM PUBLIC, anon, authenticated, service_role")
+		);
+		expect(revoke).toContain("public.ai_s13_assert_managed_card(uuid,uuid)");
+		expect(revoke).toContain("public.undo_import_internal(uuid,uuid)");
 		expect(migration).toContain("GRANT EXECUTE ON FUNCTION public.list_ai_managed_cards");
 	});
 });

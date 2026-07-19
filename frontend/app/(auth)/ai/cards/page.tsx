@@ -27,7 +27,11 @@ export default async function AiCardsPage() {
 			<AiCardManagementClient
 				initialPage={initialPage.ok ? initialPage.data : { items: [], nextCursor: null }}
 				initialError={initialPage.ok ? null : initialPage.error.message}
-				options={options.ok ? options.data : { decks: [], tags: [], illustrations: [] }}
+				initialOptions={
+					options.ok
+						? { status: "ready", data: options.data }
+						: { status: "error", message: options.error.message }
+				}
 			/>
 		</main>
 	);

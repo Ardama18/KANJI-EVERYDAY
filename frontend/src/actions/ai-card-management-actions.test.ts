@@ -10,7 +10,10 @@ vi.mock("next/cache", () => ({
 	revalidatePath: revalidatePathMock,
 }));
 
-import { getAiCardListAction } from "./ai-card-management-actions";
+import {
+	getAiCardListAction,
+	getAiCardManagementOptionsAction,
+} from "./ai-card-management-actions";
 
 describe("S-13 management Server Action boundary", () => {
 	beforeEach(() => createServerClientMock.mockReset());
@@ -47,6 +50,30 @@ describe("S-13 management Server Action boundary", () => {
 		expect(await getAiCardListAction({})).toEqual({
 			ok: false,
 			error: { code: "NOT_FOUND", status: 404, message: "対象が見つかりません。" },
+		});
+	});
+
+	it("returns a safe error when loading management options throws", async () => {
+		process.env.AI_CARD_MANAGEMENT_ENABLED = "true";
+		const order = vi.fn().mockRejectedValue(new Error("raw network error"));
+		createServerClientMock.mockReturnValue({
+			auth: {
+				getUser: vi.fn().mockResolvedValue({ data: { user: { id: "actor" } }, error: null }),
+			},
+			from: vi.fn(() => ({
+				select: vi.fn(() => ({
+					eq: vi.fn(() => ({ order })),
+				})),
+			})),
+		});
+
+		expect(await getAiCardManagementOptionsAction()).toEqual({
+			ok: false,
+			error: {
+				code: "INTERNAL_ERROR",
+				status: 500,
+				message: "処理に失敗しました。時間をおいて再試行してください。",
+			},
 		});
 	});
 });

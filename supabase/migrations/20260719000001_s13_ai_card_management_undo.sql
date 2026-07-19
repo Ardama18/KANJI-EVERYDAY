@@ -5,6 +5,35 @@
 
 BEGIN;
 
+CREATE OR REPLACE FUNCTION public.ai_s13_authenticated_actor()
+RETURNS uuid
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE caller_claims jsonb;
+DECLARE actor_text text;
+BEGIN
+  BEGIN
+    caller_claims:=NULLIF(current_setting('request.jwt.claims',true),'')::jsonb;
+  EXCEPTION WHEN invalid_text_representation THEN
+    RETURN NULL;
+  END;
+  IF jsonb_typeof(caller_claims) IS DISTINCT FROM 'object'
+    OR caller_claims->>'role' IS DISTINCT FROM 'authenticated' THEN
+    RETURN NULL;
+  END IF;
+  actor_text:=NULLIF(caller_claims->>'sub','');
+  IF actor_text IS NULL THEN RETURN NULL; END IF;
+  BEGIN
+    RETURN actor_text::uuid;
+  EXCEPTION WHEN invalid_text_representation THEN
+    RETURN NULL;
+  END;
+END;
+$$;
+
 CREATE INDEX cards_owner_private_created_id_idx
   ON public.cards (owner_user_id, created_at DESC, id DESC)
   WHERE visibility = 'private';
@@ -63,12 +92,10 @@ AS $$
 DECLARE actor_id uuid;
 DECLARE result jsonb;
 BEGIN
-  IF current_setting('request.jwt.claim.role', true) IS DISTINCT FROM 'authenticated' THEN
-    PERFORM public.ai_raise_import_error('UNAUTHORIZED');
-  END IF;
-  actor_id := NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid;
+  -- PostgREST v14 exposes JWT data through the packed request.jwt.claims GUC.
+  actor_id := public.ai_s13_authenticated_actor();
   IF actor_id IS NULL THEN PERFORM public.ai_raise_import_error('UNAUTHORIZED'); END IF;
-  IF p_limit NOT BETWEEN 1 AND 100
+  IF p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 100
     OR (p_cursor_created_at IS NULL) <> (p_cursor_id IS NULL)
     OR p_source IS NOT NULL AND p_source NOT IN ('app_ai', 'remote_mcp')
     OR p_created_from IS NOT NULL AND p_created_to IS NOT NULL AND p_created_from >= p_created_to
@@ -136,6 +163,18 @@ BEGIN
     'hasMore', (SELECT count(*) > p_limit FROM selected)
   ) INTO result FROM enriched e;
   RETURN COALESCE(result, jsonb_build_object('items', '[]'::jsonb, 'hasMore', false));
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.update_imported_card(
+  p_card_id uuid, p_patch jsonb, p_expected_updated_at timestamptz
+)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+DECLARE actor_id uuid;
+BEGIN
+  actor_id := public.ai_s13_authenticated_actor();
+  IF actor_id IS NULL THEN PERFORM public.ai_raise_import_error('UNAUTHORIZED'); END IF;
+  RETURN public.update_imported_card_internal(actor_id,p_card_id,p_patch,p_expected_updated_at);
 END;
 $$;
 
@@ -241,10 +280,7 @@ CREATE OR REPLACE FUNCTION public.bulk_delete_imported_cards(p_cards jsonb)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE actor_id uuid;
 BEGIN
-  IF current_setting('request.jwt.claim.role',true) IS DISTINCT FROM 'authenticated' THEN
-    PERFORM public.ai_raise_import_error('UNAUTHORIZED');
-  END IF;
-  actor_id:=NULLIF(current_setting('request.jwt.claim.sub',true),'')::uuid;
+  actor_id:=public.ai_s13_authenticated_actor();
   IF actor_id IS NULL THEN PERFORM public.ai_raise_import_error('UNAUTHORIZED'); END IF;
   RETURN public.bulk_delete_imported_cards_internal(actor_id,p_cards);
 END;
@@ -261,6 +297,28 @@ BEGIN
     jsonb_build_array(jsonb_build_object('cardId',p_card_id,'expectedUpdatedAt',p_expected_updated_at))
   );
   RETURN jsonb_build_object('cardId',p_card_id,'status','deleted');
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.delete_private_card(
+  p_card_id uuid,p_expected_updated_at timestamptz
+)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+DECLARE actor_id uuid;
+BEGIN
+  actor_id:=public.ai_s13_authenticated_actor();
+  IF actor_id IS NULL THEN PERFORM public.ai_raise_import_error('UNAUTHORIZED'); END IF;
+  RETURN public.delete_private_card_internal(actor_id,p_card_id,p_expected_updated_at);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.set_card_decks(p_card_id uuid,p_deck_ids uuid[])
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+DECLARE actor_id uuid;
+BEGIN
+  actor_id:=public.ai_s13_authenticated_actor();
+  IF actor_id IS NULL THEN PERFORM public.ai_raise_import_error('UNAUTHORIZED'); END IF;
+  RETURN public.set_card_decks_internal(actor_id,p_card_id,p_deck_ids);
 END;
 $$;
 
@@ -299,6 +357,16 @@ BEGIN
   DELETE FROM public.deck_cards WHERE card_id=p_card_id AND NOT (deck_id=ANY(target_ids));
   INSERT INTO public.deck_cards(deck_id,card_id) SELECT x.id,p_card_id FROM unnest(target_ids) x(id) ORDER BY x.id ON CONFLICT DO NOTHING;
   RETURN jsonb_build_object('cardId',p_card_id,'deckIds',to_jsonb(target_ids));
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.set_card_tags(p_card_id uuid,p_tag_ids uuid[])
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+DECLARE actor_id uuid;
+BEGIN
+  actor_id:=public.ai_s13_authenticated_actor();
+  IF actor_id IS NULL THEN PERFORM public.ai_raise_import_error('UNAUTHORIZED'); END IF;
+  RETURN public.set_card_tags_internal(actor_id,p_card_id,p_tag_ids);
 END;
 $$;
 
@@ -380,10 +448,7 @@ CREATE OR REPLACE FUNCTION public.set_card_tag_names(p_card_id uuid,p_tag_names 
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE actor_id uuid;
 BEGIN
-  IF current_setting('request.jwt.claim.role',true) IS DISTINCT FROM 'authenticated' THEN
-    PERFORM public.ai_raise_import_error('UNAUTHORIZED');
-  END IF;
-  actor_id:=NULLIF(current_setting('request.jwt.claim.sub',true),'')::uuid;
+  actor_id:=public.ai_s13_authenticated_actor();
   IF actor_id IS NULL THEN PERFORM public.ai_raise_import_error('UNAUTHORIZED'); END IF;
   RETURN public.set_card_tag_names_internal(actor_id,p_card_id,p_tag_names);
 END;
@@ -425,6 +490,18 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION public.set_card_illustration(
+  p_card_id uuid,p_illustration_id uuid DEFAULT NULL
+)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+DECLARE actor_id uuid;
+BEGIN
+  actor_id:=public.ai_s13_authenticated_actor();
+  IF actor_id IS NULL THEN PERFORM public.ai_raise_import_error('UNAUTHORIZED'); END IF;
+  RETURN public.set_card_illustration_internal(actor_id,p_card_id,p_illustration_id);
+END;
+$$;
+
 -- Replace the S-10 function as one body so every destructive path follows the
 -- same lock matrix. Calling a renamed body after a lifecycle-lock prefix would
 -- reacquire batch/items/deck/relations in the legacy order and permit a cycle.
@@ -453,6 +530,23 @@ BEGIN
   IF NOT FOUND OR initial_batch.owner_user_id IS DISTINCT FROM p_owner_user_id
     OR initial_batch.source NOT IN ('app_ai','remote_mcp') THEN
     PERFORM public.ai_raise_import_error('DECK_NOT_FOUND');
+  END IF;
+
+  -- S-11 workers acquire the concept job before any batch/item side effect.
+  -- Lock every job first, then reject active delivery state without cancelling a
+  -- claim or rewriting Queue messages. Terminal succeeded/failed jobs can be
+  -- converted to undone after their cards/items are removed.
+  PERFORM 1
+  FROM public.ai_import_concept_jobs AS jobs
+  WHERE jobs.batch_id=p_batch_id AND jobs.owner_user_id=p_owner_user_id
+  ORDER BY jobs.id
+  FOR UPDATE;
+  IF EXISTS (
+    SELECT 1 FROM public.ai_import_concept_jobs AS jobs
+    WHERE jobs.batch_id=p_batch_id AND jobs.owner_user_id=p_owner_user_id
+      AND jobs.state IN ('queued','processing')
+  ) THEN
+    PERFORM public.ai_raise_import_error('CONFLICT');
   END IF;
 
   SELECT COALESCE(array_agg(items.result_card_id ORDER BY items.result_card_id),'{}'::uuid[])
@@ -576,6 +670,14 @@ BEGIN
     undone_at=statement_timestamp()
   WHERE items.batch_id=p_batch_id AND items.owner_user_id=p_owner_user_id
     AND items.status<>'deleted';
+  UPDATE public.ai_import_concept_jobs AS jobs
+  SET state='undone',claim_token=NULL,claim_expires_at=NULL,
+    terminal_message_id=NULL,terminal_claim_token_hash=NULL,
+    next_attempt_at=NULL,error_code=NULL,
+    completed_at=COALESCE(jobs.completed_at,statement_timestamp()),
+    updated_at=statement_timestamp()
+  WHERE jobs.batch_id=p_batch_id AND jobs.owner_user_id=p_owner_user_id
+    AND jobs.state IN ('succeeded','failed');
   IF current_setting('app.s10_failpoint',true)='undo_after_items' THEN
     PERFORM public.ai_raise_import_error('CONFLICT');
   END IF;
@@ -630,9 +732,20 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION public.undo_import(p_batch_id uuid)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+DECLARE actor_id uuid;
+BEGIN
+  actor_id:=public.ai_s13_authenticated_actor();
+  IF actor_id IS NULL THEN PERFORM public.ai_raise_import_error('UNAUTHORIZED'); END IF;
+  RETURN public.undo_import_internal(actor_id,p_batch_id);
+END;
+$$;
+
 DROP FUNCTION public.undo_import_internal_s10(uuid,uuid);
 
 ALTER FUNCTION public.ai_s13_assert_managed_card(uuid,uuid) OWNER TO s10_migration_owner;
+ALTER FUNCTION public.ai_s13_authenticated_actor() OWNER TO s10_migration_owner;
 ALTER FUNCTION public.list_ai_managed_cards(integer,timestamptz,uuid,uuid,uuid,text,timestamptz,timestamptz) OWNER TO s10_migration_owner;
 ALTER FUNCTION public.bulk_delete_imported_cards_internal(uuid,jsonb) OWNER TO s10_migration_owner;
 ALTER FUNCTION public.bulk_delete_imported_cards(jsonb) OWNER TO s10_migration_owner;
@@ -644,17 +757,32 @@ ALTER FUNCTION public.set_card_tag_names_internal(uuid,uuid,text[]) OWNER TO s10
 ALTER FUNCTION public.set_card_tag_names(uuid,text[]) OWNER TO s10_migration_owner;
 ALTER FUNCTION public.set_card_illustration_internal(uuid,uuid,uuid) OWNER TO s10_migration_owner;
 ALTER FUNCTION public.undo_import_internal(uuid,uuid) OWNER TO s10_migration_owner;
+ALTER FUNCTION public.update_imported_card(uuid,jsonb,timestamptz) OWNER TO s10_migration_owner;
+ALTER FUNCTION public.delete_private_card(uuid,timestamptz) OWNER TO s10_migration_owner;
+ALTER FUNCTION public.set_card_decks(uuid,uuid[]) OWNER TO s10_migration_owner;
+ALTER FUNCTION public.set_card_tags(uuid,uuid[]) OWNER TO s10_migration_owner;
+ALTER FUNCTION public.set_card_illustration(uuid,uuid) OWNER TO s10_migration_owner;
+ALTER FUNCTION public.undo_import(uuid) OWNER TO s10_migration_owner;
 
-REVOKE ALL ON FUNCTION public.ai_s13_assert_managed_card(uuid,uuid),
+REVOKE ALL ON FUNCTION public.ai_s13_authenticated_actor(),
+  public.ai_s13_assert_managed_card(uuid,uuid),
   public.bulk_delete_imported_cards_internal(uuid,jsonb),
   public.set_card_tag_names_internal(uuid,uuid,text[]),
   public.undo_import_internal(uuid,uuid)
 FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public.list_ai_managed_cards(integer,timestamptz,uuid,uuid,uuid,text,timestamptz,timestamptz),
-  public.bulk_delete_imported_cards(jsonb), public.set_card_tag_names(uuid,text[])
+  public.update_imported_card(uuid,jsonb,timestamptz),
+  public.delete_private_card(uuid,timestamptz),
+  public.set_card_decks(uuid,uuid[]), public.set_card_tags(uuid,uuid[]),
+  public.set_card_tag_names(uuid,text[]), public.set_card_illustration(uuid,uuid),
+  public.bulk_delete_imported_cards(jsonb), public.undo_import(uuid)
 FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.list_ai_managed_cards(integer,timestamptz,uuid,uuid,uuid,text,timestamptz,timestamptz),
-  public.bulk_delete_imported_cards(jsonb), public.set_card_tag_names(uuid,text[])
+  public.update_imported_card(uuid,jsonb,timestamptz),
+  public.delete_private_card(uuid,timestamptz),
+  public.set_card_decks(uuid,uuid[]), public.set_card_tags(uuid,uuid[]),
+  public.set_card_tag_names(uuid,text[]), public.set_card_illustration(uuid,uuid),
+  public.bulk_delete_imported_cards(jsonb), public.undo_import(uuid)
 TO authenticated;
 
 COMMIT;

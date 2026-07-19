@@ -3,6 +3,7 @@
 import {
 	deleteAiCardsAction,
 	getAiCardListAction,
+	getAiCardManagementOptionsAction,
 	setAiCardDecksAction,
 	setAiCardIllustrationAction,
 	setAiCardTagNamesAction,
@@ -21,7 +22,9 @@ import { useMemo, useRef, useState } from "react";
 interface Props {
 	readonly initialPage: AiCardListPage;
 	readonly initialError: string | null;
-	readonly options: AiCardManagementOptions;
+	readonly initialOptions:
+		| { readonly status: "ready"; readonly data: AiCardManagementOptions }
+		| { readonly status: "error"; readonly message: string };
 }
 
 type Notice = { kind: "error" | "success"; text: string } | null;
@@ -36,30 +39,81 @@ const formatDateTime = (value: string) =>
 const checkedValues = (form: HTMLFormElement, name: string) =>
 	Array.from(new FormData(form).getAll(name), String);
 
-export function AiCardManagementClient({ initialPage, initialError, options }: Props) {
+export const managedCardSyncKey = (card: ManagedAiCard) =>
+	JSON.stringify({
+		id: card.id,
+		updatedAt: card.updatedAt,
+		frontText: card.frontText,
+		backText: card.backText,
+		skill: card.skill,
+		pattern: card.pattern,
+		deckIds: card.decks.map((deck) => deck.id),
+		tagIds: card.tags.map((tag) => tag.id),
+		illustrationId: card.illustration?.id ?? null,
+	});
+
+export function AiCardManagementClient({ initialPage, initialError, initialOptions }: Props) {
 	const [cards, setCards] = useState<readonly ManagedAiCard[]>(initialPage.items);
 	const [nextCursor, setNextCursor] = useState(initialPage.nextCursor);
 	const [filters, setFilters] = useState<AiCardListFilters>({});
 	const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
-	const [notice, setNotice] = useState<Notice>(
-		initialError === null ? null : { kind: "error", text: initialError }
-	);
+	const [listError, setListError] = useState(initialError);
+	const [optionsState, setOptionsState] = useState(initialOptions);
+	const [requiresFreshData, setRequiresFreshData] = useState(false);
+	const [notice, setNotice] = useState<Notice>(null);
 	const [isPending, setIsPending] = useState(false);
 	const runExclusive = useRef(createExclusiveOperationRunner(setIsPending)).current;
 	const selectedCards = useMemo(
 		() => cards.filter((card) => selected.has(card.id)),
 		[cards, selected]
 	);
+	const options = optionsState.status === "ready" ? optionsState.data : null;
+	const mutationsDisabled = isPending || requiresFreshData || listError !== null;
+	const relationsDisabled = mutationsDisabled || options === null;
 
 	const refresh = (nextFilters: AiCardListFilters = filters) => {
 		void runExclusive(
 			async () => {
 				setNotice(null);
 				const result = await getAiCardListAction(nextFilters);
-				if (!result.ok) return setNotice({ kind: "error", text: result.error.message });
+				if (!result.ok) {
+					setListError(result.error.message);
+					return;
+				}
 				setCards(result.data.items);
 				setNextCursor(result.data.nextCursor);
 				setSelected(new Set());
+				setListError(null);
+			},
+			() => setListError("通信に失敗しました。再試行してください。")
+		);
+	};
+
+	const retryUnavailableData = () => {
+		void runExclusive(
+			async () => {
+				setNotice(null);
+				const [listResult, optionsResult] = await Promise.all([
+					getAiCardListAction(filters),
+					getAiCardManagementOptionsAction(),
+				]);
+				if (listResult.ok) {
+					setCards(listResult.data.items);
+					setNextCursor(listResult.data.nextCursor);
+					setSelected(new Set());
+					setListError(null);
+				} else {
+					setListError(listResult.error.message);
+				}
+				if (optionsResult.ok) {
+					setOptionsState({ status: "ready", data: optionsResult.data });
+				} else {
+					setOptionsState({ status: "error", message: optionsResult.error.message });
+				}
+				if (!listResult.ok || !optionsResult.ok) return;
+
+				setRequiresFreshData(false);
+				setNotice({ kind: "success", text: "最新のカード情報を読み込みました。" });
 			},
 			() => setNotice({ kind: "error", text: "通信に失敗しました。再試行してください。" })
 		);
@@ -78,13 +132,28 @@ export function AiCardManagementClient({ initialPage, initialError, options }: P
 						kind: "error",
 						text: result.error?.message ?? "処理に失敗しました。",
 					});
-				setNotice({ kind: "success", text: message });
-				const refreshed = await getAiCardListAction(filters);
+				setRequiresFreshData(true);
+				setSelected(new Set());
+				const [refreshed, refreshedOptions] = await Promise.all([
+					getAiCardListAction(filters),
+					getAiCardManagementOptionsAction(),
+				]);
 				if (refreshed.ok) {
 					setCards(refreshed.data.items);
 					setNextCursor(refreshed.data.nextCursor);
-					setSelected(new Set());
+					setListError(null);
+				} else {
+					setListError(refreshed.error.message);
 				}
+				if (refreshedOptions.ok) {
+					setOptionsState({ status: "ready", data: refreshedOptions.data });
+				} else {
+					setOptionsState({ status: "error", message: refreshedOptions.error.message });
+				}
+				if (!refreshed.ok || !refreshedOptions.ok) return;
+
+				setRequiresFreshData(false);
+				setNotice({ kind: "success", text: message });
 			},
 			() => setNotice({ kind: "error", text: "通信に失敗しました。再試行してください。" })
 		);
@@ -112,10 +181,12 @@ export function AiCardManagementClient({ initialPage, initialError, options }: P
 					デッキ
 					<select
 						name="deckId"
+						disabled={isPending || options === null}
+						aria-describedby={options === null ? "ai-card-options-error" : undefined}
 						className="mt-1 min-h-12 w-full rounded-lg border border-slate-300 px-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600"
 					>
-						<option value="">すべて</option>
-						{options.decks.map((item) => (
+						<option value="">{options === null ? "取得できません" : "すべて"}</option>
+						{options?.decks.map((item) => (
 							<option key={item.id} value={item.id}>
 								{item.name}
 							</option>
@@ -126,10 +197,12 @@ export function AiCardManagementClient({ initialPage, initialError, options }: P
 					タグ
 					<select
 						name="tagId"
+						disabled={isPending || options === null}
+						aria-describedby={options === null ? "ai-card-options-error" : undefined}
 						className="mt-1 min-h-12 w-full rounded-lg border border-slate-300 px-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600"
 					>
-						<option value="">すべて</option>
-						{options.tags.map((item) => (
+						<option value="">{options === null ? "取得できません" : "すべて"}</option>
+						{options?.tags.map((item) => (
 							<option key={item.id} value={item.id}>
 								{item.name}
 							</option>
@@ -165,12 +238,39 @@ export function AiCardManagementClient({ initialPage, initialError, options }: P
 				</label>
 				<button
 					type="submit"
-					disabled={isPending}
+					disabled={isPending || requiresFreshData || listError !== null}
 					className="min-h-12 self-end rounded-lg bg-blue-700 px-4 font-semibold text-white hover:bg-blue-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 disabled:opacity-60"
 				>
 					絞り込む
 				</button>
 			</form>
+
+			{requiresFreshData || listError !== null || optionsState.status === "error" ? (
+				<div
+					id={optionsState.status === "error" ? "ai-card-options-error" : undefined}
+					role="alert"
+					className="mt-4 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900"
+				>
+					{requiresFreshData ? (
+						<p>変更後の最新情報を取得できませんでした。安全のため編集・削除を停止しています。</p>
+					) : null}
+					{listError !== null ? <p>カード一覧を取得できませんでした。{listError}</p> : null}
+					{optionsState.status === "error" ? (
+						<p>
+							デッキ・タグ・イラストの選択肢を取得できませんでした。関係の編集は一時的に利用できません。
+							{optionsState.message}
+						</p>
+					) : null}
+					<button
+						type="button"
+						disabled={isPending}
+						className="mt-3 min-h-12 rounded-lg border border-red-700 bg-white px-4 font-semibold text-red-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700 disabled:opacity-60"
+						onClick={retryUnavailableData}
+					>
+						カード情報を再読み込み
+					</button>
+				</div>
+			) : null}
 
 			{notice ? (
 				<p
@@ -181,7 +281,9 @@ export function AiCardManagementClient({ initialPage, initialError, options }: P
 				</p>
 			) : null}
 			{isPending ? (
-				<output className="mt-4 block text-sm text-slate-600">処理中です…</output>
+				<output aria-live="polite" className="mt-4 block text-sm text-slate-600">
+					処理中です…
+				</output>
 			) : null}
 
 			{selectedCards.length > 0 ? (
@@ -189,7 +291,7 @@ export function AiCardManagementClient({ initialPage, initialError, options }: P
 					<p className="text-sm font-medium text-red-900">{selectedCards.length}件を選択中</p>
 					<button
 						type="button"
-						disabled={isPending}
+						disabled={mutationsDisabled}
 						className="min-h-12 rounded-lg bg-red-700 px-4 font-semibold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700 disabled:opacity-60"
 						onClick={() => {
 							if (
@@ -215,7 +317,7 @@ export function AiCardManagementClient({ initialPage, initialError, options }: P
 				</div>
 			) : null}
 
-			{cards.length === 0 && !isPending ? (
+			{cards.length === 0 && !isPending && listError === null ? (
 				<p className="mt-4 rounded-xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-600">
 					条件に合うAIカードはありません。
 				</p>
@@ -223,7 +325,7 @@ export function AiCardManagementClient({ initialPage, initialError, options }: P
 				<ul className="mt-4 grid gap-4">
 					{cards.map((card) => (
 						<li
-							key={card.id}
+							key={managedCardSyncKey(card)}
 							className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
 						>
 							<div className="flex items-start gap-3">
@@ -231,7 +333,7 @@ export function AiCardManagementClient({ initialPage, initialError, options }: P
 									type="checkbox"
 									aria-label={`${card.frontText}を選択`}
 									checked={selected.has(card.id)}
-									disabled={isPending}
+									disabled={mutationsDisabled}
 									className="mt-1 h-6 w-6 shrink-0 rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600"
 									onChange={(event) =>
 										setSelected((current) => {
@@ -288,6 +390,7 @@ export function AiCardManagementClient({ initialPage, initialError, options }: P
 											defaultValue={card.frontText}
 											maxLength={200}
 											required
+											disabled={mutationsDisabled}
 											className="mt-1 min-h-12 w-full rounded-lg border border-slate-300 px-3"
 										/>
 									</label>
@@ -298,6 +401,7 @@ export function AiCardManagementClient({ initialPage, initialError, options }: P
 											defaultValue={card.backText}
 											maxLength={200}
 											required
+											disabled={mutationsDisabled}
 											className="mt-1 min-h-12 w-full rounded-lg border border-slate-300 px-3"
 										/>
 									</label>
@@ -307,6 +411,7 @@ export function AiCardManagementClient({ initialPage, initialError, options }: P
 											<select
 												name="skill"
 												defaultValue={card.skill}
+												disabled={mutationsDisabled}
 												className="mt-1 min-h-12 w-full rounded-lg border border-slate-300 px-3"
 											>
 												<option value="reading">読み</option>
@@ -318,6 +423,7 @@ export function AiCardManagementClient({ initialPage, initialError, options }: P
 											<select
 												name="pattern"
 												defaultValue={card.pattern}
+												disabled={mutationsDisabled}
 												className="mt-1 min-h-12 w-full rounded-lg border border-slate-300 px-3"
 											>
 												<option value="R1">R1</option>
@@ -327,7 +433,7 @@ export function AiCardManagementClient({ initialPage, initialError, options }: P
 									</div>
 									<button
 										type="submit"
-										disabled={isPending}
+										disabled={mutationsDisabled}
 										className="min-h-12 rounded-lg bg-blue-700 px-4 font-semibold text-white disabled:opacity-60"
 									>
 										本文を保存
@@ -336,9 +442,9 @@ export function AiCardManagementClient({ initialPage, initialError, options }: P
 								<RelationEditor
 									title="所属デッキ"
 									name="deckIds"
-									choices={options.decks}
+									choices={options?.decks ?? null}
 									selected={card.decks.map((item) => item.id)}
-									disabled={isPending}
+									disabled={relationsDisabled}
 									onSave={(form) =>
 										applyMutation(
 											() =>
@@ -364,17 +470,19 @@ export function AiCardManagementClient({ initialPage, initialError, options }: P
 										);
 									}}
 								>
-									<label className="text-sm font-medium">
-										タグ（カンマ区切り・最大10件）
-										<input
-											name="tagNames"
-											defaultValue={card.tags.map((tag) => tag.name).join(", ")}
-											className="mt-1 min-h-12 w-full rounded-lg border border-slate-300 px-3"
-										/>
-									</label>
+									<fieldset disabled={relationsDisabled}>
+										<label className="text-sm font-medium">
+											タグ（カンマ区切り・最大10件）
+											<input
+												name="tagNames"
+												defaultValue={card.tags.map((tag) => tag.name).join(", ")}
+												className="mt-1 min-h-12 w-full rounded-lg border border-slate-300 px-3"
+											/>
+										</label>
+									</fieldset>
 									<button
 										type="submit"
-										disabled={isPending}
+										disabled={relationsDisabled}
 										className="min-h-12 rounded-lg border border-blue-600 px-4 font-semibold text-blue-700 disabled:opacity-60"
 									>
 										タグを保存
@@ -397,24 +505,26 @@ export function AiCardManagementClient({ initialPage, initialError, options }: P
 										);
 									}}
 								>
-									<label className="text-sm font-medium">
-										イラスト
-										<select
-											name="illustrationId"
-											defaultValue={card.illustration?.id ?? ""}
-											className="mt-1 min-h-12 w-full rounded-lg border border-slate-300 px-3"
-										>
-											<option value="">なし</option>
-											{options.illustrations.map((item) => (
-												<option key={item.id} value={item.id}>
-													イラスト {item.id.slice(0, 8)}
-												</option>
-											))}
-										</select>
-									</label>
+									<fieldset disabled={relationsDisabled}>
+										<label className="text-sm font-medium">
+											イラスト
+											<select
+												name="illustrationId"
+												defaultValue={card.illustration?.id ?? ""}
+												className="mt-1 min-h-12 w-full rounded-lg border border-slate-300 px-3"
+											>
+												<option value="">{options === null ? "取得できません" : "なし"}</option>
+												{options?.illustrations.map((item) => (
+													<option key={item.id} value={item.id}>
+														イラスト {item.id.slice(0, 8)}
+													</option>
+												))}
+											</select>
+										</label>
+									</fieldset>
 									<button
 										type="submit"
-										disabled={isPending}
+										disabled={relationsDisabled}
 										className="min-h-12 rounded-lg border border-blue-600 px-4 font-semibold text-blue-700 disabled:opacity-60"
 									>
 										イラストを保存
@@ -423,7 +533,7 @@ export function AiCardManagementClient({ initialPage, initialError, options }: P
 								<div className="mt-5 grid gap-3 border-t border-red-200 pt-4 sm:grid-cols-2">
 									<button
 										type="button"
-										disabled={isPending}
+										disabled={mutationsDisabled}
 										className="min-h-12 rounded-lg border border-red-600 px-4 font-semibold text-red-700 disabled:opacity-60"
 										onClick={() => {
 											if (window.confirm(`「${card.frontText}」を削除します。よろしいですか？`))
@@ -440,7 +550,7 @@ export function AiCardManagementClient({ initialPage, initialError, options }: P
 									</button>
 									<button
 										type="button"
-										disabled={isPending}
+										disabled={mutationsDisabled}
 										className="min-h-12 rounded-lg bg-red-700 px-4 font-semibold text-white disabled:opacity-60"
 										onClick={() => {
 											if (
@@ -465,7 +575,7 @@ export function AiCardManagementClient({ initialPage, initialError, options }: P
 			{nextCursor ? (
 				<button
 					type="button"
-					disabled={isPending}
+					disabled={isPending || requiresFreshData || listError !== null}
 					className="mt-5 min-h-12 w-full rounded-lg border border-blue-600 bg-white px-4 font-semibold text-blue-700 disabled:opacity-60"
 					onClick={() =>
 						void runExclusive(
@@ -496,7 +606,7 @@ function RelationEditor({
 }: {
 	readonly title: string;
 	readonly name: string;
-	readonly choices: readonly { id: string; name: string }[];
+	readonly choices: readonly { id: string; name: string }[] | null;
 	readonly selected: readonly string[];
 	readonly disabled: boolean;
 	readonly onSave: (form: HTMLFormElement) => void;
@@ -509,10 +619,12 @@ function RelationEditor({
 				onSave(event.currentTarget);
 			}}
 		>
-			<fieldset>
+			<fieldset disabled={disabled}>
 				<legend className="text-sm font-medium">{title}</legend>
 				<div className="mt-2 grid gap-1 sm:grid-cols-2">
-					{choices.length === 0 ? (
+					{choices === null ? (
+						<p className="text-sm text-red-700">選択肢を取得できません。</p>
+					) : choices.length === 0 ? (
 						<p className="text-sm text-slate-500">選択肢がありません。</p>
 					) : (
 						choices.map((choice) => (

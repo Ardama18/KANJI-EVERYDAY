@@ -93,34 +93,40 @@ export async function getAiCardManagementOptionsAction(): Promise<
 	noStore();
 	const boundary = await createAuthenticatedBoundary<AiCardManagementOptions>();
 	if (!boundary.ok) return boundary.result;
-	const { data: decks, error: deckError } = await boundary.supabase
-		.from("decks")
-		.select("id, name")
-		.eq("owner_user_id", boundary.userId)
-		.order("name", { ascending: true });
-	if (deckError) return { ok: false, error: mapAiCardManagementError(deckError) };
-	const { data: tags, error: tagError } = await boundary.supabase
-		.from("tags")
-		.select("id, display_name")
-		.eq("owner_user_id", boundary.userId)
-		.order("display_name", { ascending: true });
-	if (tagError) return { ok: false, error: mapAiCardManagementError(tagError) };
-	const { data: illustrations, error: illustrationError } = await boundary.supabase
-		.from("illustrations")
-		.select("id, status")
-		.eq("owner_user_id", boundary.userId)
-		.eq("status", "ready")
-		.not("storage_path", "is", null)
-		.order("created_at", { ascending: false });
-	if (illustrationError) return { ok: false, error: mapAiCardManagementError(illustrationError) };
-	return {
-		ok: true,
-		data: {
-			decks: (decks ?? []).map((deck) => ({ id: deck.id, name: deck.name })),
-			tags: (tags ?? []).map((tag) => ({ id: tag.id, name: tag.display_name })),
-			illustrations: illustrations ?? [],
-		},
-	};
+	try {
+		const { data: decks, error: deckError } = await boundary.supabase
+			.from("decks")
+			.select("id, name")
+			.eq("owner_user_id", boundary.userId)
+			.order("name", { ascending: true });
+		if (deckError) return { ok: false, error: mapAiCardManagementError(deckError) };
+		const { data: tags, error: tagError } = await boundary.supabase
+			.from("tags")
+			.select("id, display_name")
+			.eq("owner_user_id", boundary.userId)
+			.order("display_name", { ascending: true });
+		if (tagError) return { ok: false, error: mapAiCardManagementError(tagError) };
+		const { data: illustrations, error: illustrationError } = await boundary.supabase
+			.from("illustrations")
+			.select("id, status")
+			.eq("owner_user_id", boundary.userId)
+			.eq("status", "ready")
+			.not("storage_path", "is", null)
+			.order("created_at", { ascending: false });
+		if (illustrationError) {
+			return { ok: false, error: mapAiCardManagementError(illustrationError) };
+		}
+		return {
+			ok: true,
+			data: {
+				decks: (decks ?? []).map((deck) => ({ id: deck.id, name: deck.name })),
+				tags: (tags ?? []).map((tag) => ({ id: tag.id, name: tag.display_name })),
+				illustrations: illustrations ?? [],
+			},
+		};
+	} catch (error) {
+		return { ok: false, error: mapAiCardManagementError(error) };
+	}
 }
 
 const mutationResult = async (
