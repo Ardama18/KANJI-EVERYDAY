@@ -59,3 +59,6 @@ schema 変更は `supabase/migrations/` の新規 SQL migration として追加�
 - index は実 query、join、owner filter、unique constraint に根拠があるものだけ追加する。
 - `INSERT ... ON CONFLICT (column...)` を使う場合は、同じ column 順の unique / exclusion constraint が全対象環境に存在することを migration と検証で保証する。constraint drift を `ON CONFLICT` の変更で隠さない。
 - seed 実行前に migration version と必要 constraint を確認する。空 DB だけでなく既存 local / preview schema への適用結果も検証する。
+- `SECURITY DEFINER` 関数を作成・置換する migration は、固定 `search_path`、完全な function signature を使った `ALTER FUNCTION ... OWNER TO s10_migration_owner`、不要 role からの revoke、必要 role への grant を同じ migration に含める。
+- function owner は SQL 本文の静的確認だけで合格にしない。隔離 local DB と適用対象 Hosted Supabase の `pg_proc` / `pg_roles` を照合し、許可 owner 以外の `SECURITY DEFINER` 関数が0件であることを確認する。
+- local migration ledger と実 schema がずれている場合、関数やtableの存在だけを根拠に適用済みと判断しない。対象 migration の効果を確認し、隔離DBに限ってledger修復または再構築を行い、共有環境では勝手に履歴を編集しない。

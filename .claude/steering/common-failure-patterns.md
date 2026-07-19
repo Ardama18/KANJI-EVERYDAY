@@ -32,3 +32,9 @@
     - delete、rename、型変更、backfill 前に対象件数、NULL、重複、外部キー、constraint を read-only query で確認し、rollback / forward-fix を用意する。
 16. **Story の受入条件がテストへ到達しない**
     - AC と test / 手動確認の対応表を requirements、design、plan で維持し、未検証条件を明記する。
+17. **`SECURITY DEFINER` の owner を暗黙のままにする**
+    - `CREATE OR REPLACE FUNCTION` の実 owner は migration 実行 role に依存する。固定 `search_path` と権限だけで終わらせず、完全 signature の `ALTER FUNCTION ... OWNER TO s10_migration_owner` を含め、適用後の catalog query で違反0件を確認する。
+18. **契約E2EをHosted E2Eとして報告する**
+    - `*.e2e.test.*` の名称ではなく、実HTTP、実ブラウザ、実provider、Hosted DB、worker / cron のどこまで接続したかを記録する。未接続の境界は別gateとして残す。
+19. **公開したsecretをローカルから消して解決したことにする**
+    - chat、issue、PR、ログへ出たsecretはprovider側で失効・再発行する。新しい値を再び記録へ残さず、旧credentialが無効になったことまで確認する。

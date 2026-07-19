@@ -11,6 +11,9 @@ NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 GEMINI_API_KEY=   # イラスト生成を実確認する場合だけ
+OPENAI_API_KEY=   # AIカード生成を実確認する場合だけ
+AI_PREVIEW_HMAC_SECRET=   # AIカードpreview/commitを実確認する場合だけ
+AI_CARD_IMPORT_ENABLED=true   # AIカード作成経路を有効化する場合だけ
 ```
 
 実値を commit、画面 capture、ログへ含めない。
@@ -69,10 +72,12 @@ npm run check
 npm run build
 ```
 
-実ブラウザ自動化は現行 package に含まれない。手動確認を行った場合は、自動 E2E 済みと表現せず URL、操作、期待結果、実結果を記録する。
+実ブラウザ自動化は現行 package に含まれない。手動または外部browser runnerで確認した場合は、package scriptによる自動 E2E 済みと表現せず、URL、viewport、操作、期待結果、実結果、接続したHTTP / provider / DB / worker境界を記録する。
+
+Hosted受入では、ローカルのcontract / real-DB testと同じ結果を前提にしない。適用対象projectのmigration一覧、Edge Function、secretの存在、worker / cleanup cronのactive状態、owner境界、feature flag rollbackをread-only確認し、必要なtest dataだけで検証する。
 
 ## 後始末
 
 - 開発 server を停止する。
-- 作成した test user / data を消す場合は対象を明示し、共有環境の data を一括削除しない。
+- 作成した test user / data を消す場合はIDと識別用email等を組み合わせて対象を限定し、共有環境の data を一括削除しない。削除後はowner / user columnを持つ関連tableの残存件数が0であることを確認する。
 - 一時的に変更した env や redirect URL を戻す。
