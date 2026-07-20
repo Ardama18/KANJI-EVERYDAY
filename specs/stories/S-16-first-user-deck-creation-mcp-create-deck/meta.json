@@ -1,0 +1,9 @@
+{
+  "story_id": "S-16",
+  "epic_id": "GH-9",
+  "parent_story_id": "S-10",
+  "status": "implementation_review",
+  "github_issue": 28,
+  "github_pr_url": "",
+  "github_branch": "issue/28-mcp-create_deck"
+}

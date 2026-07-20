@@ -1,3 +1,4 @@
+import { normalizeDeckNameInput } from "@/actions/deck-action-types";
 import {
 	createRemoteMcpCardManagementRepository,
 	updateRemoteMcpAiCard,
@@ -31,6 +32,7 @@ export function createMcpToolServices(dependencies: McpToolServiceDependencies):
 	const cards = createRemoteMcpCardManagementRepository(client, actor);
 	return {
 		listDecks: async () => await listOwnerDecks(client),
+		createDeck: async ({ name }) => await createOwnerDeck(client, actor, name),
 		previewCardImport: async ({ request }) => {
 			const secret = dependencies.previewSecret;
 			if (secret === undefined) return unavailable();
@@ -77,6 +79,28 @@ export function createMcpToolServices(dependencies: McpToolServiceDependencies):
 	};
 }
 
+async function createOwnerDeck(
+	client: JwtScopedSupabaseClient,
+	actor: McpActorContext,
+	inputName: unknown
+): Promise<unknown> {
+	const validation = normalizeDeckNameInput(inputName);
+	if (!validation.ok) {
+		return {
+			ok: false as const,
+			error: { code: "VALIDATION_ERROR", message: validation.message, details: { field: "name" } },
+		};
+	}
+
+	const { data, error } = await client
+		.from("decks")
+		.insert({ owner_user_id: actor.userId, name: validation.name })
+		.select("id,name")
+		.single();
+	if (error !== null || !isDeckResultRow(data)) return unavailable();
+	return { deck: { id: data.id, name: data.name } };
+}
+
 async function listOwnerDecks(client: JwtScopedSupabaseClient): Promise<unknown> {
 	const { data, error } = await client
 		.from("decks")
@@ -89,6 +113,16 @@ async function listOwnerDecks(client: JwtScopedSupabaseClient): Promise<unknown>
 		return unavailable();
 	}
 	return { decks };
+}
+
+function isDeckResultRow(value: unknown): value is Readonly<{ id: string; name: string }> {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		!Array.isArray(value) &&
+		typeof (value as { id?: unknown }).id === "string" &&
+		typeof (value as { name?: unknown }).name === "string"
+	);
 }
 
 function unavailable() {

@@ -4,9 +4,11 @@ import { countByCategory } from "@/lib/srs";
 import type { CardWithState, ReviewState } from "@/lib/srs/types";
 import { createServerClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/database";
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { getTodayJST } from "../lib/date";
+import { type DeckActionState, normalizeDeckNameInput } from "./deck-action-types";
 
 const LOGIN_PATH = "/login";
 
@@ -89,6 +91,55 @@ const requireAuthenticatedUserId = async (
 
 	return data.user.id;
 };
+
+export async function createDeck(
+	previousState: DeckActionState,
+	formData: FormData
+): Promise<DeckActionState> {
+	void previousState;
+
+	const validation = normalizeDeckNameInput(formData.get("name"));
+	if (!validation.ok) {
+		return { status: "error", message: validation.message };
+	}
+
+	const supabase = createServerClient();
+	const { data: authData, error: authError } = await supabase.auth.getUser();
+	if (authError || !authData.user) {
+		return { status: "error", message: "ログインが必要です。" };
+	}
+
+	const { data, error } = await supabase
+		.from("decks")
+		.insert({ owner_user_id: authData.user.id, name: validation.name })
+		.select("id, name")
+		.single();
+
+	if (error || !isCreatedDeckRow(data)) {
+		return {
+			status: "error",
+			message: "デッキを作成できませんでした。時間をおいて再度お試しください。",
+		};
+	}
+
+	revalidatePath("/decks");
+
+	return {
+		status: "success",
+		message: "デッキを作成しました。",
+		deck: { id: data.id, name: data.name },
+	};
+}
+
+function isCreatedDeckRow(value: unknown): value is Readonly<{ id: string; name: string }> {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		!Array.isArray(value) &&
+		typeof (value as { id?: unknown }).id === "string" &&
+		typeof (value as { name?: unknown }).name === "string"
+	);
+}
 
 const fetchDeckCardRows = async (
 	supabase: ReturnType<typeof createServerClient>,

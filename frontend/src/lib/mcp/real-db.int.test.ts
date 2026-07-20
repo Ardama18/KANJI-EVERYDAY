@@ -156,6 +156,39 @@ describe.skipIf(verifiedIsolatedDatabaseUrl === undefined)(
 		);
 
 		it(
+			"creates an owner deck through authenticated RLS and returns it through owner list only",
+			async () => {
+				const fixture = await createFixture();
+				const deckName = `${fixture.marker} created`;
+				const created = await remoteQuery<{ id: string; name: string }>(
+					fixture,
+					`INSERT INTO public.decks(owner_user_id,name)
+						VALUES ('${S10_ACTORS.ownerA.userId}'::uuid,${sqlLiteral(deckName)})
+						RETURNING json_build_object('id', id, 'name', name) AS result`
+				);
+				const ownerList = await remoteQuery<{ decks: Array<{ id: string; name: string }> }>(
+					fixture,
+					`SELECT json_build_object(
+							'decks',
+							COALESCE(json_agg(json_build_object('id', id, 'name', name) ORDER BY name, id), '[]'::json)
+						) AS result
+						FROM public.decks`
+				);
+				const otherOwner = await remoteQuery<{ count: number }>(
+					fixture,
+					`SELECT json_build_object('count', count(*)::int) AS result
+						FROM public.decks WHERE id='${created.id}'::uuid`,
+					{ ownerUserId: S10_ACTORS.ownerB.userId }
+				);
+
+				expect(created.name).toBe(deckName);
+				expect(ownerList.decks).toContainEqual(created);
+				expect(otherOwner.count).toBe(0);
+			},
+			S10_DB_TEST_TIMEOUT_MS
+		);
+
+		it(
 			"rejects mismatched client and session claims before preview work",
 			async () => {
 				const fixture = await createFixture();

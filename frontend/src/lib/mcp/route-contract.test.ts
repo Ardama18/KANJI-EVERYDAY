@@ -35,6 +35,7 @@ function request(
 function services(): McpToolServices {
 	return {
 		listDecks: vi.fn(),
+		createDeck: vi.fn(),
 		previewCardImport: vi.fn(),
 		commitCardImport: vi.fn(),
 		getImportStatus: vi.fn(),
