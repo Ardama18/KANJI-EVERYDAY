@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
 	createJwtScopedClient as createJwtScopedClientUnderTest,
+	createReadOnlyServerClient as createReadOnlyServerClientUnderTest,
 	createServerClient as createServerClientUnderTest,
 	createServiceRoleClient as createServiceRoleClientUnderTest,
 } from "./server";
@@ -118,6 +119,23 @@ describe("frontend/src/lib/supabase/server.ts", () => {
 			value: "",
 			path: "/",
 		});
+	});
+
+	it("createReadOnlyServerClient は Server Component 向けに cookie 書き込みを no-op にする", () => {
+		const fakeClient = { id: "read-only-server-client" };
+		cookieGetMock.mockReturnValue({ value: "cookie-value" });
+		createServerClientMock.mockReturnValue(fakeClient);
+
+		const actual = createReadOnlyServerClientUnderTest();
+
+		expect(actual).toBe(fakeClient);
+		const [, , options] = createServerClientMock.mock.calls[0];
+		const { get, set, remove } = options.cookies;
+
+		expect(get("sb-auth-token")).toBe("cookie-value");
+		set("sb-auth-token", "next-token", { path: "/" });
+		remove("sb-auth-token", { path: "/" });
+		expect(cookieSetMock).not.toHaveBeenCalled();
 	});
 
 	it("createServiceRoleClient は service role key で Supabase client を初期化する", () => {

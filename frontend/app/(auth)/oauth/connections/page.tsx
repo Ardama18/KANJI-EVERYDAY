@@ -2,10 +2,10 @@ import { redirect } from "next/navigation";
 
 import { OAuthConnectionsClient } from "@/components/oauth/connections-client";
 import { type OAuthServerApi, getOAuthConnections } from "@/lib/oauth/server";
-import { createServerClient } from "@/lib/supabase/server";
+import { createReadOnlyServerClient } from "@/lib/supabase/server";
 
 export default async function OAuthConnectionsPage() {
-	const supabase = createServerClient();
+	const supabase = createReadOnlyServerClient();
 	const { data, error } = await supabase.auth.getUser();
 	if (error !== null || data.user === null) redirect("/login");
 	const connections = await getOAuthConnections(supabase.auth.oauth as unknown as OAuthServerApi);
