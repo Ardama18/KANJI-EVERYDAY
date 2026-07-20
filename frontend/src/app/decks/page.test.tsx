@@ -7,6 +7,10 @@ vi.mock("@/actions/deck-actions", () => ({
 	getDecksWithCounts: getDecksWithCountsMock,
 }));
 
+vi.mock("@/components/deck/CreateDeckForm", () => ({
+	CreateDeckForm: () => <form aria-label="新しいデッキ作成" data-testid="create-deck-form" />,
+}));
+
 import DecksPage, { DECKS_EMPTY_MESSAGE, DECKS_PAGE_TITLE } from "../../../app/(auth)/decks/page";
 
 describe("frontend/app/(auth)/decks/page.tsx", () => {
@@ -20,6 +24,7 @@ describe("frontend/app/(auth)/decks/page.tsx", () => {
 		const html = renderToStaticMarkup(await DecksPage());
 
 		expect(html).toContain(DECKS_PAGE_TITLE);
+		expect(html).toContain('aria-label="新しいデッキ作成"');
 		expect(html).toContain(DECKS_EMPTY_MESSAGE);
 	});
 
@@ -35,6 +40,7 @@ describe("frontend/app/(auth)/decks/page.tsx", () => {
 		const html = renderToStaticMarkup(await DecksPage());
 
 		expect(html).toContain("小学3年生の漢字");
+		expect(html).toContain('aria-label="新しいデッキ作成"');
 		expect(html).toContain('href="/decks/deck-1"');
 		expect(html).toContain("New");
 		expect(html).toContain("Learn");

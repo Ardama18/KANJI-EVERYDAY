@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const createServerClientMock = vi.hoisted(() => vi.fn());
 const redirectMock = vi.hoisted(() => vi.fn<(location: string) => never>());
+const revalidatePathMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/supabase/server", () => ({
 	createServerClient: createServerClientMock,
@@ -11,7 +12,16 @@ vi.mock("next/navigation", () => ({
 	redirect: redirectMock,
 }));
 
-import { getDeckOverview, getDecksWithCounts } from "./deck-actions";
+vi.mock("next/cache", () => ({
+	revalidatePath: revalidatePathMock,
+}));
+
+import {
+	DECK_ACTION_INITIAL_STATE,
+	MAX_DECK_NAME_LENGTH,
+	normalizeDeckNameInput,
+} from "./deck-action-types";
+import { createDeck, getDeckOverview, getDecksWithCounts } from "./deck-actions";
 
 class RedirectSignal extends Error {
 	constructor(public readonly location: string) {
@@ -42,10 +52,12 @@ type DeckCardRow = {
 
 type SetupOptions = {
 	userId?: string | null;
+	authError?: unknown;
 	decksList?: DeckRow[];
 	deckOverview?: DeckRow | null;
 	deckCards?: DeckCardRow[];
 	reviewStates?: ReviewStateRow[];
+	insertResult?: { data: unknown; error: unknown };
 };
 
 const setupClient = (options: SetupOptions = {}) => {
@@ -53,7 +65,7 @@ const setupClient = (options: SetupOptions = {}) => {
 		data: {
 			user: options.userId === null ? null : { id: options.userId ?? "user-1" },
 		},
-		error: null,
+		error: options.authError ?? null,
 	});
 
 	const decksOrderMock = vi.fn().mockResolvedValue({
@@ -71,6 +83,18 @@ const setupClient = (options: SetupOptions = {}) => {
 	const reviewStatesInMock = vi.fn().mockResolvedValue({
 		data: options.reviewStates ?? [],
 		error: null,
+	});
+	const decksInsertSingleMock = vi.fn().mockResolvedValue(
+		options.insertResult ?? {
+			data: { id: "created-deck-1", name: "新しいデッキ" },
+			error: null,
+		}
+	);
+	const decksInsertSelectMock = vi.fn().mockReturnValue({
+		single: decksInsertSingleMock,
+	});
+	const decksInsertMock = vi.fn().mockReturnValue({
+		select: decksInsertSelectMock,
 	});
 
 	const decksSelectMock = vi.fn().mockImplementation(() => ({
@@ -104,7 +128,7 @@ const setupClient = (options: SetupOptions = {}) => {
 
 	const fromMock = vi.fn((table: string) => {
 		if (table === "decks") {
-			return { select: decksSelectMock };
+			return { select: decksSelectMock, insert: decksInsertMock };
 		}
 
 		if (table === "deck_cards") {
@@ -131,6 +155,9 @@ const setupClient = (options: SetupOptions = {}) => {
 		decksSelectMock,
 		decksOrderMock,
 		decksMaybeSingleMock,
+		decksInsertMock,
+		decksInsertSelectMock,
+		decksInsertSingleMock,
 		deckCardsSelectMock,
 		deckCardsInMock,
 		reviewStatesInMock,
@@ -141,9 +168,88 @@ describe("frontend/src/actions/deck-actions.ts", () => {
 	beforeEach(() => {
 		createServerClientMock.mockReset();
 		redirectMock.mockReset();
+		revalidatePathMock.mockReset();
 		redirectMock.mockImplementation((location: string) => {
 			throw new RedirectSignal(location);
 		});
+	});
+
+	it("UT-S16-VALIDATE-DECK-NAME: デッキ名の空・長さ・制御文字を拒否しtrim済み名を返す", () => {
+		expect(normalizeDeckNameInput("  一年生  ")).toEqual({ ok: true, name: "一年生" });
+		expect(normalizeDeckNameInput("")).toMatchObject({ ok: false });
+		expect(normalizeDeckNameInput("   ")).toMatchObject({ ok: false });
+		expect(normalizeDeckNameInput(`${"あ".repeat(MAX_DECK_NAME_LENGTH)}x`)).toMatchObject({
+			ok: false,
+		});
+		expect(normalizeDeckNameInput("漢字\u0000")).toMatchObject({ ok: false });
+	});
+
+	it("UT-S16-CREATE-DECK-VALIDATION: invalid form input fails before auth and insert", async () => {
+		const formData = new FormData();
+		formData.set("name", " ");
+
+		const result = await createDeck(DECK_ACTION_INITIAL_STATE, formData);
+
+		expect(result).toMatchObject({ status: "error" });
+		expect(createServerClientMock).not.toHaveBeenCalled();
+		expect(revalidatePathMock).not.toHaveBeenCalled();
+	});
+
+	it("UT-S16-CREATE-DECK-UNAUTH: 未認証ではinsertせず安全なerror stateを返す", async () => {
+		const { decksInsertMock } = setupClient({ userId: null });
+		const formData = new FormData();
+		formData.set("name", "初回デッキ");
+
+		const result = await createDeck(DECK_ACTION_INITIAL_STATE, formData);
+
+		expect(result).toEqual({ status: "error", message: "ログインが必要です。" });
+		expect(decksInsertMock).not.toHaveBeenCalled();
+		expect(revalidatePathMock).not.toHaveBeenCalled();
+	});
+
+	it("UT-S16-CREATE-DECK-SUCCESS: 認証user IDでdeckを作成しdefault列を明示しない", async () => {
+		const { decksInsertMock, decksInsertSelectMock } = setupClient({
+			userId: "owner-user-1",
+			insertResult: { data: { id: "deck-created", name: "初回デッキ" }, error: null },
+		});
+		const formData = new FormData();
+		formData.set("name", "  初回デッキ  ");
+
+		const result = await createDeck(DECK_ACTION_INITIAL_STATE, formData);
+
+		expect(decksInsertMock).toHaveBeenCalledWith({
+			owner_user_id: "owner-user-1",
+			name: "初回デッキ",
+		});
+		expect(decksInsertMock.mock.calls[0]?.[0]).not.toHaveProperty("new_limit_per_day");
+		expect(decksInsertSelectMock).toHaveBeenCalledWith("id, name");
+		expect(revalidatePathMock).toHaveBeenCalledWith("/decks");
+		expect(result).toEqual({
+			status: "success",
+			message: "デッキを作成しました。",
+			deck: { id: "deck-created", name: "初回デッキ" },
+		});
+	});
+
+	it("UT-S16-CREATE-DECK-SAFE-ERROR: Supabase error detailを返却stateに含めない", async () => {
+		setupClient({
+			insertResult: {
+				data: null,
+				error: { message: "duplicate key value violates unique constraint using SQL secret token" },
+			},
+		});
+		const formData = new FormData();
+		formData.set("name", "初回デッキ");
+
+		const result = await createDeck(DECK_ACTION_INITIAL_STATE, formData);
+
+		expect(result).toEqual({
+			status: "error",
+			message: "デッキを作成できませんでした。時間をおいて再度お試しください。",
+		});
+		expect(JSON.stringify(result)).not.toContain("duplicate key");
+		expect(JSON.stringify(result)).not.toContain("secret");
+		expect(revalidatePathMock).not.toHaveBeenCalled();
 	});
 
 	it("UT-AC14-UNAUTH-REDIRECT-LIST: 未認証で getDecksWithCounts を呼ぶと /login へ遷移する", async () => {

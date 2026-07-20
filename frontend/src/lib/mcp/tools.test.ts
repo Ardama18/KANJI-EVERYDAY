@@ -6,6 +6,7 @@ import { MCP_TOOL_NAMES, type McpToolServices, invokeMcpTool, mcpToolDescriptors
 function services(overrides: Partial<McpToolServices> = {}): McpToolServices {
 	return {
 		listDecks: vi.fn().mockResolvedValue({ decks: [] }),
+		createDeck: vi.fn().mockResolvedValue({ deck: { id: "deck-1", name: "初回デッキ" } }),
 		previewCardImport: vi.fn().mockResolvedValue({ ok: true }),
 		commitCardImport: vi.fn().mockResolvedValue({ ok: true }),
 		getImportStatus: vi.fn().mockResolvedValue({ ok: true }),
@@ -18,9 +19,10 @@ function services(overrides: Partial<McpToolServices> = {}): McpToolServices {
 }
 
 describe("S-14 static MCP tools", () => {
-	it("exposes exactly the approved eight-tool allowlist", () => {
+	it("exposes exactly the approved nine-tool allowlist", () => {
 		expect(MCP_TOOL_NAMES).toEqual([
 			"list_decks",
+			"create_deck",
 			"preview_card_import",
 			"commit_card_import",
 			"get_import_status",
@@ -44,6 +46,25 @@ describe("S-14 static MCP tools", () => {
 		const result = await invokeMcpTool("rpc_anything", {}, instance);
 		expect(result.isError).toBe(true);
 		expect(instance.listDecks).not.toHaveBeenCalled();
+	});
+
+	it("dispatches create_deck with strict input and rejects owner overrides", async () => {
+		const createDeck = vi.fn().mockResolvedValue({ deck: { id: "deck-1", name: "初回デッキ" } });
+		const instance = services({ createDeck });
+		const result = await invokeMcpTool("create_deck", { name: "初回デッキ" }, instance);
+		const rejected = await invokeMcpTool(
+			"create_deck",
+			{ name: "初回デッキ", ownerUserId: "forged" },
+			instance
+		);
+
+		expect(result.structuredContent).toEqual({
+			ok: true,
+			data: { deck: { id: "deck-1", name: "初回デッキ" } },
+		});
+		expect(createDeck).toHaveBeenCalledWith({ name: "初回デッキ" });
+		expect(rejected.isError).toBe(true);
+		expect(createDeck).toHaveBeenCalledTimes(1);
 	});
 
 	it("rejects unknown input fields before dispatch", async () => {

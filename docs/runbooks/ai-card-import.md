@@ -68,17 +68,18 @@ Claude の本番相当クライアントで次を1回以上実行する。
 3. OAuth Authorization Code + PKCE。
 4. 日本語 consent approve。
 5. `list_decks`。
-6. `preview_card_import`。
-7. `commit_card_import`。
-8. `get_import_status` terminal poll。
-9. connection revoke。
-10. revoke後の同一接続または旧tokenが401になること。
+6. `list_decks` が空なら `create_deck` を実行し、返却された `deck.id` を以降の登録先にする。既存deckがある場合は本人所有deckの `id` を1件選ぶ。
+7. `preview_card_import` の `request.deck.id` に、前手順で決めたdeck IDを指定する。
+8. `commit_card_import`。
+9. `get_import_status` terminal poll。
+10. connection revoke。
+11. revoke後の同一接続または旧tokenが401になること。
 
-証跡には client名/version、日時、対象SHA、public MCP URL、Hosted project ref、tool名、HTTP status、safe resultだけを残す。
+証跡には client名/version、日時、対象SHA、public MCP URL、Hosted project ref、tool名、HTTP status、safe resultだけを残す。secret、token、cookie、deck名、カード本文、raw prompt、raw errorは残さない。
 
 ## 8. ChatGPT live-client gate
 
-ChatGPT の本番相当クライアントで Claude と同じ flow を実行する。ChatGPT 固有の再認証要求が出る場合は、`_meta["mcp/www_authenticate"]` の challenge が auth failure のみに付くことを確認する。
+ChatGPT の本番相当クライアントで Claude と同じ flow を実行する。`list_decks` が空の場合は `create_deck` を挟み、返却された `deck.id` を `preview_card_import.request.deck.id` に使う。ChatGPT 固有の再認証要求が出る場合は、`_meta["mcp/www_authenticate"]` の challenge が auth failure のみに付くことを確認する。
 
 ## 9. Rollback / restart gate
 

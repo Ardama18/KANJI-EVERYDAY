@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.0.0] - 2026-07-20
+
+### Added
+
+- Added a first-use deck creation form on `/decks` so users with no decks can create their registration target before adding AI cards.
+- Added the Remote MCP `create_deck` tool so ChatGPT and other external AI clients can create an owner-scoped deck before calling `preview_card_import` and `commit_card_import`.
+- Added shared deck-name validation for UI and MCP deck creation, covering empty names, overlong names, and control or invisible control characters.
+
+### Changed
+
+- Updated the Remote MCP tool contract from eight tools to nine tools, preserving the existing AI card import, status, management, and undo flow.
+- Updated the AI card import runbook with the first-user `list_decks` empty-state flow: `create_deck` → `preview_card_import` → `commit_card_import` → `get_import_status`.
+
+### Verification
+
+- Passed targeted S-16 Vitest coverage: 7 files, 39 tests.
+- Passed `npm --prefix frontend run lint`, `npm --prefix frontend run typecheck`, `npm --prefix frontend run build`, `git diff --check`, and confirmed `supabase/migrations/` has no changes.
+- Confirmed `npm --prefix frontend run check` still requires existing `S10_TEST_DATABASE_URL` real-database configuration for unrelated S-10/S-13 DB suites; the S-16 targeted unit and contract gates passed.
+
 ## [0.3.0.0] - 2026-07-19
 
 ### Added

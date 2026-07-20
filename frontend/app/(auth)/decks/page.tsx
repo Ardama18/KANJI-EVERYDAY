@@ -1,4 +1,5 @@
 import { getDecksWithCounts } from "@/actions/deck-actions";
+import { CreateDeckForm } from "@/components/deck/CreateDeckForm";
 import { DeckCard } from "@/components/deck/DeckCard";
 
 export const DECKS_PAGE_TITLE = "デッキ一覧";
@@ -12,6 +13,7 @@ export default async function DecksPage() {
 	return (
 		<main className="mx-auto w-full max-w-5xl px-4 py-6">
 			<h1 className="text-2xl font-bold text-slate-900">{DECKS_PAGE_TITLE}</h1>
+			<CreateDeckForm />
 			{decks.length === 0 ? (
 				<p className="mt-4 rounded-xl border border-dashed border-slate-300 bg-white px-4 py-6 text-sm text-slate-600">
 					{DECKS_EMPTY_MESSAGE}

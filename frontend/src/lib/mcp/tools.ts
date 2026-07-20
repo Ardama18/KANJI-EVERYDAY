@@ -71,6 +71,7 @@ const cardPatch = z
 
 export const mcpToolInputSchemas = Object.freeze({
 	list_decks: z.object({}).strict(),
+	create_deck: z.object({ name: z.string() }).strict(),
 	preview_card_import: z.object({ request: inputRequest }).strict(),
 	commit_card_import: z
 		.object({
@@ -122,6 +123,9 @@ export type McpToolName = keyof typeof mcpToolInputSchemas;
 
 export interface McpToolServices {
 	readonly listDecks: () => Promise<unknown>;
+	readonly createDeck: (
+		input: z.infer<(typeof mcpToolInputSchemas)["create_deck"]>
+	) => Promise<unknown>;
 	readonly previewCardImport: (
 		input: z.infer<(typeof mcpToolInputSchemas)["preview_card_import"]>
 	) => Promise<unknown>;
@@ -149,6 +153,7 @@ const oauthSecurity = Object.freeze([{ type: "oauth2", scopes: [...MCP_SCOPES] }
 
 export const MCP_TOOL_NAMES = Object.freeze([
 	"list_decks",
+	"create_deck",
 	"preview_card_import",
 	"commit_card_import",
 	"get_import_status",
@@ -160,6 +165,7 @@ export const MCP_TOOL_NAMES = Object.freeze([
 
 export const mcpToolDescriptors = Object.freeze({
 	list_decks: descriptor("本人所有デッキの一覧", true, false, false),
+	create_deck: descriptor("本人所有デッキを作成", false, false, false),
 	preview_card_import: descriptor("R1/W1 private card import の事前確認", true, false, false),
 	commit_card_import: descriptor("確認済み preview を非同期登録", false, false, false),
 	get_import_status: descriptor("非同期 import 状態を取得", true, false, false),
@@ -222,6 +228,10 @@ async function executeKnownTool(
 	switch (name) {
 		case "list_decks":
 			return await services.listDecks();
+		case "create_deck":
+			return await services.createDeck(
+				input as z.infer<(typeof mcpToolInputSchemas)["create_deck"]>
+			);
 		case "preview_card_import":
 			return await services.previewCardImport(
 				input as z.infer<(typeof mcpToolInputSchemas)["preview_card_import"]>
