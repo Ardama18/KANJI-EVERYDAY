@@ -257,6 +257,36 @@ describe.skipIf(verifiedIsolatedDatabaseUrl === undefined)(
 		);
 
 		it(
+			"allows commit when ChatGPT rotates the OAuth client after preview",
+			async () => {
+				const fixture = await createFixture();
+				const rotatedClientId = randomUUID();
+				const commit = await remoteQuery<{
+					batchId: string;
+					status: string;
+					statusUrl: string;
+				}>(
+					fixture,
+					commitSql(fixture, {
+						clientId: rotatedClientId,
+						generationRequestHash: await deriveRemoteGenerationRequestHash(
+							fixture.importRequestHash,
+							rotatedClientId
+						),
+					}),
+					{ clientId: rotatedClientId }
+				);
+				expect(commit.status).toBe("queued");
+				expect(commit.statusUrl).toBe(`/api/ai/imports/status?batchId=${commit.batchId}`);
+				const state = await markerState(fixture);
+				expect(state).toMatchObject({ reservations: 1, batches: 1, items: 1, jobs: 1 });
+				expect(state.reservationUnits).toBe(0);
+				expect(state.batchSource).toBe("remote_mcp");
+			},
+			S10_DB_TEST_TIMEOUT_MS
+		);
+
+		it(
 			"replays the same owner/key/hash to the same batch without duplicating durable rows",
 			async () => {
 				const fixture = await createFixture();
@@ -475,16 +505,18 @@ function previewSql(fixture: Fixture, deckId = fixture.ownerDeckId): string {
 function commitSql(
 	fixture: Fixture,
 	overrides: Partial<{
+		clientId: string;
 		importRequestHash: string;
 		generationRequestHash: string;
 		previewToken: string;
 	}> = {}
 ): string {
+	const clientId = overrides.clientId ?? fixture.clientId;
 	const importRequestHash = overrides.importRequestHash ?? fixture.importRequestHash;
 	const generationRequestHash = overrides.generationRequestHash ?? fixture.generationRequestHash;
 	const previewToken = overrides.previewToken ?? fixture.previewToken;
 	return `SELECT public.s14_remote_commit_import(
-		${sqlLiteral(fixture.clientId)},
+		${sqlLiteral(clientId)},
 		${sqlLiteral(fixture.sessionId)},
 		${sqlLiteral(fixture.idempotencyKey)},
 		'${importRequestHash}',

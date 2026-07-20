@@ -11,6 +11,10 @@ const runtimeConfigMigrationPath = resolve(
 	process.cwd(),
 	"../supabase/migrations/20260719000003_s14_remote_mcp_runtime_config.sql"
 );
+const remoteCommitClientRotationMigrationPath = resolve(
+	process.cwd(),
+	"../supabase/migrations/20260720000004_s14_remote_commit_allows_client_rotation.sql"
+);
 
 async function readMigration(): Promise<string> {
 	return await readFile(migrationPath, "utf8");
@@ -18,6 +22,10 @@ async function readMigration(): Promise<string> {
 
 async function readRuntimeConfigMigration(): Promise<string> {
 	return await readFile(runtimeConfigMigrationPath, "utf8");
+}
+
+async function readRemoteCommitClientRotationMigration(): Promise<string> {
+	return await readFile(remoteCommitClientRotationMigrationPath, "utf8");
 }
 
 describe("S-14 remote MCP migration contract", () => {
@@ -70,6 +78,20 @@ describe("S-14 remote MCP migration contract", () => {
 		expect(sql).toContain("REVOKE ALL ON TABLE s14_private.remote_mcp_runtime_config");
 		expect(sql).toContain("OWNER TO s10_migration_owner");
 		expect(sql).not.toMatch(/^\s*ALTER\s+ROLE\b/imu);
+	});
+
+	it("allows remote preview tokens to survive OAuth client rotation at commit", async () => {
+		const sql = await readRemoteCommitClientRotationMigration();
+		expect(sql).toContain("CREATE OR REPLACE FUNCTION public.s14_remote_commit_import");
+		expect(sql).toContain("kanji-everyday:remote-mcp:preview:v2");
+		expect(sql).toContain(
+			"lower(preview_payload ->> 'userId') IS DISTINCT FROM lower(actor_id::text)"
+		);
+		expect(sql).not.toContain(
+			"lower(preview_payload ->> 'clientId') IS DISTINCT FROM lower(p_client_id)"
+		);
+		expect(sql).toContain("p_generation_request_hash IS DISTINCT FROM expected_generation_hash");
+		expect(sql).toContain("GRANT EXECUTE ON FUNCTION public.s14_remote_commit_import");
 	});
 
 	it("keeps remote preview write-free while checking owner deck, upload, and existing-card boundaries", async () => {
