@@ -129,7 +129,6 @@ export async function verifyRemotePreviewToken(
 		if (!(await verifyHmac(payloadPart, signature, secret))) throw new PreviewTokenError();
 		if (
 			payload.userId !== expected.userId.toLowerCase() ||
-			payload.clientId !== expected.clientId.toLowerCase() ||
 			payload.reservationKey !== expected.reservationKey ||
 			payload.importRequestHash !== expected.importRequestHash ||
 			now > payload.expiresAt

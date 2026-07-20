@@ -33,7 +33,7 @@ describe("preview token versions", () => {
 		).rejects.toThrow(PreviewTokenError);
 	});
 
-	it("binds remote token v2 to domain, owner, verified client, request hash, reservation, and expiry", async () => {
+	it("binds remote token v2 to domain, owner, request hash, reservation, and expiry", async () => {
 		const expected = { userId: ownerId, clientId, reservationKey, importRequestHash };
 		const token = await signRemotePreviewToken(expected, secret, now);
 		await expect(verifyRemotePreviewToken(token, expected, secret, now)).resolves.toMatchObject({
@@ -47,9 +47,22 @@ describe("preview token versions", () => {
 		);
 	});
 
+	it("allows OAuth clients to rotate between remote preview and commit", async () => {
+		const expected = { userId: ownerId, clientId, reservationKey, importRequestHash };
+		const token = await signRemotePreviewToken(expected, secret, now);
+		await expect(
+			verifyRemotePreviewToken(token, { ...expected, clientId: otherClientId }, secret, now)
+		).resolves.toMatchObject({
+			v: 2,
+			userId: ownerId,
+			clientId,
+			reservationKey,
+			importRequestHash,
+		});
+	});
+
 	it.each([
 		["cross owner", { userId: otherOwnerId }],
-		["cross client", { clientId: otherClientId }],
 		["request substitution", { importRequestHash: "b".repeat(64) }],
 		["reservation substitution", { reservationKey: "reservation-2" }],
 	] as const)("rejects %s replay", async (_name, overrides) => {
