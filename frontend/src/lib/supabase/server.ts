@@ -29,6 +29,23 @@ const createCookieStoreAdapter = () => {
 	};
 };
 
+const createReadOnlyCookieStoreAdapter = () => {
+	const cookieStore = cookies();
+
+	return {
+		get(name: string) {
+			return cookieStore.get(name)?.value;
+		},
+		set() {
+			// Server Components cannot mutate cookies. Route Handlers and Server Actions
+			// use createServerClient(), which keeps cookie refresh writable.
+		},
+		remove() {
+			// See set().
+		},
+	};
+};
+
 export type ServerSupabaseClient = SupabaseClient<Database, "public", "public", Database["public"]>;
 
 export type JwtScopedSupabaseClient = ServerSupabaseClient;
@@ -43,6 +60,14 @@ export const createServerClient = (): ServerSupabaseClient => {
 	// the currently installed supabase-js four-parameter client declaration.
 	return createSupabaseServerClient(supabaseUrl, supabaseAnonKey, {
 		cookies: createCookieStoreAdapter(),
+	});
+};
+
+export const createReadOnlyServerClient = (): ServerSupabaseClient => {
+	const { supabaseUrl, supabaseAnonKey } = getPublicEnvConfig();
+
+	return createSupabaseServerClient(supabaseUrl, supabaseAnonKey, {
+		cookies: createReadOnlyCookieStoreAdapter(),
 	});
 };
 

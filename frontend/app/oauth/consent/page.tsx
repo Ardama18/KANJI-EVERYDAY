@@ -7,7 +7,7 @@ import {
 	getVerifiedAuthorization,
 	isAuthorizationId,
 } from "@/lib/oauth/server";
-import { createServerClient } from "@/lib/supabase/server";
+import { createReadOnlyServerClient } from "@/lib/supabase/server";
 
 type ConsentPageProps = Readonly<{
 	searchParams?: Readonly<{ authorization_id?: string | string[] }>;
@@ -18,7 +18,7 @@ export default async function OAuthConsentPage({ searchParams }: ConsentPageProp
 		typeof searchParams?.authorization_id === "string" ? searchParams.authorization_id : undefined;
 	if (!isAuthorizationId(authorizationId)) return <ConsentProblem />;
 
-	const supabase = createServerClient();
+	const supabase = createReadOnlyServerClient();
 	let userId: string | null = null;
 	try {
 		const { data, error } = await supabase.auth.getUser();
