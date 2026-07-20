@@ -68,7 +68,7 @@ describe("S-14 import application service", () => {
 		);
 	});
 
-	it("binds remote preview and commit to the verified client, before repository side effects", async () => {
+	it("allows remote OAuth client rotation while keeping commit repository actor-bound", async () => {
 		const repo = repository();
 		const preview = await previewCardImport({
 			actor: { userId: ownerId, clientId, kind: "remote_mcp" },
@@ -97,8 +97,16 @@ describe("S-14 import application service", () => {
 			correlationId: "test-correlation",
 		});
 
-		expect(result).toEqual({ ok: false, error: { code: "UNAUTHORIZED", httpStatus: 401 } });
-		expect(repo.commit).not.toHaveBeenCalled();
+		expect(result).toEqual({
+			ok: true,
+			data: { batchId, status: "queued", statusUrl: `/api/ai/imports/status?batchId=${batchId}` },
+		});
+		expect(repo.commit).toHaveBeenCalledWith(
+			expect.objectContaining({
+				importRequestHash: preview.data.importRequestHash,
+				cardReservationKey: reservationKey,
+			})
+		);
 	});
 
 	it("uses the same normalized request for UI commit and returns the async contract", async () => {
