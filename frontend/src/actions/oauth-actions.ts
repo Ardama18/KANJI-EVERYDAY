@@ -12,9 +12,7 @@ import { createServerClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-export type OAuthActionState = Readonly<{ status: "idle" | "error"; message?: string }>;
-
-export const OAUTH_ACTION_INITIAL_STATE: OAuthActionState = Object.freeze({ status: "idle" });
+import type { OAuthActionState } from "./oauth-action-types";
 
 const CONSENT_ERROR = "連携の確認を完了できませんでした。最初からやり直してください。";
 const REVOKE_ERROR = "連携の解除を完了できませんでした。画面を更新して再試行してください。";

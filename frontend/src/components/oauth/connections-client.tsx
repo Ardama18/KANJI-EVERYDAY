@@ -3,11 +3,8 @@
 import { useState } from "react";
 import { useFormState, useFormStatus } from "react-dom";
 
-import {
-	OAUTH_ACTION_INITIAL_STATE,
-	type OAuthActionState,
-	revokeOAuthConnection,
-} from "@/actions/oauth-actions";
+import { OAUTH_ACTION_INITIAL_STATE, type OAuthActionState } from "@/actions/oauth-action-types";
+import { revokeOAuthConnection } from "@/actions/oauth-actions";
 
 export interface OAuthConnectionView {
 	readonly clientId: string;

@@ -2,11 +2,8 @@
 
 import { useFormState, useFormStatus } from "react-dom";
 
-import {
-	OAUTH_ACTION_INITIAL_STATE,
-	type OAuthActionState,
-	decideOAuthConsent,
-} from "@/actions/oauth-actions";
+import { OAUTH_ACTION_INITIAL_STATE, type OAuthActionState } from "@/actions/oauth-action-types";
+import { decideOAuthConsent } from "@/actions/oauth-actions";
 
 function DecisionButton({
 	decision,
