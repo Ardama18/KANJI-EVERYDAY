@@ -92,7 +92,7 @@ describe("S-14 MCP route boundary", () => {
 	it("rejects bad content negotiation and payloads before authentication", async () => {
 		const { dependencies } = createDependencies();
 		const media = await handleMcpRoute(
-			request("POST", undefined, { "content-type": "text/plain" }),
+			request("POST", undefined, { "content-type": "application/x-www-form-urlencoded" }),
 			dependencies
 		);
 		const accept = await handleMcpRoute(
@@ -102,6 +102,29 @@ describe("S-14 MCP route boundary", () => {
 		const malformed = await handleMcpRoute(request("POST", "{"), dependencies);
 		expect([media.status, accept.status, malformed.status]).toEqual([415, 406, 400]);
 		expect(dependencies.authenticate).not.toHaveBeenCalled();
+	});
+
+	it("accepts ChatGPT-compatible JSON media types before authentication", async () => {
+		const { dependencies } = createDependencies({
+			authenticate: vi.fn(async () => {
+				throw new Error("unauthenticated");
+			}),
+		});
+		for (const contentType of [
+			undefined,
+			"",
+			"application/json",
+			"application/json; charset=UTF-8",
+			"application/json; profile=mcp; charset=UTF-8",
+			"application/json-rpc",
+			"text/plain",
+			"text/plain;charset=UTF-8",
+		]) {
+			const headers =
+				contentType === undefined ? { "content-type": "" } : { "content-type": contentType };
+			const response = await handleMcpRoute(request("POST", undefined, headers), dependencies);
+			expect(response.status, String(contentType)).toBe(401);
+		}
 	});
 
 	it("returns the single 401 challenge before transport for missing or invalid Bearer auth", async () => {

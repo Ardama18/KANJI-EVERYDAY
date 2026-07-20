@@ -124,7 +124,14 @@ async function inspectMcpPayload(request: Request): Promise<unknown | Response> 
 }
 
 function isJsonContentType(value: string | null): boolean {
-	return value !== null && /^application\/json(?:\s*;\s*charset=utf-8)?$/iu.test(value);
+	const mediaType = parseMediaType(value);
+	return (
+		mediaType === null ||
+		mediaType === "" ||
+		mediaType === "application/json" ||
+		mediaType === "application/json-rpc" ||
+		mediaType === "text/plain"
+	);
 }
 
 function acceptsMcpJson(value: string | null): boolean {
@@ -133,6 +140,11 @@ function acceptsMcpJson(value: string | null): boolean {
 		.split(",")
 		.map((part) => part.trim().split(";", 1)[0]?.toLowerCase())
 		.some((part) => part === "application/json" || part === "text/event-stream" || part === "*/*");
+}
+
+function parseMediaType(value: string | null): string | null {
+	if (value === null) return null;
+	return value.split(";", 1)[0]?.trim().toLowerCase() ?? "";
 }
 
 function isAcceptableContentLength(value: string): boolean {
