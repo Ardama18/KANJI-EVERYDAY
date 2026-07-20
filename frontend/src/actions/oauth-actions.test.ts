@@ -10,11 +10,8 @@ vi.mock("@/lib/env", () => ({ isMcpEnabled: isMcpEnabledMock }));
 vi.mock("next/navigation", () => ({ redirect: redirectMock }));
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 
-import {
-	OAUTH_ACTION_INITIAL_STATE,
-	decideOAuthConsent,
-	revokeOAuthConnection,
-} from "./oauth-actions";
+import { OAUTH_ACTION_INITIAL_STATE } from "./oauth-action-types";
+import { decideOAuthConsent, revokeOAuthConnection } from "./oauth-actions";
 
 const authorizationId = "11111111-1111-4111-8111-111111111111";
 const clientId = "22222222-2222-4222-8222-222222222222";
