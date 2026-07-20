@@ -103,7 +103,11 @@ function validateHttpBoundary(
 	if (origin !== null && origin !== allowedOrigin) return forbiddenResponse();
 	if (request.method === "POST") {
 		if (!isJsonContentType(request.headers.get("content-type")))
-			return unsupportedMediaTypeResponse();
+			return unsupportedMediaTypeResponse({
+				contentType: request.headers.get("content-type"),
+				accept: request.headers.get("accept"),
+				contentLength: request.headers.get("content-length"),
+			});
 		if (!acceptsMcpJson(request.headers.get("accept"))) return notAcceptableResponse();
 		const contentLength = request.headers.get("content-length");
 		if (contentLength !== null && !isAcceptableContentLength(contentLength)) {
@@ -130,7 +134,8 @@ function isJsonContentType(value: string | null): boolean {
 		mediaType === "" ||
 		mediaType === "application/json" ||
 		mediaType === "application/json-rpc" ||
-		mediaType === "text/plain"
+		mediaType === "text/plain" ||
+		(mediaType.startsWith("application/") && mediaType.endsWith("+json"))
 	);
 }
 
@@ -178,7 +183,16 @@ function forbiddenResponse(): Response {
 	return Response.json({ error: "forbidden" }, { status: 403, headers: noStoreHeaders() });
 }
 
-function unsupportedMediaTypeResponse(): Response {
+function unsupportedMediaTypeResponse(context?: {
+	readonly contentType: string | null;
+	readonly accept: string | null;
+	readonly contentLength: string | null;
+}): Response {
+	console.warn("[mcp] unsupported media type", {
+		contentType: context?.contentType ?? null,
+		accept: context?.accept ?? null,
+		contentLength: context?.contentLength ?? null,
+	});
 	return Response.json(
 		{ error: "unsupported_media_type" },
 		{ status: 415, headers: noStoreHeaders() }
