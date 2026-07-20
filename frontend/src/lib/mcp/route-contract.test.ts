@@ -117,6 +117,8 @@ describe("S-14 MCP route boundary", () => {
 			"application/json; charset=UTF-8",
 			"application/json; profile=mcp; charset=UTF-8",
 			"application/json-rpc",
+			"application/mcp+json",
+			"application/vnd.modelcontextprotocol.request+json; charset=UTF-8",
 			"text/plain",
 			"text/plain;charset=UTF-8",
 		]) {
