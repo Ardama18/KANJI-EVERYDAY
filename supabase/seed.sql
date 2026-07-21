@@ -208,4 +208,24 @@ SELECT
 FROM resolved_seed_cards
 ON CONFLICT (deck_id, card_id) DO NOTHING;
 
+INSERT INTO public.card_mnemonics (
+	owner_user_id,
+	illustration_key,
+	slots,
+	explanation,
+	status
+)
+VALUES (
+	'00000000-0000-4000-8000-000000000001'::uuid,
+	'見',
+	'{"kanji":"見","isSingleKanji":true,"shapeHint":{"part":"下の「見」","picture":"目"},"meaningHint":"見る・気づく","story":"目で見たものが頭の中で光って記憶に残る"}'::jsonb,
+	'{"summary":"目で見たものが、頭の中で光って記憶に残る。","mappings":[{"part":"下の「見」","meaning":"目で見る"},{"part":"上の光","meaning":"頭の中で気づき、記憶する"},{"part":"目から光へ伸びる線","meaning":"見た情報が記憶になる"}]}'::jsonb,
+	'approved'
+)
+ON CONFLICT (owner_user_id, illustration_key) DO UPDATE
+SET
+	slots = EXCLUDED.slots,
+	explanation = EXCLUDED.explanation,
+	status = EXCLUDED.status;
+
 COMMIT;
