@@ -7,7 +7,7 @@ export {
 } from "./constants";
 
 export { calculateRating, getIntervalPreview } from "./calculate";
-export { classifyCard, countByCategory } from "./classify";
+export { classifyCard, countByCategory, summarizeDeckStudyState } from "./classify";
 export {
 	addToRetryQueue,
 	buildSessionQueue,
@@ -20,9 +20,11 @@ export type {
 	CardCategory,
 	CardWithState,
 	CategoryCounts,
+	DeckStudySummary,
 	IntervalPreview,
 	Rating,
 	RatingResult,
 	ReviewState,
 	SessionQueue,
+	SessionQueueLimits,
 } from "./types";

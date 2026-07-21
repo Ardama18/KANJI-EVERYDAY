@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.5.0.0] - 2026-07-21
+
+### Added
+
+- Added a deck-level daily study limit so each deck can cap the number of unique cards shown in a day.
+- Added deck detail controls for editing the daily study limit, with owner-scoped validation and clear success or failure feedback.
+- Added deck-wide study status on deck list and detail screens so future scheduled cards remain visible even when `New / Learn / Due` are all zero.
+
+### Changed
+
+- Changed study session creation to build queues within the remaining daily deck limit, preserving `Due -> Learn -> New` priority and keeping `new_limit_per_day` as the new-card-only cap.
+- Changed deck detail behavior so the start action is disabled when today's remaining study slot is exhausted.
+
+### Verification
+
+- Passed S-17 focused Vitest coverage: 10 files, 82 tests.
+- Passed full `npm run check` from `frontend/` with `S10_TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres`: 87 files passed, 1 skipped, 976 tests passed, 22 skipped.
+- Passed `npm run build` from `frontend/` and `git diff --check`.
+
 ## [0.4.0.0] - 2026-07-20
 
 ### Added

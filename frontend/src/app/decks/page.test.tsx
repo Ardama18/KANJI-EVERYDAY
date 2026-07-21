@@ -34,6 +34,10 @@ describe("frontend/app/(auth)/decks/page.tsx", () => {
 				id: "deck-1",
 				name: "小学3年生の漢字",
 				counts: { new: 10, learn: 3, due: 5 },
+				totalCards: 18,
+				learnedCards: 8,
+				scheduledCards: 2,
+				dailyStudyLimit: 20,
 			},
 		]);
 
@@ -48,5 +52,7 @@ describe("frontend/app/(auth)/decks/page.tsx", () => {
 		expect(html).toContain(">10<");
 		expect(html).toContain(">3<");
 		expect(html).toContain(">5<");
+		expect(html).toContain("カード 18枚");
+		expect(html).toContain("学習済み 8枚");
 	});
 });

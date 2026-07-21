@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { addDaysJST, getTodayJST, getTomorrowJST, isBeforeOrEqualJST } from "./date";
+import {
+	addDaysJST,
+	getJstDateForInstant,
+	getTodayJST,
+	getTomorrowJST,
+	isBeforeOrEqualJST,
+} from "./date";
 
 const INVALID_DATE_ERROR_MESSAGE = "Invalid JST date format: expected YYYY-MM-DD";
 
@@ -9,8 +15,9 @@ describe("date utilities", () => {
 		vi.useRealTimers();
 	});
 
-	it("UT-AC01-DATE-EXPORTS: 4つのJSTユーティリティ関数を提供する", () => {
+	it("UT-AC01-DATE-EXPORTS: JSTユーティリティ関数を提供する", () => {
 		expect(typeof getTodayJST).toBe("function");
+		expect(typeof getJstDateForInstant).toBe("function");
 		expect(typeof getTomorrowJST).toBe("function");
 		expect(typeof addDaysJST).toBe("function");
 		expect(typeof isBeforeOrEqualJST).toBe("function");
@@ -42,5 +49,11 @@ describe("date utilities", () => {
 		expect(() => addDaysJST("2026/02/23", 1)).toThrowError(INVALID_DATE_ERROR_MESSAGE);
 		expect(() => addDaysJST("2026-02-30", 1)).toThrowError(INVALID_DATE_ERROR_MESSAGE);
 		expect(() => getTomorrowJST("bad-date")).toThrowError(INVALID_DATE_ERROR_MESSAGE);
+	});
+
+	it("UT-S17-JST-INSTANT-BOUNDARY: ISO時刻をJST日付へ変換する", () => {
+		expect(getJstDateForInstant("2026-02-23T14:59:59.999Z")).toBe("2026-02-23");
+		expect(getJstDateForInstant("2026-02-23T15:00:00.000Z")).toBe("2026-02-24");
+		expect(getJstDateForInstant("bad-date")).toBeNull();
 	});
 });

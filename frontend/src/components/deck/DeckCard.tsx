@@ -32,10 +32,17 @@ export function DeckCard({ deck }: DeckCardProps) {
 	return (
 		<Link
 			href={`/decks/${deck.id}`}
-			className="flex min-h-[72px] items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
+			className="flex min-h-[88px] flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 sm:flex-row sm:items-center sm:justify-between"
 		>
-			<span className="text-base font-semibold text-slate-900">{deck.name}</span>
-			<span className="ml-3 flex flex-wrap items-center justify-end gap-1.5">
+			<span className="min-w-0">
+				<span className="block break-words text-base font-semibold text-slate-900">
+					{deck.name}
+				</span>
+				<span className="mt-1 block text-sm text-slate-600">
+					カード {deck.totalCards}枚 / 学習済み {deck.learnedCards}枚 / 予定 {deck.scheduledCards}枚
+				</span>
+			</span>
+			<span className="flex flex-wrap items-center gap-1.5 sm:justify-end">
 				<CountBadge label="New" value={deck.counts.new} kind="new" />
 				<CountBadge label="Learn" value={deck.counts.learn} kind="learn" />
 				<CountBadge label="Due" value={deck.counts.due} kind="due" />

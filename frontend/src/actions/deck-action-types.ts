@@ -12,7 +12,17 @@ export type DeckActionState = Readonly<{
 	deck?: Readonly<{ id: string; name: string }>;
 }>;
 
+export type DeckStudyLimitActionState = Readonly<{
+	status: "idle" | "success" | "error";
+	message: string;
+}>;
+
 export const DECK_ACTION_INITIAL_STATE: DeckActionState = Object.freeze({
+	status: "idle",
+	message: "",
+});
+
+export const DECK_STUDY_LIMIT_ACTION_INITIAL_STATE: DeckStudyLimitActionState = Object.freeze({
 	status: "idle",
 	message: "",
 });
