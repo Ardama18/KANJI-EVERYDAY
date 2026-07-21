@@ -23,7 +23,7 @@ import { createServerClient } from "@/lib/supabase/server";
 import type { Database, Json } from "@/types/database";
 import { redirect } from "next/navigation";
 
-import { getTodayJST } from "../lib/date";
+import { getJstDateForInstant, getTodayJST } from "../lib/date";
 
 const LOGIN_PATH = "/login";
 const ILLUSTRATION_SIGNED_URL_EXPIRES_IN_SECONDS = 3600;
@@ -55,7 +55,7 @@ type ReviewStatesMutationTable = {
 
 type DeckRow = Pick<
 	Database["public"]["Tables"]["decks"]["Row"],
-	"id" | "name" | "owner_user_id" | "new_limit_per_day"
+	"id" | "name" | "owner_user_id" | "new_limit_per_day" | "daily_study_limit"
 >;
 
 type CardRow = Pick<
@@ -352,7 +352,7 @@ const requireOwnedDeck = async (
 ): Promise<DeckRow> => {
 	const { data, error } = await supabase
 		.from("decks")
-		.select("id, name, owner_user_id, new_limit_per_day")
+		.select("id, name, owner_user_id, new_limit_per_day, daily_study_limit")
 		.eq("id", deckId)
 		.eq("owner_user_id", userId)
 		.maybeSingle();
@@ -521,6 +521,29 @@ const countReviewedUniqueCards = async (
 		}
 
 		if (reviewedAtMs >= startedAtMs) {
+			reviewedCardIds.add(row.card_id);
+		}
+	}
+
+	return reviewedCardIds.size;
+};
+
+const countDeckCardsReviewedOnJstDate = (
+	rows: readonly DeckCardWithReviewRows[],
+	userId: string,
+	targetDate: string
+): number => {
+	const reviewedCardIds = new Set<string>();
+
+	for (const row of rows) {
+		const reviewState = asReviewStateArray(row.review_states).find(
+			(item) => item.user_id === userId
+		);
+		if (!reviewState?.last_reviewed_at) {
+			continue;
+		}
+
+		if (getJstDateForInstant(reviewState.last_reviewed_at) === targetDate) {
 			reviewedCardIds.add(row.card_id);
 		}
 	}
@@ -760,6 +783,8 @@ export async function startStudySession(deckId: string): Promise<StartStudySessi
 
 	const today = getTodayJST();
 	const deckCardRows = await fetchDeckCardsWithReviewStates(supabase, deck.id, userId);
+	const studiedToday = countDeckCardsReviewedOnJstDate(deckCardRows, userId, today);
+	const remainingToday = Math.max(0, deck.daily_study_limit - studiedToday);
 	const queue = buildSessionQueue(
 		deckCardRows.map((row) => ({
 			cardId: row.card_id,
@@ -769,7 +794,10 @@ export async function startStudySession(deckId: string): Promise<StartStudySessi
 				) ?? null,
 		})),
 		today,
-		deck.new_limit_per_day
+		{
+			newLimit: deck.new_limit_per_day,
+			dailyStudyLimit: remainingToday,
+		}
 	);
 
 	if (isSessionComplete(queue)) {
@@ -779,7 +807,7 @@ export async function startStudySession(deckId: string): Promise<StartStudySessi
 			deckName: deck.name,
 			summary: {
 				message: STUDY_SESSION_EMPTY_MESSAGE,
-				studiedUniqueCards: 0,
+				studiedUniqueCards: studiedToday,
 			},
 		};
 	}

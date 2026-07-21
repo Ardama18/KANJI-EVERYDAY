@@ -659,6 +659,7 @@ export type Database = {
 			decks: {
 				Row: {
 					created_at: string;
+					daily_study_limit: number;
 					id: string;
 					name: string;
 					new_limit_per_day: number;
@@ -667,6 +668,7 @@ export type Database = {
 				};
 				Insert: {
 					created_at?: string;
+					daily_study_limit?: number;
 					id?: string;
 					name: string;
 					new_limit_per_day?: number;
@@ -675,6 +677,7 @@ export type Database = {
 				};
 				Update: {
 					created_at?: string;
+					daily_study_limit?: number;
 					id?: string;
 					name?: string;
 					new_limit_per_day?: number;

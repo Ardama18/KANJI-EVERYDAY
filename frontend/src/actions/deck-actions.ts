@@ -1,20 +1,24 @@
 "use server";
 
-import { countByCategory } from "@/lib/srs";
+import { countByCategory, summarizeDeckStudyState } from "@/lib/srs";
 import type { CardWithState, ReviewState } from "@/lib/srs/types";
 import { createServerClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/database";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-import { getTodayJST } from "../lib/date";
-import { type DeckActionState, normalizeDeckNameInput } from "./deck-action-types";
+import { getJstDateForInstant, getTodayJST } from "../lib/date";
+import {
+	type DeckActionState,
+	type DeckStudyLimitActionState,
+	normalizeDeckNameInput,
+} from "./deck-action-types";
 
 const LOGIN_PATH = "/login";
 
 type DeckRow = Pick<
 	Database["public"]["Tables"]["decks"]["Row"],
-	"id" | "name" | "new_limit_per_day"
+	"id" | "name" | "new_limit_per_day" | "daily_study_limit"
 >;
 
 type ReviewStateRow = Pick<
@@ -44,15 +48,25 @@ export interface DeckWithCounts {
 	id: string;
 	name: string;
 	counts: DeckCounts;
+	totalCards: number;
+	learnedCards: number;
+	scheduledCards: number;
+	dailyStudyLimit: number;
 }
 
 export interface DeckOverview {
 	id: string;
 	name: string;
 	newLimitPerDay: number;
+	dailyStudyLimit: number;
+	studiedToday: number;
+	remainingToday: number;
 	counts: DeckCounts & {
 		total: number;
 	};
+	totalCards: number;
+	learnedCards: number;
+	scheduledCards: number;
 }
 
 const asReviewStateArray = (value: DeckCardQueryRow["review_states"]): ReviewStateRow[] => {
@@ -79,6 +93,25 @@ const toReviewState = (value: ReviewStateRow | null): ReviewState | null => {
 		retryTodayCount: value.retry_today_count,
 		lastReviewedAt: value.last_reviewed_at,
 	};
+};
+
+const countCardsReviewedOnJstDate = (
+	cards: readonly CardWithState[],
+	targetDate: string
+): number => {
+	const reviewedCardIds = new Set<string>();
+	for (const card of cards) {
+		const reviewedAt = card.reviewState?.lastReviewedAt;
+		if (!reviewedAt) {
+			continue;
+		}
+
+		if (getJstDateForInstant(reviewedAt) === targetDate) {
+			reviewedCardIds.add(card.cardId);
+		}
+	}
+
+	return reviewedCardIds.size;
 };
 
 const requireAuthenticatedUserId = async (
@@ -217,7 +250,7 @@ const fetchOwnedDecks = async (
 ): Promise<DeckRow[]> => {
 	const { data, error } = await supabase
 		.from("decks")
-		.select("id, name, new_limit_per_day")
+		.select("id, name, new_limit_per_day, daily_study_limit")
 		.eq("owner_user_id", userId)
 		.order("created_at", { ascending: true });
 
@@ -245,6 +278,8 @@ export async function getDecksWithCounts(): Promise<DeckWithCounts[]> {
 		id: deck.id,
 		name: deck.name,
 		counts: countByCategory(cardsByDeck.get(deck.id) ?? [], today),
+		...summarizeDeckStudyState(cardsByDeck.get(deck.id) ?? [], today),
+		dailyStudyLimit: deck.daily_study_limit,
 	}));
 }
 
@@ -253,7 +288,7 @@ export async function getDeckOverview(deckId: string): Promise<DeckOverview | nu
 	const userId = await requireAuthenticatedUserId(supabase);
 	const { data: rawDeck, error } = await supabase
 		.from("decks")
-		.select("id, name, new_limit_per_day")
+		.select("id, name, new_limit_per_day, daily_study_limit")
 		.eq("id", deckId)
 		.eq("owner_user_id", userId)
 		.maybeSingle();
@@ -270,15 +305,100 @@ export async function getDeckOverview(deckId: string): Promise<DeckOverview | nu
 	const deckCardRows = await fetchDeckCardRows(supabase, [deck.id], userId);
 	const cardsByDeck = buildCardsByDeck(deckCardRows, [deck.id], userId);
 	const today = getTodayJST();
-	const counts = countByCategory(cardsByDeck.get(deck.id) ?? [], today);
+	const cards = cardsByDeck.get(deck.id) ?? [];
+	const counts = countByCategory(cards, today);
+	const summary = summarizeDeckStudyState(cards, today);
+	const studiedToday = countCardsReviewedOnJstDate(cards, today);
 
 	return {
 		id: deck.id,
 		name: deck.name,
 		newLimitPerDay: deck.new_limit_per_day,
+		dailyStudyLimit: deck.daily_study_limit,
+		studiedToday,
+		remainingToday: Math.max(0, deck.daily_study_limit - studiedToday),
 		counts: {
 			...counts,
 			total: counts.new + counts.learn + counts.due,
 		},
+		...summary,
 	};
+}
+
+const parseDailyStudyLimitInput = (value: unknown): number | null => {
+	if (typeof value !== "string" || !/^\d+$/.test(value.trim())) {
+		return null;
+	}
+
+	const parsed = Number(value);
+	if (!Number.isInteger(parsed) || parsed < 1 || parsed > 100) {
+		return null;
+	}
+
+	return parsed;
+};
+
+type DeckStudyLimitUpdateTable = {
+	update: (values: Database["public"]["Tables"]["decks"]["Update"]) => {
+		eq: (
+			column: string,
+			value: string
+		) => {
+			eq: (
+				column: string,
+				value: string
+			) => {
+				select: (columns: string) => {
+					maybeSingle: () => Promise<{
+						data: Pick<Database["public"]["Tables"]["decks"]["Row"], "id"> | null;
+						error: { message: string } | null;
+					}>;
+				};
+			};
+		};
+	};
+};
+
+export async function updateDeckStudyLimit(
+	previousState: DeckStudyLimitActionState,
+	formData: FormData
+): Promise<DeckStudyLimitActionState> {
+	void previousState;
+
+	const deckId = formData.get("deckId");
+	if (typeof deckId !== "string" || deckId.trim().length === 0) {
+		return { status: "error", message: "デッキを確認できませんでした。" };
+	}
+	const normalizedDeckId = deckId.trim();
+
+	const dailyStudyLimit = parseDailyStudyLimitInput(formData.get("dailyStudyLimit"));
+	if (dailyStudyLimit === null) {
+		return { status: "error", message: "一日最大枚数は1〜100の整数で入力してください。" };
+	}
+
+	const supabase = createServerClient();
+	const { data: authData, error: authError } = await supabase.auth.getUser();
+	if (authError || !authData.user) {
+		return { status: "error", message: "ログインが必要です。" };
+	}
+
+	const table = supabase.from("decks") as unknown as DeckStudyLimitUpdateTable;
+	const { data, error } = await table
+		.update({ daily_study_limit: dailyStudyLimit })
+		.eq("id", normalizedDeckId)
+		.eq("owner_user_id", authData.user.id)
+		.select("id")
+		.maybeSingle();
+
+	if (error || data === null) {
+		return {
+			status: "error",
+			message: "一日最大枚数を保存できませんでした。時間をおいて再度お試しください。",
+		};
+	}
+
+	revalidatePath("/decks");
+	revalidatePath(`/decks/${normalizedDeckId}`);
+
+	return { status: "success", message: "一日最大枚数を保存しました。" };
 }

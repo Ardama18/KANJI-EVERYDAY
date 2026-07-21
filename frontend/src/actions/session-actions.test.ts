@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const createServerClientMock = vi.hoisted(() => vi.fn());
 const redirectMock = vi.hoisted(() => vi.fn<(location: string) => never>());
@@ -287,6 +287,7 @@ const createBackPhaseClient = (options: {
 		name: "小学3年生の漢字",
 		owner_user_id: "user-1",
 		new_limit_per_day: 10,
+		daily_study_limit: 20,
 	});
 	const cardSelectChain = createCardSelectChain(createCardRow(options.illustrationKey));
 	const reviewStateSelectChain = createReviewStateSelectChain(createReviewStateRow());
@@ -344,9 +345,14 @@ describe("frontend/src/actions/session-actions.ts", () => {
 		redirectMock.mockReset();
 		getSignedUrlMock.mockReset();
 		triggerIllustrationGenerationMock.mockReset();
+		vi.useRealTimers();
 		redirectMock.mockImplementation((location: string) => {
 			throw new RedirectSignal(location);
 		});
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
 	});
 
 	it("UT-S07-AC01: 未認証で startStudySession を呼ぶと /login に遷移する", async () => {
@@ -367,6 +373,7 @@ describe("frontend/src/actions/session-actions.ts", () => {
 			name: "小学3年生の漢字",
 			owner_user_id: "user-1",
 			new_limit_per_day: 10,
+			daily_study_limit: 20,
 		});
 		const activeSessionChain = createActiveSessionSelectChain(null);
 		const deckCardsSelectMock = vi.fn().mockReturnValue({
@@ -412,6 +419,199 @@ describe("frontend/src/actions/session-actions.ts", () => {
 			summary: {
 				message: STUDY_SESSION_EMPTY_MESSAGE,
 				studiedUniqueCards: 0,
+			},
+		});
+		expect(studyInsertMock).not.toHaveBeenCalled();
+	});
+
+	it("UT-S17-START-DAILY-REMAINING-LIMIT: JST当日学習済み枚数を引いた残枠でキューを作る", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-02-23T15:30:00.000Z"));
+		const decksChain = createOwnedDeckSelectChain({
+			id: "deck-1",
+			name: "小学3年生の漢字",
+			owner_user_id: "user-1",
+			new_limit_per_day: 10,
+			daily_study_limit: 20,
+		});
+		const activeSessionChain = createActiveSessionSelectChain(null);
+		const deckCardRows = [
+			...Array.from({ length: 18 }, (_, index) => ({ card_id: `studied-${index + 1}` })),
+			{ card_id: "due-1" },
+			{ card_id: "learn-1" },
+			{ card_id: "new-1" },
+		];
+		const reviewStateRows = [
+			...Array.from({ length: 18 }, (_, index) => ({
+				user_id: "user-1",
+				card_id: `studied-${index + 1}`,
+				level: 3,
+				due_date: "2999-01-01",
+				last_rating: "good",
+				retry_today_count: 0,
+				last_reviewed_at: "2026-02-23T15:00:00.000Z",
+			})),
+			{
+				user_id: "user-1",
+				card_id: "due-1",
+				level: 3,
+				due_date: "2026-02-24",
+				last_rating: "good",
+				retry_today_count: 0,
+				last_reviewed_at: "2026-01-01T00:00:00.000Z",
+			},
+			{
+				user_id: "user-1",
+				card_id: "learn-1",
+				level: 1,
+				due_date: "2026-02-24",
+				last_rating: "hard",
+				retry_today_count: 0,
+				last_reviewed_at: "2026-01-01T00:00:00.000Z",
+			},
+		];
+		const deckCardsSelectMock = vi.fn().mockReturnValue({
+			eq: vi.fn().mockResolvedValue({ data: deckCardRows, error: null }),
+		});
+		const reviewStatesInMock = vi.fn().mockResolvedValue({
+			data: reviewStateRows,
+			error: null,
+		});
+		const reviewStatesSelectMock = vi.fn().mockReturnValue({
+			eq: vi.fn().mockReturnValue({
+				in: reviewStatesInMock,
+			}),
+		});
+		const studyInsertSingleMock = vi.fn().mockResolvedValue({
+			data: { id: "session-created" },
+			error: null,
+		});
+		const studyInsertSelectMock = vi.fn().mockReturnValue({
+			single: studyInsertSingleMock,
+		});
+		const studyInsertMock = vi.fn().mockReturnValue({
+			select: studyInsertSelectMock,
+		});
+
+		createServerClientMock.mockReturnValue({
+			auth: createAuth("user-1"),
+			from: vi.fn((table: string) => {
+				if (table === "decks") {
+					return { select: decksChain.selectMock };
+				}
+
+				if (table === "study_sessions") {
+					return { select: activeSessionChain.selectMock, insert: studyInsertMock };
+				}
+
+				if (table === "deck_cards") {
+					return { select: deckCardsSelectMock };
+				}
+
+				if (table === "review_states") {
+					return { select: reviewStatesSelectMock };
+				}
+
+				throw new Error(`Unsupported table: ${table}`);
+			}),
+		});
+
+		const result = await startStudySession("deck-1");
+
+		expect(result).toEqual({
+			status: "active",
+			sessionId: "session-created",
+			deckId: "deck-1",
+			deckName: "小学3年生の漢字",
+		});
+		expect(studyInsertMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				queue_due: ["due-1"],
+				queue_learn: ["learn-1"],
+				queue_new: [],
+				queue_retry: [],
+			})
+		);
+	});
+
+	it("UT-S17-START-DAILY-LIMIT-REACHED: 残枠0なら新規セッションを作らず完了扱いにする", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-02-23T15:30:00.000Z"));
+		const decksChain = createOwnedDeckSelectChain({
+			id: "deck-1",
+			name: "小学3年生の漢字",
+			owner_user_id: "user-1",
+			new_limit_per_day: 10,
+			daily_study_limit: 2,
+		});
+		const activeSessionChain = createActiveSessionSelectChain(null);
+		const deckCardsSelectMock = vi.fn().mockReturnValue({
+			eq: vi.fn().mockResolvedValue({
+				data: [{ card_id: "card-1" }, { card_id: "card-2" }],
+				error: null,
+			}),
+		});
+		const reviewStatesSelectMock = vi.fn().mockReturnValue({
+			eq: vi.fn().mockReturnValue({
+				in: vi.fn().mockResolvedValue({
+					data: [
+						{
+							user_id: "user-1",
+							card_id: "card-1",
+							level: 3,
+							due_date: "2026-02-24",
+							last_rating: "good",
+							retry_today_count: 0,
+							last_reviewed_at: "2026-02-23T15:00:00.000Z",
+						},
+						{
+							user_id: "user-1",
+							card_id: "card-2",
+							level: 1,
+							due_date: "2026-02-24",
+							last_rating: "hard",
+							retry_today_count: 0,
+							last_reviewed_at: "2026-02-23T16:00:00.000Z",
+						},
+					],
+					error: null,
+				}),
+			}),
+		});
+		const studyInsertMock = vi.fn();
+
+		createServerClientMock.mockReturnValue({
+			auth: createAuth("user-1"),
+			from: vi.fn((table: string) => {
+				if (table === "decks") {
+					return { select: decksChain.selectMock };
+				}
+
+				if (table === "study_sessions") {
+					return { select: activeSessionChain.selectMock, insert: studyInsertMock };
+				}
+
+				if (table === "deck_cards") {
+					return { select: deckCardsSelectMock };
+				}
+
+				if (table === "review_states") {
+					return { select: reviewStatesSelectMock };
+				}
+
+				throw new Error(`Unsupported table: ${table}`);
+			}),
+		});
+
+		const result = await startStudySession("deck-1");
+
+		expect(result).toEqual({
+			status: "completed",
+			deckId: "deck-1",
+			deckName: "小学3年生の漢字",
+			summary: {
+				message: STUDY_SESSION_EMPTY_MESSAGE,
+				studiedUniqueCards: 2,
 			},
 		});
 		expect(studyInsertMock).not.toHaveBeenCalled();

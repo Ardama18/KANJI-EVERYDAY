@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { classifyCard, countByCategory } from "./classify";
+import { classifyCard, countByCategory, summarizeDeckStudyState } from "./classify";
 import type { CardWithState, ReviewState } from "./types";
 
 const TODAY = "2026-02-24";
@@ -58,6 +58,27 @@ describe("countByCategory", () => {
 			new: 1,
 			learn: 1,
 			due: 1,
+		});
+	});
+});
+
+describe("summarizeDeckStudyState", () => {
+	it("UT-S17-SUMMARY-FUTURE-SCHEDULED: 将来予定カードだけでも全体状態を集計する", () => {
+		const cards: CardWithState[] = [
+			{ cardId: "future-1", reviewState: createState({ level: 3, dueDate: "2026-03-01" }) },
+			{ cardId: "future-2", reviewState: createState({ level: 4, dueDate: "2026-03-02" }) },
+			{ cardId: "new-1", reviewState: null },
+		];
+
+		expect(countByCategory(cards, TODAY)).toEqual({
+			new: 1,
+			learn: 0,
+			due: 0,
+		});
+		expect(summarizeDeckStudyState(cards, TODAY)).toEqual({
+			totalCards: 3,
+			learnedCards: 2,
+			scheduledCards: 2,
 		});
 	});
 });

@@ -1,5 +1,5 @@
 import { classifyCard } from "./classify";
-import type { CardWithState, SessionQueue } from "./types";
+import type { CardCategory, CardWithState, SessionQueue, SessionQueueLimits } from "./types";
 
 const QUEUE_PRIORITY = ["due", "learn", "new", "retry"] as const;
 
@@ -10,25 +10,29 @@ export interface NextCardResult {
 	source: QueueSource | null;
 }
 
-const normalizeNewLimit = (newLimit: number): number => {
-	if (!Number.isFinite(newLimit)) {
+const normalizeLimit = (value: number): number => {
+	if (!Number.isFinite(value)) {
 		return 0;
 	}
 
-	return Math.max(0, Math.floor(newLimit));
+	return Math.max(0, Math.floor(value));
 };
 
 export function buildSessionQueue(
 	cards: readonly CardWithState[],
 	today: string,
-	newLimit: number
+	limits: SessionQueueLimits | number
 ): SessionQueue {
-	const normalizedNewLimit = normalizeNewLimit(newLimit);
-	const queue: SessionQueue = {
+	const normalizedLimits =
+		typeof limits === "number"
+			? { newLimit: limits, dailyStudyLimit: Number.MAX_SAFE_INTEGER }
+			: limits;
+	const normalizedNewLimit = normalizeLimit(normalizedLimits.newLimit);
+	let remaining = normalizeLimit(normalizedLimits.dailyStudyLimit);
+	const candidates: Record<CardCategory, string[]> = {
 		due: [],
 		learn: [],
 		new: [],
-		retry: [],
 	};
 
 	for (const card of cards) {
@@ -37,17 +41,21 @@ export function buildSessionQueue(
 			continue;
 		}
 
-		if (category === "new") {
-			if (queue.new.length < normalizedNewLimit) {
-				queue.new.push(card.cardId);
-			}
-			continue;
-		}
-
-		queue[category].push(card.cardId);
+		candidates[category].push(card.cardId);
 	}
 
-	return queue;
+	const due = candidates.due.slice(0, remaining);
+	remaining -= due.length;
+	const learn = candidates.learn.slice(0, remaining);
+	remaining -= learn.length;
+	const newCards = candidates.new.slice(0, Math.min(normalizedNewLimit, remaining));
+
+	return {
+		due,
+		learn,
+		new: newCards,
+		retry: [],
+	};
 }
 
 const cloneQueue = (queue: SessionQueue): SessionQueue => ({

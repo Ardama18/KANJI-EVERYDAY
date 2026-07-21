@@ -40,6 +40,17 @@ export interface CategoryCounts {
 	due: number;
 }
 
+export interface DeckStudySummary {
+	totalCards: number;
+	learnedCards: number;
+	scheduledCards: number;
+}
+
+export interface SessionQueueLimits {
+	newLimit: number;
+	dailyStudyLimit: number;
+}
+
 export interface SessionQueue {
 	due: string[];
 	learn: string[];

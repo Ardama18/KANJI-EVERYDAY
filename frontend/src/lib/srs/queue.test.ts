@@ -38,7 +38,7 @@ describe("buildSessionQueue", () => {
 			{ cardId: "new-2", reviewState: null },
 		];
 
-		expect(buildSessionQueue(cards, TODAY, 10)).toEqual({
+		expect(buildSessionQueue(cards, TODAY, { newLimit: 10, dailyStudyLimit: 10 })).toEqual({
 			due: ["due-1"],
 			learn: ["learn-1"],
 			new: ["new-1", "new-2"],
@@ -58,7 +58,9 @@ describe("buildSessionQueue", () => {
 				{ cardId: "new-2", reviewState: null },
 			];
 
-			expect(buildSessionQueue(cards, TODAY, newLimit).new).toEqual(expectedNew);
+			expect(buildSessionQueue(cards, TODAY, { newLimit, dailyStudyLimit: 10 }).new).toEqual(
+				expectedNew
+			);
 		}
 	);
 
@@ -72,13 +74,87 @@ describe("buildSessionQueue", () => {
 			{ cardId: "new-2", reviewState: null },
 		];
 
-		expect(buildSessionQueue(cards, TODAY, 10)).toEqual({
+		expect(buildSessionQueue(cards, TODAY, { newLimit: 10, dailyStudyLimit: 10 })).toEqual({
 			due: ["due-1", "due-2"],
 			learn: ["learn-1", "learn-2"],
 			new: ["new-1", "new-2"],
 			retry: [],
 		});
 	});
+
+	it("UT-S17-QUEUE-DAILY-LIMIT-DUE-FIRST: Due が一日上限を満たすと後続カテゴリを入れない", () => {
+		const cards: CardWithState[] = [
+			{ cardId: "due-1", reviewState: createState({ level: 2 }) },
+			{ cardId: "due-2", reviewState: createState({ level: 3 }) },
+			{ cardId: "due-3", reviewState: createState({ level: 4 }) },
+			{ cardId: "due-4", reviewState: createState({ level: 5 }) },
+			{ cardId: "learn-1", reviewState: createState({ level: 1 }) },
+			{ cardId: "new-1", reviewState: null },
+		];
+
+		expect(buildSessionQueue(cards, TODAY, { newLimit: 10, dailyStudyLimit: 3 })).toEqual({
+			due: ["due-1", "due-2", "due-3"],
+			learn: [],
+			new: [],
+			retry: [],
+		});
+	});
+
+	it("UT-S17-QUEUE-DAILY-LIMIT-DUE-LEARN-NEW: Due -> Learn -> New の順に残枠まで構築する", () => {
+		const cards: CardWithState[] = [
+			{ cardId: "new-1", reviewState: null },
+			{ cardId: "learn-1", reviewState: createState({ level: 1 }) },
+			{ cardId: "due-1", reviewState: createState({ level: 2 }) },
+			{ cardId: "learn-2", reviewState: createState({ level: 0 }) },
+			{ cardId: "due-2", reviewState: createState({ level: 3 }) },
+			{ cardId: "new-2", reviewState: null },
+		];
+
+		expect(buildSessionQueue(cards, TODAY, { newLimit: 10, dailyStudyLimit: 3 })).toEqual({
+			due: ["due-1", "due-2"],
+			learn: ["learn-1"],
+			new: [],
+			retry: [],
+		});
+	});
+
+	it.each([
+		{
+			name: "daily 残枠のほうが小さい",
+			limits: { newLimit: 4, dailyStudyLimit: 3 },
+			expectedNew: ["new-1", "new-2", "new-3"],
+		},
+		{
+			name: "new_limit_per_day のほうが小さい",
+			limits: { newLimit: 2, dailyStudyLimit: 5 },
+			expectedNew: ["new-1", "new-2"],
+		},
+	])("UT-S17-QUEUE-NEW-MIN-LIMIT: $name", ({ limits, expectedNew }) => {
+		const cards: CardWithState[] = Array.from({ length: 10 }, (_, index) => ({
+			cardId: `new-${index + 1}`,
+			reviewState: null,
+		}));
+
+		expect(buildSessionQueue(cards, TODAY, limits).new).toEqual(expectedNew);
+	});
+
+	it.each([
+		{ dailyStudyLimit: 1.9, expectedDue: ["due-1"] },
+		{ dailyStudyLimit: -1, expectedDue: [] },
+		{ dailyStudyLimit: Number.NaN, expectedDue: [] },
+	])(
+		"UT-S17-QUEUE-DAILY-LIMIT-NORMALIZE: dailyStudyLimit=$dailyStudyLimit",
+		({ dailyStudyLimit, expectedDue }) => {
+			const cards: CardWithState[] = [
+				{ cardId: "due-1", reviewState: createState({ level: 2 }) },
+				{ cardId: "due-2", reviewState: createState({ level: 3 }) },
+			];
+
+			expect(buildSessionQueue(cards, TODAY, { newLimit: 10, dailyStudyLimit }).due).toEqual(
+				expectedDue
+			);
+		}
+	);
 });
 
 describe("getNextCardId", () => {

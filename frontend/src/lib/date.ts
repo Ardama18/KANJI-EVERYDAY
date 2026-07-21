@@ -34,6 +34,15 @@ export function getTodayJST(now: Date = new Date()): string {
 	return formatIsoDate(new Date(now.getTime() + JST_OFFSET_MILLISECONDS));
 }
 
+export function getJstDateForInstant(instant: string | Date): string | null {
+	const date = typeof instant === "string" ? new Date(instant) : instant;
+	if (Number.isNaN(date.getTime())) {
+		return null;
+	}
+
+	return getTodayJST(date);
+}
+
 export function addDaysJST(baseDate: string, days: number): string {
 	const date = parseJstDate(baseDate);
 	date.setUTCDate(date.getUTCDate() + days);

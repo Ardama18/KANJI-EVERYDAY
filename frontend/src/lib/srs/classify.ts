@@ -1,4 +1,10 @@
-import type { CardCategory, CardWithState, CategoryCounts, ReviewState } from "./types";
+import type {
+	CardCategory,
+	CardWithState,
+	CategoryCounts,
+	DeckStudySummary,
+	ReviewState,
+} from "./types";
 
 const isDueTodayOrPast = (reviewState: ReviewState, today: string): boolean =>
 	reviewState.dueDate <= today;
@@ -30,6 +36,29 @@ export function countByCategory(cards: readonly CardWithState[], today: string):
 			new: 0,
 			learn: 0,
 			due: 0,
+		}
+	);
+}
+
+export function summarizeDeckStudyState(
+	cards: readonly CardWithState[],
+	today: string
+): DeckStudySummary {
+	return cards.reduce<DeckStudySummary>(
+		(summary, card) => {
+			summary.totalCards += 1;
+			if (card.reviewState !== null) {
+				summary.learnedCards += 1;
+				if (card.reviewState.dueDate > today) {
+					summary.scheduledCards += 1;
+				}
+			}
+			return summary;
+		},
+		{
+			totalCards: 0,
+			learnedCards: 0,
+			scheduledCards: 0,
 		}
 	);
 }
