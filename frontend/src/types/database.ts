@@ -548,6 +548,39 @@ export type Database = {
 				};
 				Relationships: [];
 			};
+			card_mnemonics: {
+				Row: {
+					created_at: string;
+					explanation: Json;
+					id: string;
+					illustration_key: string;
+					owner_user_id: string;
+					slots: Json;
+					status: string;
+					updated_at: string;
+				};
+				Insert: {
+					created_at?: string;
+					explanation: Json;
+					id?: string;
+					illustration_key: string;
+					owner_user_id: string;
+					slots: Json;
+					status?: string;
+					updated_at?: string;
+				};
+				Update: {
+					created_at?: string;
+					explanation?: Json;
+					id?: string;
+					illustration_key?: string;
+					owner_user_id?: string;
+					slots?: Json;
+					status?: string;
+					updated_at?: string;
+				};
+				Relationships: [];
+			};
 			card_tags: {
 				Row: {
 					card_id: string;
