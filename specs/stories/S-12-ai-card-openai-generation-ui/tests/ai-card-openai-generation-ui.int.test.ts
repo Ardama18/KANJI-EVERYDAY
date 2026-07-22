@@ -39,7 +39,28 @@ const input = {
 	illustration: "none" as const,
 	generationReservationKey: "reservation-1",
 };
-const concepts = [{ kanjiSide: "山", counterpartSide: "やま" }];
+const concepts = [
+	{
+		kanjiSide: "山",
+		counterpartSide: "やま",
+		mnemonic: {
+			slots: {
+				kanji: "山",
+				isSingleKanji: true,
+				shapeHint: { part: "三つの峰", picture: "そびえ立つ山並み" },
+				meaningHint: "たかい土地",
+				story: "峰が三つ並ぶ風景を思い浮かべる。",
+			},
+			explanation: {
+				summary: "三つの峰が並ぶ形が山を表す。",
+				mappings: [
+					{ part: "左の峰", meaning: "やま" },
+					{ part: "中央の峰", meaning: "たかい" },
+				],
+			},
+		},
+	},
+];
 const config = {
 	apiKey: "mock-key",
 	model: "gpt-mocked",

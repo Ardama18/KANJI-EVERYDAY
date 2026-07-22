@@ -2,6 +2,7 @@ import type { OpenAiCardGenerationConfig } from "@/lib/env";
 
 import type {
 	GenerateCardDraftInput,
+	MnemonicDraft,
 	OpenAiConceptOutput,
 	ResponsesPayload,
 	SanitizedSourceImage,
@@ -63,10 +64,59 @@ export function buildResponsesPayload(
 							items: {
 								type: "object",
 								additionalProperties: false,
-								required: ["kanjiSide", "counterpartSide"],
+								required: ["kanjiSide", "counterpartSide", "mnemonic"],
 								properties: {
 									kanjiSide: { type: "string", minLength: 1, maxLength: 200 },
 									counterpartSide: { type: "string", minLength: 1, maxLength: 200 },
+									mnemonic: {
+										type: "object",
+										additionalProperties: false,
+										required: ["slots", "explanation"],
+										properties: {
+											slots: {
+												type: "object",
+												additionalProperties: false,
+												required: ["kanji", "isSingleKanji", "shapeHint", "meaningHint", "story"],
+												properties: {
+													kanji: { type: "string", minLength: 1, maxLength: 16 },
+													isSingleKanji: { type: "boolean" },
+													shapeHint: {
+														type: "object",
+														additionalProperties: false,
+														required: ["part", "picture"],
+														properties: {
+															part: { type: "string", minLength: 1, maxLength: 100 },
+															picture: { type: "string", minLength: 1, maxLength: 100 },
+														},
+													},
+													meaningHint: { type: "string", minLength: 1, maxLength: 100 },
+													story: { type: "string", minLength: 1, maxLength: 100 },
+												},
+											},
+											explanation: {
+												type: "object",
+												additionalProperties: false,
+												required: ["summary", "mappings"],
+												properties: {
+													summary: { type: "string", minLength: 1, maxLength: 120 },
+													mappings: {
+														type: "array",
+														minItems: 2,
+														maxItems: 4,
+														items: {
+															type: "object",
+															additionalProperties: false,
+															required: ["part", "meaning"],
+															properties: {
+																part: { type: "string", minLength: 1, maxLength: 100 },
+																meaning: { type: "string", minLength: 1, maxLength: 100 },
+															},
+														},
+													},
+												},
+											},
+										},
+									},
 								},
 							},
 						},
@@ -121,7 +171,7 @@ export function parseOpenAiResponse(
 	for (const concept of parsed.concepts) {
 		if (
 			!isRecord(concept) ||
-			Object.keys(concept).length !== 2 ||
+			Object.keys(concept).length !== 3 ||
 			typeof concept.kanjiSide !== "string" ||
 			typeof concept.counterpartSide !== "string" ||
 			Array.from(concept.kanjiSide).length < 1 ||
@@ -130,9 +180,68 @@ export function parseOpenAiResponse(
 			Array.from(concept.counterpartSide).length > 200
 		)
 			throw schemaError();
-		concepts.push({ kanjiSide: concept.kanjiSide, counterpartSide: concept.counterpartSide });
+		concepts.push({
+			kanjiSide: concept.kanjiSide,
+			counterpartSide: concept.counterpartSide,
+			mnemonic: parseMnemonic(concept.mnemonic),
+		});
 	}
 	return { concepts };
+}
+
+function parseMnemonic(value: unknown): MnemonicDraft {
+	if (!isRecord(value) || Object.keys(value).length !== 2) throw schemaError();
+	const slots = value.slots;
+	const explanation = value.explanation;
+	if (!isRecord(slots) || Object.keys(slots).length !== 5) throw schemaError();
+	const shapeHint = slots.shapeHint;
+	if (
+		!isBoundedString(slots.kanji, 1, 16) ||
+		typeof slots.isSingleKanji !== "boolean" ||
+		!isRecord(shapeHint) ||
+		Object.keys(shapeHint).length !== 2 ||
+		!isBoundedString(shapeHint.part, 1, 100) ||
+		!isBoundedString(shapeHint.picture, 1, 100) ||
+		!isBoundedString(slots.meaningHint, 1, 100) ||
+		!isBoundedString(slots.story, 1, 100)
+	)
+		throw schemaError();
+	if (!isRecord(explanation) || Object.keys(explanation).length !== 2) throw schemaError();
+	const mappings = explanation.mappings;
+	if (
+		!isBoundedString(explanation.summary, 1, 120) ||
+		!Array.isArray(mappings) ||
+		mappings.length < 2 ||
+		mappings.length > 4
+	)
+		throw schemaError();
+	const parsedMappings: { readonly part: string; readonly meaning: string }[] = [];
+	for (const mapping of mappings) {
+		if (
+			!isRecord(mapping) ||
+			Object.keys(mapping).length !== 2 ||
+			!isBoundedString(mapping.part, 1, 100) ||
+			!isBoundedString(mapping.meaning, 1, 100)
+		)
+			throw schemaError();
+		parsedMappings.push({ part: mapping.part, meaning: mapping.meaning });
+	}
+	return {
+		slots: {
+			kanji: slots.kanji,
+			isSingleKanji: slots.isSingleKanji,
+			shapeHint: { part: shapeHint.part, picture: shapeHint.picture },
+			meaningHint: slots.meaningHint,
+			story: slots.story,
+		},
+		explanation: { summary: explanation.summary, mappings: parsedMappings },
+	};
+}
+
+function isBoundedString(value: unknown, min: number, max: number): value is string {
+	if (typeof value !== "string") return false;
+	const length = Array.from(value).length;
+	return length >= min && length <= max;
 }
 
 export function classifyOpenAiFailure(
