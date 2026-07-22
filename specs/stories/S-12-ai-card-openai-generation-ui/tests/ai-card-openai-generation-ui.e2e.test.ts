@@ -33,7 +33,28 @@ describe("S-12 user-flow E2E contracts", () => {
 			moderateText: async () => undefined,
 			moderateImage: async () => undefined,
 			reserveUsage: async () => undefined,
-			requestConcepts: async () => [{ kanjiSide: "山", counterpartSide: "やま" }],
+			requestConcepts: async () => [
+				{
+					kanjiSide: "山",
+					counterpartSide: "やま",
+					mnemonic: {
+						slots: {
+							kanji: "山",
+							isSingleKanji: true,
+							shapeHint: { part: "三つの峰", picture: "そびえ立つ山並み" },
+							meaningHint: "たかい土地",
+							story: "峰が三つ並ぶ風景を思い浮かべる。",
+						},
+						explanation: {
+							summary: "三つの峰が並ぶ形が山を表す。",
+							mappings: [
+								{ part: "左の峰", meaning: "やま" },
+								{ part: "中央の峰", meaning: "たかい" },
+							],
+						},
+					},
+				},
+			],
 			createPreview: async (request, reservationKey) =>
 				await createImportPreview(userId, request, reservationKey, {
 					secret: "secret",

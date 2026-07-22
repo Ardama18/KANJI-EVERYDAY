@@ -1,5 +1,6 @@
 import type { ClientImportRequestInput } from "@/lib/ai-import/schema";
 import type { OpenAiCardGenerationConfig } from "@/lib/env";
+import type { MnemonicSlots } from "@/lib/illustration/prompt";
 
 export type GenerationPattern = "R1" | "W1" | "both";
 export type GenerationIllustrationMode = "none" | "ai" | "upload";
@@ -19,9 +20,54 @@ export interface SanitizedSourceImage {
 	readonly bytes: Uint8Array;
 }
 
+export interface MnemonicShapeHintDraft {
+	readonly part: string;
+	readonly picture: string;
+}
+
+export interface MnemonicSlotsDraft {
+	readonly kanji: string;
+	readonly isSingleKanji: boolean;
+	readonly shapeHint: MnemonicShapeHintDraft;
+	readonly meaningHint: string;
+	readonly story: string;
+}
+
+export interface MnemonicExplanationDraft {
+	readonly summary: string;
+	readonly mappings: readonly { readonly part: string; readonly meaning: string }[];
+}
+
+export interface MnemonicDraft {
+	readonly slots: MnemonicSlotsDraft;
+	readonly explanation: MnemonicExplanationDraft;
+}
+
+export interface MnemonicDraftEntry {
+	readonly conceptId: string;
+	readonly slots: MnemonicSlotsDraft;
+	readonly explanation: MnemonicExplanationDraft;
+}
+
+/**
+ * Compile-time drift guard (design §5): `MnemonicSlotsDraft` must stay structurally
+ * aligned with the canonical `MnemonicSlots` so its values can be passed straight to
+ * `generatePrompt` in S-16E without conversion. If either side drifts, typecheck fails.
+ */
+type AssertAssignable<Target, _Source extends Target> = true;
+export type MnemonicSlotsDraftMirrorsCanonical = AssertAssignable<
+	MnemonicSlots,
+	MnemonicSlotsDraft
+>;
+export type CanonicalMirrorsMnemonicSlotsDraft = AssertAssignable<
+	MnemonicSlotsDraft,
+	Readonly<MnemonicSlots>
+>;
+
 export interface OpenAiConceptOutput {
 	readonly kanjiSide: string;
 	readonly counterpartSide: string;
+	readonly mnemonic: MnemonicDraft;
 }
 
 export interface PreviewEnvelope {
@@ -31,11 +77,13 @@ export interface PreviewEnvelope {
 	readonly previewExpiresAt: number;
 	readonly cardReservationKey: string;
 	readonly warnings: readonly ["accuracy", "privacy", "copyright"];
+	readonly mnemonicDraft?: readonly MnemonicDraftEntry[];
 }
 
 export interface DraftEnvelope {
 	readonly request: ClientImportRequestInput;
 	readonly requiresIllustrationUploads: readonly string[];
+	readonly mnemonicDraft?: readonly MnemonicDraftEntry[];
 }
 
 export type GenerateCardDraftResponse = PreviewEnvelope | DraftEnvelope;

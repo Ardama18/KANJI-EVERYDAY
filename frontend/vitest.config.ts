@@ -24,6 +24,7 @@ export default defineConfig({
 			"../specs/stories/S-10-ai-card-import-foundation/tests/*.test.ts",
 			"../specs/stories/S-11-ai-card-async-processing/tests/*.test.ts",
 			"../specs/stories/S-12-ai-card-openai-generation-ui/tests/*.test.ts",
+			"../specs/stories/S-16C-ai-mnemonic-draft/tests/*.test.ts",
 			"../specs/stories/S-01-project-scaffolding/tests/*.test.ts",
 			"../specs/stories/S-01-project-scaffolding/tests/*.test.tsx",
 			"../specs/stories/S-03-authentication-flow/tests/*.test.ts",

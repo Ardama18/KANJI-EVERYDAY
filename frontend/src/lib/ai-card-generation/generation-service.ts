@@ -3,6 +3,7 @@ import { hashGenerationRequest } from "@/lib/ai-import/canonical-request";
 import type {
 	DraftEnvelope,
 	GenerateCardDraftInput,
+	MnemonicDraftEntry,
 	OpenAiConceptOutput,
 	PreviewEnvelope,
 	SanitizedSourceImage,
@@ -53,15 +54,31 @@ export async function generateCardDraft(
 	});
 	const concepts = await dependencies.requestConcepts(input, sources);
 	const request = await mapConceptsToImportRequest(input, concepts);
-	const outputText = request.items
+	const cardText = request.items
 		.map((item, index) => `[CARD ${index + 1} FRONT]\n${item.front}\n[BACK]\n${item.back}`)
 		.join("\n");
-	await dependencies.moderateText(outputText, "output");
+	const mnemonicText = concepts
+		.map((concept, index) => {
+			const { slots, explanation } = concept.mnemonic;
+			const mappings = explanation.mappings
+				.map((mapping) => `${mapping.part} -> ${mapping.meaning}`)
+				.join("\n");
+			return `[MNEMONIC ${index + 1}]\n${slots.kanji}\n${slots.shapeHint.part}\n${slots.shapeHint.picture}\n${slots.meaningHint}\n${slots.story}\n${explanation.summary}\n${mappings}`;
+		})
+		.join("\n");
+	await dependencies.moderateText(`${cardText}\n${mnemonicText}`, "output");
+	const mnemonicDraft: readonly MnemonicDraftEntry[] = concepts.map((concept, index) => ({
+		conceptId: `concept-${String(index + 1).padStart(3, "0")}`,
+		slots: concept.mnemonic.slots,
+		explanation: concept.mnemonic.explanation,
+	}));
 	if (input.illustration === "upload") {
 		return {
 			request,
 			requiresIllustrationUploads: [...new Set(request.items.map((item) => item.conceptId))],
+			mnemonicDraft,
 		};
 	}
-	return await dependencies.createPreview(request, input.generationReservationKey);
+	const preview = await dependencies.createPreview(request, input.generationReservationKey);
+	return { ...preview, mnemonicDraft };
 }

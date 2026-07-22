@@ -115,7 +115,7 @@ describe("S-12 OpenAI card generation unit contracts", () => {
 						content: [
 							{
 								type: "output_text",
-								text: '{"concepts":[{"kanjiSide":"山","counterpartSide":"やま"}]}',
+								text: '{"concepts":[{"kanjiSide":"山","counterpartSide":"やま","mnemonic":{"slots":{"kanji":"山","isSingleKanji":true,"shapeHint":{"part":"三つの峰","picture":"そびえ立つ山並み"},"meaningHint":"たかい土地","story":"峰が三つ並ぶ風景を思い浮かべる。"},"explanation":{"summary":"三つの峰が並ぶ形が山を表す。","mappings":[{"part":"左の峰","meaning":"やま"},{"part":"中央の峰","meaning":"たかい"}]}}}]}',
 							},
 						],
 					},
