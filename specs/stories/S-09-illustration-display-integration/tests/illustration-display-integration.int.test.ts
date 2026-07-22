@@ -185,6 +185,26 @@ const createDeckCardsSelectChain = (rows: Record<string, unknown>[] = []) => {
 	};
 };
 
+const createMnemonicSelectChain = (mnemonic: Record<string, unknown> | null = null) => {
+	const maybeSingleMock = vi.fn().mockResolvedValue({
+		data: mnemonic,
+		error: null,
+	});
+	const eqIllustrationKeyMock = vi.fn().mockReturnValue({
+		maybeSingle: maybeSingleMock,
+	});
+	const eqOwnerMock = vi.fn().mockReturnValue({
+		eq: eqIllustrationKeyMock,
+	});
+	const selectMock = vi.fn().mockReturnValue({
+		eq: eqOwnerMock,
+	});
+
+	return {
+		selectMock,
+	};
+};
+
 const createSessionRow = (revealed: boolean) => ({
 	id: "session-2",
 	user_id: "user-1",
@@ -247,6 +267,7 @@ const createRevealCardClient = (options: {
 	const cardSelectChain = createCardSelectChain(createCardRow(options.illustrationKey));
 	const reviewStateSelectChain = createReviewStateSelectChain(createReviewStateRow());
 	const illustrationSelectChain = createIllustrationSelectChain(options.illustration);
+	const mnemonicSelectChain = createMnemonicSelectChain();
 	const fromMock = vi.fn((table: string) => {
 		if (table === "study_sessions") {
 			return {
@@ -270,6 +291,12 @@ const createRevealCardClient = (options: {
 		if (table === "illustrations") {
 			return {
 				select: illustrationSelectChain.selectMock,
+			};
+		}
+
+		if (table === "card_mnemonics") {
+			return {
+				select: mnemonicSelectChain.selectMock,
 			};
 		}
 
@@ -299,6 +326,7 @@ const createBackPhaseClient = (options: {
 	const cardSelectChain = createCardSelectChain(createCardRow(options.illustrationKey));
 	const reviewStateSelectChain = createReviewStateSelectChain(createReviewStateRow());
 	const illustrationSelectChain = createIllustrationSelectChain(options.illustration);
+	const mnemonicSelectChain = createMnemonicSelectChain();
 	const deckCardsSelectChain = createDeckCardsSelectChain([]);
 	const fromMock = vi.fn((table: string) => {
 		if (table === "study_sessions") {
@@ -328,6 +356,12 @@ const createBackPhaseClient = (options: {
 		if (table === "illustrations") {
 			return {
 				select: illustrationSelectChain.selectMock,
+			};
+		}
+
+		if (table === "card_mnemonics") {
+			return {
+				select: mnemonicSelectChain.selectMock,
 			};
 		}
 

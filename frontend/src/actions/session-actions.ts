@@ -6,6 +6,7 @@ import {
 } from "@/actions/illustration-actions";
 import {
 	type IllustrationDisplayStatus,
+	type MnemonicExplanation,
 	STUDY_SESSION_COMPLETE_MESSAGE,
 	STUDY_SESSION_EMPTY_MESSAGE,
 } from "@/actions/session-contracts";
@@ -28,7 +29,7 @@ import { getJstDateForInstant, getTodayJST } from "../lib/date";
 const LOGIN_PATH = "/login";
 const ILLUSTRATION_SIGNED_URL_EXPIRES_IN_SECONDS = 3600;
 
-export type { IllustrationDisplayStatus } from "@/actions/session-contracts";
+export type { IllustrationDisplayStatus, MnemonicExplanation } from "@/actions/session-contracts";
 
 type SupabaseClient = ReturnType<typeof createServerClient>;
 type MutationError = { message: string } | null;
@@ -99,6 +100,8 @@ type IllustrationRow = Pick<
 	"status" | "storage_path"
 >;
 
+type CardMnemonicRow = Pick<Database["public"]["Tables"]["card_mnemonics"]["Row"], "explanation">;
+
 type GetSignedUrlFn = (storagePath: string, expiresIn: number) => Promise<string | null>;
 type TriggerIllustrationGenerationFn = (
 	cardId: string
@@ -125,6 +128,7 @@ export interface CardBackData {
 	backText: string;
 	illustrationUrl: string | null;
 	illustrationStatus: IllustrationDisplayStatus;
+	explanation: MnemonicExplanation | null;
 	intervalPreview: IntervalPreview;
 }
 
@@ -191,6 +195,36 @@ const parseQueuePart = (value: Json): string[] => {
 	}
 
 	return value.filter((item): item is string => typeof item === "string");
+};
+
+const isJsonObject = (value: Json): value is { [key: string]: Json } =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
+
+const parseMnemonicExplanation = (value: Json): MnemonicExplanation | null => {
+	if (!isJsonObject(value)) {
+		return null;
+	}
+
+	const { summary, mappings } = value;
+	if (typeof summary !== "string" || summary.trim().length === 0 || !Array.isArray(mappings)) {
+		return null;
+	}
+
+	const parsedMappings: MnemonicExplanation["mappings"] = [];
+	for (const mapping of mappings) {
+		if (!isJsonObject(mapping)) {
+			return null;
+		}
+
+		const { part, meaning } = mapping;
+		if (typeof part !== "string" || typeof meaning !== "string") {
+			return null;
+		}
+
+		parsedMappings.push({ part, meaning });
+	}
+
+	return { summary, mappings: parsedMappings };
 };
 
 type NormalizeIllustrationStateParams = {
@@ -493,6 +527,30 @@ const fetchLatestIllustrationByKey = async (
 	return row;
 };
 
+const fetchMnemonicExplanationByKey = async (
+	supabase: SupabaseClient,
+	userId: string,
+	illustrationKey: string
+): Promise<MnemonicExplanation | null> => {
+	const { data, error } = await supabase
+		.from("card_mnemonics")
+		.select("explanation")
+		.eq("owner_user_id", userId)
+		.eq("illustration_key", illustrationKey)
+		.maybeSingle();
+
+	if (error) {
+		throw new Error(`Failed to fetch card mnemonic: ${error.message}`);
+	}
+
+	const row = (data as CardMnemonicRow | null) ?? null;
+	if (row === null) {
+		return null;
+	}
+
+	return parseMnemonicExplanation(row.explanation);
+};
+
 const countRemainingUniqueCards = (queue: SessionQueue): number => {
 	return new Set([...queue.due, ...queue.learn, ...queue.new]).size;
 };
@@ -611,7 +669,8 @@ const toCardFrontData = (
 const toCardBackData = (
 	card: CardRow,
 	intervalPreview: IntervalPreview,
-	illustrationState: NormalizedIllustrationState
+	illustrationState: NormalizedIllustrationState,
+	explanation: MnemonicExplanation | null
 ): CardBackData => {
 	return {
 		cardId: card.id,
@@ -621,6 +680,7 @@ const toCardBackData = (
 		backText: card.back_text,
 		illustrationUrl: illustrationState.illustrationUrl,
 		illustrationStatus: illustrationState.illustrationStatus,
+		explanation,
 		intervalPreview,
 	};
 };
@@ -645,8 +705,12 @@ const buildCardBackData = async (params: BuildCardBackDataParams): Promise<CardB
 		illustration,
 		allowTrigger,
 	});
+	const explanation =
+		card.illustration_key === null
+			? null
+			: await fetchMnemonicExplanationByKey(supabase, userId, card.illustration_key);
 
-	return toCardBackData(card, getIntervalPreview(reviewState), illustrationState);
+	return toCardBackData(card, getIntervalPreview(reviewState), illustrationState, explanation);
 };
 
 const removeCardFromQueue = (

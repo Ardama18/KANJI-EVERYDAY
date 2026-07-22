@@ -25,6 +25,7 @@ const baseBackData: CardBackData = {
 	backText: "あたたかい",
 	illustrationUrl: null,
 	illustrationStatus: "pending",
+	explanation: null,
 	intervalPreview: {
 		again: { label: "今日さいご + 明日" },
 		hard: { interval: 2, label: "2日後" },
@@ -86,5 +87,49 @@ describe("frontend/src/components/study/CardBack.tsx", () => {
 		expect(html).toContain("むり");
 		expect(html).toContain("あやしい");
 		expect(html).toContain("できた");
+	});
+
+	it("UT-S16F-AC01: ready + explanation で summary と mappings 行を表示する", () => {
+		const html = renderCardBack({
+			illustrationStatus: "ready",
+			illustrationUrl: "https://signed.example/image.png",
+			explanation: {
+				summary: "目で見たものが、頭の中で光って記憶に残る。",
+				mappings: [
+					{ part: "下の「見」", meaning: "目で見る" },
+					{ part: "上の光", meaning: "頭の中で気づき、記憶する" },
+				],
+			},
+		});
+
+		expect(countByTestId(html, "mnemonic-explanation")).toBe(1);
+		expect(html).toContain("目で見たものが、頭の中で光って記憶に残る。");
+		expect(html).toContain("下の「見」：目で見る");
+		expect(html).toContain("上の光：頭の中で気づき、記憶する");
+		expect(countByTestId(html, "mnemonic-explanation-mapping")).toBe(2);
+	});
+
+	it("UT-S16F-AC02: explanation=null では説明ブロックを描画しない", () => {
+		const html = renderCardBack({
+			illustrationStatus: "ready",
+			illustrationUrl: "https://signed.example/image.png",
+			explanation: null,
+		});
+
+		expect(countByTestId(html, "mnemonic-explanation")).toBe(0);
+	});
+
+	it("UT-S16F-AC03: illustration が ready 以外なら explanation があっても描画しない", () => {
+		const html = renderCardBack({
+			illustrationStatus: "pending",
+			illustrationUrl: null,
+			explanation: {
+				summary: "目で見たものが、頭の中で光って記憶に残る。",
+				mappings: [{ part: "下の「見」", meaning: "目で見る" }],
+			},
+		});
+
+		expect(countByTestId(html, "mnemonic-explanation")).toBe(0);
+		expect(html).not.toContain("目で見たものが、頭の中で光って記憶に残る。");
 	});
 });

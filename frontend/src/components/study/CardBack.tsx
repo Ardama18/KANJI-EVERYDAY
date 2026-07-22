@@ -5,6 +5,7 @@ import type { Rating } from "@/lib/srs/types";
 import Link from "next/link";
 
 import { IllustrationDisplay } from "./IllustrationDisplay";
+import { MnemonicExplanation } from "./MnemonicExplanation";
 import { RatingButtons } from "./RatingButtons";
 
 type CardBackProps = {
@@ -45,6 +46,10 @@ export function CardBack({
 					<IllustrationDisplay
 						illustrationStatus={backData.illustrationStatus}
 						illustrationUrl={backData.illustrationUrl}
+					/>
+					<MnemonicExplanation
+						illustrationStatus={backData.illustrationStatus}
+						explanation={backData.explanation}
 					/>
 				</div>
 
