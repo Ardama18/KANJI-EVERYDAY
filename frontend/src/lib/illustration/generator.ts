@@ -134,7 +134,14 @@ export const processIllustrationGeneration = async (
 	const now = dependencies.now ?? (() => new Date());
 
 	const supabase = asGeneratorSupabaseClient(createServiceRoleClientFn());
-	const prompt = generatePromptFn(input.backText, input.skill);
+	// S-16E で承認済み slots を配線するまでの暫定アダプタ。本番経路は未登録（runtime は no-op）。
+	const prompt = generatePromptFn({
+		kanji: input.backText,
+		isSingleKanji: Array.from(input.backText).length === 1,
+		shapeHint: { part: "", picture: "" },
+		meaningHint: input.backText,
+		story: input.backText,
+	});
 	const apiKey = getEnvConfigFn().geminiApiKey?.trim();
 
 	if (!apiKey) {

@@ -1,4 +1,15 @@
-export type IllustrationPromptSkill = "reading" | "writing";
+export type MnemonicShapeHint = {
+	part: string;
+	picture: string;
+};
+
+export type MnemonicSlots = {
+	kanji: string;
+	isSingleKanji: boolean;
+	shapeHint: MnemonicShapeHint;
+	meaningHint: string;
+	story: string;
+};
 
 const MAX_PROMPT_INPUT_LENGTH = 100;
 
@@ -7,26 +18,57 @@ const isControlCharacter = (character: string): boolean => {
 	return codePoint <= 31 || codePoint === 127;
 };
 
-const buildSkillDirective = (skill: IllustrationPromptSkill): string =>
-	skill === "reading"
-		? "読み問題向けとして、意味がひと目で分かる構図にしてください。"
-		: "書き問題向けとして、漢字語彙の意味が伝わる構図にしてください。";
-
 export const sanitizePromptInput = (text: string): string =>
 	Array.from(text)
 		.filter((character) => !isControlCharacter(character))
 		.join("")
 		.slice(0, MAX_PROMPT_INPUT_LENGTH);
 
-export const generatePrompt = (backText: string, skill: IllustrationPromptSkill): string => {
-	const sanitizedBackText = sanitizePromptInput(backText).trim();
-	const concept = sanitizedBackText.length > 0 ? sanitizedBackText : "意味が伝わる対象";
-	return [
-		"シンプルでかわいいフラットイラストを作成してください。",
-		"背景は白、明るい色使いで小学生向けにしてください。",
-		`「${concept}」の意味を視覚的に表現してください。`,
-		buildSkillDirective(skill),
-		"文字・テキストは一切描かないでください。",
-		"怖い表現、暴力的表現、不適切表現は禁止です。",
-	].join("\n");
+export const generatePrompt = (slots: MnemonicSlots): string => {
+	const kanji = sanitizePromptInput(slots.kanji);
+	const part = sanitizePromptInput(slots.shapeHint.part);
+	const picture = sanitizePromptInput(slots.shapeHint.picture);
+	const meaningHint = sanitizePromptInput(slots.meaningHint);
+	const story = sanitizePromptInput(slots.story);
+
+	const lines: string[] = [
+		`「${kanji}」という漢字を、形と意味を視覚的に結びつけて覚えられる学習用インフォグラフィックとして作成してください。`,
+		"【正確な字形】",
+		`・「${kanji}」を日本の標準的な字体で大きく表示する`,
+		"・画数、線の向き、部首の位置を変更しない",
+		"・正しい字形の維持を、装飾より優先する",
+	];
+
+	// 【形の手掛かり】の部首→絵1対1マッピングは単字のみ。複数字では省略する。
+	if (slots.isSingleKanji) {
+		lines.push(
+			"【形の手掛かり】",
+			`・「${kanji}」の${part}を、${picture}に関連づける`,
+			"・ただし、元の線を消したり別の形に置き換えたりしない"
+		);
+	}
+
+	lines.push(
+		"【意味の手掛かり】",
+		`・この漢字が持つ「${meaningHint}」を、場面・物・動きで表す`,
+		"【記憶の物語】",
+		slots.isSingleKanji
+			? `「${story}」という一つの場面で、漢字の形と意味を結びつける`
+			: `「${story}」という一つの場面で、語全体の意味を表す`,
+		"【構成】",
+		"・漢字自体を主役にする",
+		"・関係のないアイコンや説明は入れない",
+		"・一枚につき一つの記憶ルールに絞る",
+		"・子どもが3秒で意味をつかめる構成にする",
+		"【禁止事項】",
+		"・誤った漢字",
+		"・線や画数の省略",
+		"・余分な文字",
+		"・複数の異なる物語",
+		"・情報量の多い複雑な背景",
+		"・ロゴ、透かし",
+		`画像内の文字は正確な「${kanji}」のみとし、正方形、高解像度で作成してください。`
+	);
+
+	return lines.join("\n");
 };
