@@ -979,6 +979,7 @@ export type Database = {
 					p_idempotency_key: string;
 					p_import_request_hash: string;
 					p_request: Json;
+					p_mnemonics?: Json | null;
 				};
 				Returns: Json;
 			};
