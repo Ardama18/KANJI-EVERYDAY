@@ -4,6 +4,7 @@ import {
 	type ProcessIllustrationGenerationArgs,
 	runProcessIllustrationGeneration,
 } from "@/actions/illustration-generation-runtime";
+import type { MnemonicSlots } from "@/lib/illustration/prompt";
 import { getSignedUrl } from "@/lib/illustration/storage";
 import { createServerClient } from "@/lib/supabase/server";
 
@@ -15,8 +16,10 @@ type CardLookupRow = {
 	id: string;
 	owner_user_id: string | null;
 	illustration_key: string | null;
-	back_text: string;
-	skill: string;
+};
+
+type CardMnemonicRow = {
+	slots: unknown;
 };
 
 type IllustrationLookupRow = {
@@ -57,6 +60,26 @@ type TriggerSupabaseClient = {
 					value: string
 				) => {
 					maybeSingle: () => Promise<QueryResult<CardLookupRow | null>>;
+				};
+			};
+		};
+	};
+	from(table: "card_mnemonics"): {
+		select: (columns: "slots") => {
+			eq: (
+				column: "owner_user_id",
+				value: string
+			) => {
+				eq: (
+					column: "illustration_key",
+					value: string
+				) => {
+					eq: (
+						column: "status",
+						value: "approved"
+					) => {
+						maybeSingle: () => Promise<QueryResult<CardMnemonicRow | null>>;
+					};
 				};
 			};
 		};
@@ -240,12 +263,67 @@ const findCardForOwner = async (params: {
 }) => {
 	const { data, error } = await params.supabase
 		.from("cards")
-		.select("id, owner_user_id, illustration_key, back_text, skill")
+		.select("id, owner_user_id, illustration_key")
 		.eq("id", params.cardId)
 		.eq("owner_user_id", params.ownerUserId)
 		.maybeSingle();
 
 	assertNoQueryError("cards lookup failed", error);
+
+	return data;
+};
+
+const isMnemonicShapeHint = (value: unknown): value is MnemonicSlots["shapeHint"] => {
+	if (typeof value !== "object" || value === null) {
+		return false;
+	}
+
+	const shapeHint = value as Record<string, unknown>;
+	return typeof shapeHint.part === "string" && typeof shapeHint.picture === "string";
+};
+
+const parseMnemonicSlots = (value: unknown): MnemonicSlots | null => {
+	if (typeof value !== "object" || value === null) {
+		return null;
+	}
+
+	const slots = value as Record<string, unknown>;
+	if (
+		typeof slots.kanji !== "string" ||
+		typeof slots.isSingleKanji !== "boolean" ||
+		!isMnemonicShapeHint(slots.shapeHint) ||
+		typeof slots.meaningHint !== "string" ||
+		typeof slots.story !== "string"
+	) {
+		return null;
+	}
+
+	return {
+		kanji: slots.kanji,
+		isSingleKanji: slots.isSingleKanji,
+		shapeHint: {
+			part: slots.shapeHint.part,
+			picture: slots.shapeHint.picture,
+		},
+		meaningHint: slots.meaningHint,
+		story: slots.story,
+	};
+};
+
+const findApprovedMnemonicForOwner = async (params: {
+	supabase: TriggerSupabaseClient;
+	illustrationKey: string;
+	ownerUserId: string;
+}) => {
+	const { data, error } = await params.supabase
+		.from("card_mnemonics")
+		.select("slots")
+		.eq("owner_user_id", params.ownerUserId)
+		.eq("illustration_key", params.illustrationKey)
+		.eq("status", "approved")
+		.maybeSingle();
+
+	assertNoQueryError("card_mnemonics lookup failed", error);
 
 	return data;
 };
@@ -370,6 +448,21 @@ export async function triggerIllustrationGeneration(
 		};
 	}
 
+	// 承認済み card_mnemonics が無ければ pending 行を作らず生成を起動しない（AC-2）。
+	const approvedMnemonic = await findApprovedMnemonicForOwner({
+		supabase,
+		illustrationKey: card.illustration_key,
+		ownerUserId,
+	});
+	const slots = approvedMnemonic ? parseMnemonicSlots(approvedMnemonic.slots) : null;
+	if (!slots) {
+		return {
+			ok: true,
+			started: false,
+			illustrationId: null,
+		};
+	}
+
 	const existingIllustration = await findLatestIllustration({
 		supabase,
 		illustrationKey: card.illustration_key,
@@ -407,8 +500,7 @@ export async function triggerIllustrationGeneration(
 	const processArgs: ProcessIllustrationGenerationArgs = {
 		illustrationId: pendingRecord.id,
 		illustrationKey: card.illustration_key,
-		backText: card.back_text,
-		skill: card.skill,
+		slots,
 		ownerUserId,
 	};
 

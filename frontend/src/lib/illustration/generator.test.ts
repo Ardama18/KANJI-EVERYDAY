@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { processIllustrationGeneration } from "./generator";
+import type { MnemonicSlots } from "./prompt";
+import { generatePrompt } from "./prompt";
 import { GEMINI_IMAGE_MODEL, type GeminiModelInfo } from "./types";
 
 type QueryError = {
@@ -19,6 +21,14 @@ type UpdateResult = {
 };
 
 const FIXED_TIMESTAMP = new Date("2026-02-24T12:34:56.000Z");
+
+const SAMPLE_SLOTS: MnemonicSlots = {
+	kanji: "見",
+	isSingleKanji: true,
+	shapeHint: { part: "下の部分", picture: "人の足" },
+	meaningHint: "みる",
+	story: "目を大きく開いて見る",
+};
 
 const createSupabaseDouble = () => {
 	const ownerEqMock = vi
@@ -85,8 +95,7 @@ describe("processIllustrationGeneration", () => {
 			{
 				illustrationId: "illustration-1",
 				illustrationKey: "kanji-key",
-				backText: "漢字の意味",
-				skill: "reading",
+				slots: SAMPLE_SLOTS,
 				ownerUserId: "user-1",
 			},
 			{
@@ -126,8 +135,7 @@ describe("processIllustrationGeneration", () => {
 			{
 				illustrationId: "illustration-2",
 				illustrationKey: "kanji-key",
-				backText: "漢字の意味",
-				skill: "reading",
+				slots: SAMPLE_SLOTS,
 				ownerUserId: "user-2",
 			},
 			{
@@ -161,8 +169,7 @@ describe("processIllustrationGeneration", () => {
 			{
 				illustrationId: "illustration-3",
 				illustrationKey: "kanji-key",
-				backText: "漢字の意味",
-				skill: "writing",
+				slots: SAMPLE_SLOTS,
 				ownerUserId: "user-3",
 			},
 			{
@@ -202,8 +209,7 @@ describe("processIllustrationGeneration", () => {
 			{
 				illustrationId: "illustration-4",
 				illustrationKey: "kanji-key",
-				backText: "漢字の意味",
-				skill: "reading",
+				slots: SAMPLE_SLOTS,
 				ownerUserId: "user-4",
 			},
 			{
@@ -235,5 +241,50 @@ describe("processIllustrationGeneration", () => {
 			reason: "storage_upload_failed",
 			requestId: "request-storage-fail",
 		});
+	});
+
+	it("UT-AC01-SLOTS-DRIVEN-PROMPT: 承認済み slots がそのまま generatePrompt に渡り、生成プロンプトが Gemini へ渡る", async () => {
+		const supabase = createSupabaseDouble();
+		const generatePromptFn = vi.fn(generatePrompt);
+		const generateIllustrationFn = vi.fn().mockResolvedValue({
+			ok: true,
+			imageBuffer: Buffer.from("fake-png"),
+			modelInfo: {
+				provider: "gemini",
+				model: GEMINI_IMAGE_MODEL,
+				outcome: "ready",
+				reason: "success",
+				httpStatus: 200,
+				requestId: "request-slots",
+				timestamp: FIXED_TIMESTAMP.toISOString(),
+			},
+		});
+		const uploadIllustrationFn = vi.fn().mockResolvedValue(true);
+
+		await processIllustrationGeneration(
+			{
+				illustrationId: "illustration-5",
+				illustrationKey: "kanji-key",
+				slots: SAMPLE_SLOTS,
+				ownerUserId: "user-5",
+			},
+			{
+				createServiceRoleClientFn: () => supabase.client,
+				getEnvConfigFn: () => ({ geminiApiKey: "test-key" }),
+				generatePromptFn,
+				generateIllustrationFn,
+				uploadIllustrationFn,
+				now: () => FIXED_TIMESTAMP,
+			}
+		);
+
+		expect(generatePromptFn).toHaveBeenCalledWith(SAMPLE_SLOTS);
+		const expectedPrompt = generatePrompt(SAMPLE_SLOTS);
+		expect(generateIllustrationFn).toHaveBeenCalledWith({
+			prompt: expectedPrompt,
+			apiKey: "test-key",
+		});
+		const payload = readLatestUpdatePayload(supabase.updateMock);
+		expect(payload.prompt).toBe(expectedPrompt);
 	});
 });

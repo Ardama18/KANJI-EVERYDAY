@@ -2,7 +2,7 @@ import { getEnvConfig } from "@/lib/env";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 
 import { type GenerateIllustrationInput, generateIllustration } from "./gemini-client";
-import { generatePrompt } from "./prompt";
+import { type MnemonicSlots, generatePrompt } from "./prompt";
 import { buildIllustrationStoragePath, uploadIllustration } from "./storage";
 import {
 	GEMINI_IMAGE_MODEL,
@@ -10,7 +10,6 @@ import {
 	type GeminiGenerationResult,
 	type GeminiModelInfo,
 	type GeminiModelInfoFailure,
-	type IllustrationSkill,
 	type ModelInfoFailureReason,
 } from "./types";
 
@@ -51,8 +50,7 @@ type NowFunction = () => Date;
 export type ProcessIllustrationGenerationInput = {
 	illustrationId: string;
 	illustrationKey: string;
-	backText: string;
-	skill: IllustrationSkill;
+	slots: MnemonicSlots;
 	ownerUserId: string;
 };
 
@@ -134,14 +132,7 @@ export const processIllustrationGeneration = async (
 	const now = dependencies.now ?? (() => new Date());
 
 	const supabase = asGeneratorSupabaseClient(createServiceRoleClientFn());
-	// S-16E で承認済み slots を配線するまでの暫定アダプタ。本番経路は未登録（runtime は no-op）。
-	const prompt = generatePromptFn({
-		kanji: input.backText,
-		isSingleKanji: Array.from(input.backText).length === 1,
-		shapeHint: { part: "", picture: "" },
-		meaningHint: input.backText,
-		story: input.backText,
-	});
+	const prompt = generatePromptFn(input.slots);
 	const apiKey = getEnvConfigFn().geminiApiKey?.trim();
 
 	if (!apiKey) {
