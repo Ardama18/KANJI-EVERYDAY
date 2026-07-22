@@ -33,8 +33,18 @@ type CardRow = {
 	id: string;
 	owner_user_id: string | null;
 	illustration_key: string | null;
-	back_text: string;
-	skill: string;
+};
+
+type MnemonicSlotsShape = {
+	kanji: string;
+	isSingleKanji: boolean;
+	shapeHint: { part: string; picture: string };
+	meaningHint: string;
+	story: string;
+};
+
+type MnemonicRow = {
+	slots: unknown;
 };
 
 type IllustrationRow = {
@@ -50,9 +60,18 @@ type IdRow = {
 type TriggerTestOptions = {
 	user: User | null;
 	card: CardRow | null;
+	mnemonic: MnemonicRow | null;
 	existingIllustration: IllustrationRow | null;
 	updateResult: QueryResult<IdRow>;
 	insertResult: QueryResult<IdRow>;
+};
+
+const APPROVED_SLOTS: MnemonicSlotsShape = {
+	kanji: "見",
+	isSingleKanji: true,
+	shapeHint: { part: "下の部分", picture: "人の足" },
+	meaningHint: "みる",
+	story: "目を大きく開いて見る",
 };
 
 const createDefaultOptions = (): TriggerTestOptions => ({
@@ -61,9 +80,8 @@ const createDefaultOptions = (): TriggerTestOptions => ({
 		id: "card-1",
 		owner_user_id: "user-1",
 		illustration_key: "kanji-key-1",
-		back_text: "example back text",
-		skill: "reading",
 	},
+	mnemonic: { slots: APPROVED_SLOTS },
 	existingIllustration: null,
 	updateResult: {
 		data: { id: "illustration-retry" },
@@ -103,6 +121,25 @@ const createSupabaseDouble = (overrides?: Partial<TriggerTestOptions>) => {
 	const cardSelectMock = vi
 		.fn<(columns: string) => { eq: typeof cardEqIdMock }>()
 		.mockReturnValue({ eq: cardEqIdMock });
+
+	const mnemonicMaybeSingleMock = vi
+		.fn<() => Promise<QueryResult<MnemonicRow | null>>>()
+		.mockResolvedValue({
+			data: options.mnemonic,
+			error: null,
+		});
+	const mnemonicEqStatusMock = vi
+		.fn<(column: "status", value: "approved") => { maybeSingle: typeof mnemonicMaybeSingleMock }>()
+		.mockReturnValue({ maybeSingle: mnemonicMaybeSingleMock });
+	const mnemonicEqKeyMock = vi
+		.fn<(column: "illustration_key", value: string) => { eq: typeof mnemonicEqStatusMock }>()
+		.mockReturnValue({ eq: mnemonicEqStatusMock });
+	const mnemonicEqOwnerMock = vi
+		.fn<(column: "owner_user_id", value: string) => { eq: typeof mnemonicEqKeyMock }>()
+		.mockReturnValue({ eq: mnemonicEqKeyMock });
+	const mnemonicSelectMock = vi
+		.fn<(columns: "slots") => { eq: typeof mnemonicEqOwnerMock }>()
+		.mockReturnValue({ eq: mnemonicEqOwnerMock });
 
 	const illustrationMaybeSingleMock = vi
 		.fn<() => Promise<QueryResult<IllustrationRow | null>>>()
@@ -193,8 +230,9 @@ const createSupabaseDouble = (overrides?: Partial<TriggerTestOptions>) => {
 
 	const fromMock = vi
 		.fn<
-			(table: "cards" | "illustrations") =>
+			(table: "cards" | "card_mnemonics" | "illustrations") =>
 				| { select: typeof cardSelectMock }
+				| { select: typeof mnemonicSelectMock }
 				| {
 						select: typeof illustrationSelectMock;
 						update: typeof updateMock;
@@ -205,6 +243,12 @@ const createSupabaseDouble = (overrides?: Partial<TriggerTestOptions>) => {
 			if (table === "cards") {
 				return {
 					select: cardSelectMock,
+				};
+			}
+
+			if (table === "card_mnemonics") {
+				return {
+					select: mnemonicSelectMock,
 				};
 			}
 
@@ -226,6 +270,9 @@ const createSupabaseDouble = (overrides?: Partial<TriggerTestOptions>) => {
 		getUserMock,
 		fromMock,
 		cardEqOwnerMock,
+		mnemonicEqOwnerMock,
+		mnemonicEqKeyMock,
+		mnemonicEqStatusMock,
 		illustrationEqOwnerMock,
 		illustrationEqReadyStatusMock,
 		illustrationNotStoragePathMock,
@@ -328,8 +375,7 @@ describe("frontend/src/actions/illustration-actions.ts", () => {
 		expect(processMock).toHaveBeenCalledWith({
 			illustrationId: "illustration-retried",
 			illustrationKey: "kanji-key-1",
-			backText: "example back text",
-			skill: "reading",
+			slots: APPROVED_SLOTS,
 			ownerUserId: "user-1",
 		});
 	});
@@ -359,10 +405,102 @@ describe("frontend/src/actions/illustration-actions.ts", () => {
 		expect(processMock).toHaveBeenCalledWith({
 			illustrationId: "illustration-inserted",
 			illustrationKey: "kanji-key-1",
-			backText: "example back text",
-			skill: "reading",
+			slots: APPROVED_SLOTS,
 			ownerUserId: "user-1",
 		});
+	});
+
+	it("UT-AC-02-NO-APPROVED-MNEMONIC-SKIP: 承認済み card_mnemonics が無ければ生成を起動せず started=false を返す", async () => {
+		const spies = createSupabaseDouble({
+			mnemonic: null,
+			existingIllustration: null,
+		});
+		const processMock = vi.fn<(args: unknown) => Promise<void>>().mockResolvedValue(undefined);
+		__setProcessIllustrationGenerationImplementationForTest(processMock);
+
+		const result = await triggerIllustrationGeneration("card-1");
+
+		expect(result).toEqual({
+			ok: true,
+			started: false,
+			illustrationId: null,
+		});
+		expect(spies.mnemonicEqOwnerMock).toHaveBeenCalledWith("owner_user_id", "user-1");
+		expect(spies.mnemonicEqKeyMock).toHaveBeenCalledWith("illustration_key", "kanji-key-1");
+		expect(spies.mnemonicEqStatusMock).toHaveBeenCalledWith("status", "approved");
+		expect(spies.updateMock).not.toHaveBeenCalled();
+		expect(spies.insertMock).not.toHaveBeenCalled();
+		expect(processMock).not.toHaveBeenCalled();
+	});
+
+	it("UT-AC-02-INVALID-SLOTS-SKIP: 承認レコードの slots が不正形なら生成を起動しない", async () => {
+		const spies = createSupabaseDouble({
+			mnemonic: { slots: { kanji: "見" } },
+			existingIllustration: null,
+		});
+		const processMock = vi.fn<(args: unknown) => Promise<void>>().mockResolvedValue(undefined);
+		__setProcessIllustrationGenerationImplementationForTest(processMock);
+
+		const result = await triggerIllustrationGeneration("card-1");
+
+		expect(result).toEqual({
+			ok: true,
+			started: false,
+			illustrationId: null,
+		});
+		expect(spies.insertMock).not.toHaveBeenCalled();
+		expect(processMock).not.toHaveBeenCalled();
+	});
+
+	it("IT-AC-01-APPROVED-DRIVES-GENERATION: 承認 slots で pending を確保し検証済み slots を process へ渡す", async () => {
+		const spies = createSupabaseDouble({
+			mnemonic: { slots: APPROVED_SLOTS },
+			existingIllustration: null,
+			insertResult: {
+				data: { id: "illustration-approved" },
+				error: null,
+			},
+		});
+		const processMock = vi.fn<(args: unknown) => Promise<void>>().mockResolvedValue(undefined);
+		__setProcessIllustrationGenerationImplementationForTest(processMock);
+
+		const result = await triggerIllustrationGeneration("card-1");
+
+		expect(spies.insertMock).toHaveBeenCalledWith({
+			owner_user_id: "user-1",
+			illustration_key: "kanji-key-1",
+		});
+		expect(result).toEqual({
+			ok: true,
+			started: true,
+			illustrationId: "illustration-approved",
+		});
+		expect(processMock).toHaveBeenCalledWith({
+			illustrationId: "illustration-approved",
+			illustrationKey: "kanji-key-1",
+			slots: APPROVED_SLOTS,
+			ownerUserId: "user-1",
+		});
+	});
+
+	it("IT-AC-02-UNAPPROVED-NO-PENDING: 未承認では pending 行を作らず生成を起動しない", async () => {
+		const spies = createSupabaseDouble({
+			mnemonic: null,
+			existingIllustration: null,
+		});
+		const processMock = vi.fn<(args: unknown) => Promise<void>>().mockResolvedValue(undefined);
+		__setProcessIllustrationGenerationImplementationForTest(processMock);
+
+		const result = await triggerIllustrationGeneration("card-1");
+
+		expect(result).toEqual({
+			ok: true,
+			started: false,
+			illustrationId: null,
+		});
+		expect(spies.insertMock).not.toHaveBeenCalled();
+		expect(spies.updateMock).not.toHaveBeenCalled();
+		expect(processMock).not.toHaveBeenCalled();
 	});
 
 	it("UT-AC-07-FIRE-AND-FORGET: trigger は process 完了を待たずに応答する", async () => {

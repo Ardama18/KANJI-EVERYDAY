@@ -71,8 +71,18 @@ type CardRow = {
 	id: string;
 	owner_user_id: string | null;
 	illustration_key: string | null;
-	back_text: string;
-	skill: string;
+};
+
+type MnemonicSlotsShape = {
+	kanji: string;
+	isSingleKanji: boolean;
+	shapeHint: { part: string; picture: string };
+	meaningHint: string;
+	story: string;
+};
+
+type MnemonicRow = {
+	slots: unknown;
 };
 
 type IllustrationRow = {
@@ -88,9 +98,18 @@ type IdRow = {
 type TriggerTestOptions = {
 	user: User | null;
 	card: CardRow | null;
+	mnemonic: MnemonicRow | null;
 	existingIllustration: IllustrationRow | null;
 	updateResult: QueryResult<IdRow>;
 	insertResult: QueryResult<IdRow>;
+};
+
+const APPROVED_SLOTS: MnemonicSlotsShape = {
+	kanji: "見",
+	isSingleKanji: true,
+	shapeHint: { part: "下の部分", picture: "人の足" },
+	meaningHint: "みる",
+	story: "目を大きく開いて見る",
 };
 
 const createDefaultOptions = (): TriggerTestOptions => ({
@@ -99,9 +118,8 @@ const createDefaultOptions = (): TriggerTestOptions => ({
 		id: "card-1",
 		owner_user_id: "user-1",
 		illustration_key: "kanji-key-1",
-		back_text: "example back text",
-		skill: "reading",
 	},
+	mnemonic: { slots: APPROVED_SLOTS },
 	existingIllustration: null,
 	updateResult: {
 		data: { id: "illustration-retry" },
@@ -139,6 +157,25 @@ const createSupabaseDouble = (overrides?: Partial<TriggerTestOptions>) => {
 	const cardSelectMock = vi
 		.fn<(columns: string) => { eq: typeof cardEqIdMock }>()
 		.mockReturnValue({ eq: cardEqIdMock });
+
+	const mnemonicMaybeSingleMock = vi
+		.fn<() => Promise<QueryResult<MnemonicRow | null>>>()
+		.mockResolvedValue({
+			data: options.mnemonic,
+			error: null,
+		});
+	const mnemonicEqStatusMock = vi
+		.fn<(column: "status", value: "approved") => { maybeSingle: typeof mnemonicMaybeSingleMock }>()
+		.mockReturnValue({ maybeSingle: mnemonicMaybeSingleMock });
+	const mnemonicEqKeyMock = vi
+		.fn<(column: "illustration_key", value: string) => { eq: typeof mnemonicEqStatusMock }>()
+		.mockReturnValue({ eq: mnemonicEqStatusMock });
+	const mnemonicEqOwnerMock = vi
+		.fn<(column: "owner_user_id", value: string) => { eq: typeof mnemonicEqKeyMock }>()
+		.mockReturnValue({ eq: mnemonicEqKeyMock });
+	const mnemonicSelectMock = vi
+		.fn<(columns: "slots") => { eq: typeof mnemonicEqOwnerMock }>()
+		.mockReturnValue({ eq: mnemonicEqOwnerMock });
 
 	const illustrationMaybeSingleMock = vi
 		.fn<() => Promise<QueryResult<IllustrationRow | null>>>()
@@ -228,9 +265,10 @@ const createSupabaseDouble = (overrides?: Partial<TriggerTestOptions>) => {
 	const fromMock = vi
 		.fn<
 			(
-				table: "cards" | "illustrations"
+				table: "cards" | "card_mnemonics" | "illustrations"
 			) =>
 				| { select: typeof cardSelectMock }
+				| { select: typeof mnemonicSelectMock }
 				| {
 						select: typeof illustrationSelectMock;
 						update: typeof updateMock;
@@ -241,6 +279,12 @@ const createSupabaseDouble = (overrides?: Partial<TriggerTestOptions>) => {
 			if (table === "cards") {
 				return {
 					select: cardSelectMock,
+				};
+			}
+
+			if (table === "card_mnemonics") {
+				return {
+					select: mnemonicSelectMock,
 				};
 			}
 
@@ -487,8 +531,7 @@ describe("illustration-generation-backend 統合テスト", () => {
 			{
 				illustrationId: "illustration-ac08",
 				illustrationKey: "kanji-key-1",
-				backText: "例文",
-				skill: "reading",
+				slots: APPROVED_SLOTS,
 				ownerUserId: "user-1",
 			},
 			{
@@ -561,8 +604,7 @@ describe("illustration-generation-backend 統合テスト", () => {
 			{
 				illustrationId: "illustration-ac10",
 				illustrationKey: "kanji-key-1",
-				backText: "雨",
-				skill: "reading",
+				slots: APPROVED_SLOTS,
 				ownerUserId: "user-10",
 			},
 			{
@@ -604,8 +646,7 @@ describe("illustration-generation-backend 統合テスト", () => {
 			{
 				illustrationId: "illustration-ac11-gemini",
 				illustrationKey: "kanji-key-1",
-				backText: "雨",
-				skill: "reading",
+				slots: APPROVED_SLOTS,
 				ownerUserId: "user-11",
 			},
 			{
@@ -637,8 +678,7 @@ describe("illustration-generation-backend 統合テスト", () => {
 			{
 				illustrationId: "illustration-ac11-storage",
 				illustrationKey: "kanji-key-1",
-				backText: "雨",
-				skill: "reading",
+				slots: APPROVED_SLOTS,
 				ownerUserId: "user-11",
 			},
 			{
@@ -687,8 +727,7 @@ describe("illustration-generation-backend 統合テスト", () => {
 			{
 				illustrationId: "illustration-ac14",
 				illustrationKey: "kanji-key-1",
-				backText: rawBackText,
-				skill: "reading",
+				slots: { ...APPROVED_SLOTS, kanji: rawBackText },
 				ownerUserId: "user-14",
 			},
 			{

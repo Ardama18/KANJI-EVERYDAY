@@ -1,8 +1,9 @@
+import type { MnemonicSlots } from "@/lib/illustration/prompt";
+
 export type ProcessIllustrationGenerationArgs = {
 	illustrationId: string;
 	illustrationKey: string;
-	backText: string;
-	skill: string;
+	slots: MnemonicSlots;
 	ownerUserId: string;
 };
 
