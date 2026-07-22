@@ -181,6 +181,28 @@ const createIllustrationSelectChain = (illustration: Record<string, unknown> | n
 	};
 };
 
+const createMnemonicSelectChain = (mnemonic: Record<string, unknown> | null) => {
+	const maybeSingleMock = vi.fn().mockResolvedValue({
+		data: mnemonic,
+		error: null,
+	});
+	const eqIllustrationKeyMock = vi.fn().mockReturnValue({
+		maybeSingle: maybeSingleMock,
+	});
+	const eqOwnerMock = vi.fn().mockReturnValue({
+		eq: eqIllustrationKeyMock,
+	});
+	const selectMock = vi.fn().mockReturnValue({
+		eq: eqOwnerMock,
+	});
+
+	return {
+		selectMock,
+		eqOwnerMock,
+		eqIllustrationKeyMock,
+	};
+};
+
 const createDeckCardsSelectChain = (rows: Record<string, unknown>[] = []) => {
 	const eqMock = vi.fn().mockResolvedValue({
 		data: rows,
@@ -231,6 +253,7 @@ const createReviewStateRow = () => ({
 const createRevealCardClient = (options: {
 	illustrationKey: string | null;
 	illustration: Record<string, unknown> | null;
+	mnemonic?: Record<string, unknown> | null;
 }) => {
 	const sessionSelectChain = createRequireSessionChain(createSessionRow(false));
 	const sessionUpdateMock = vi.fn().mockReturnValue({
@@ -239,6 +262,7 @@ const createRevealCardClient = (options: {
 	const cardSelectChain = createCardSelectChain(createCardRow(options.illustrationKey));
 	const reviewStateSelectChain = createReviewStateSelectChain(createReviewStateRow());
 	const illustrationSelectChain = createIllustrationSelectChain(options.illustration);
+	const mnemonicSelectChain = createMnemonicSelectChain(options.mnemonic ?? null);
 	const fromMock = vi.fn((table: string) => {
 		if (table === "study_sessions") {
 			return {
@@ -265,6 +289,12 @@ const createRevealCardClient = (options: {
 			};
 		}
 
+		if (table === "card_mnemonics") {
+			return {
+				select: mnemonicSelectChain.selectMock,
+			};
+		}
+
 		throw new Error(`Unsupported table: ${table}`);
 	});
 
@@ -274,12 +304,14 @@ const createRevealCardClient = (options: {
 			from: fromMock,
 		},
 		sessionUpdateMock,
+		mnemonicSelectChain,
 	};
 };
 
 const createBackPhaseClient = (options: {
 	illustrationKey: string | null;
 	illustration: Record<string, unknown> | null;
+	mnemonic?: Record<string, unknown> | null;
 }) => {
 	const sessionSelectChain = createRequireSessionChain(createSessionRow(true));
 	const deckSelectChain = createOwnedDeckSelectChain({
@@ -292,6 +324,7 @@ const createBackPhaseClient = (options: {
 	const cardSelectChain = createCardSelectChain(createCardRow(options.illustrationKey));
 	const reviewStateSelectChain = createReviewStateSelectChain(createReviewStateRow());
 	const illustrationSelectChain = createIllustrationSelectChain(options.illustration);
+	const mnemonicSelectChain = createMnemonicSelectChain(options.mnemonic ?? null);
 	const deckCardsSelectChain = createDeckCardsSelectChain([]);
 	const fromMock = vi.fn((table: string) => {
 		if (table === "study_sessions") {
@@ -321,6 +354,12 @@ const createBackPhaseClient = (options: {
 		if (table === "illustrations") {
 			return {
 				select: illustrationSelectChain.selectMock,
+			};
+		}
+
+		if (table === "card_mnemonics") {
+			return {
+				select: mnemonicSelectChain.selectMock,
 			};
 		}
 
@@ -822,6 +861,85 @@ describe("frontend/src/actions/session-actions.ts", () => {
 		expect(result.illustrationStatus).toBe("pending");
 		expect(result.illustrationUrl).toBeNull();
 		expect(triggerIllustrationGenerationMock).toHaveBeenCalledWith("card-1");
+	});
+
+	it("IT-S16F-AC01: revealCard は card_mnemonics.explanation を owner スコープで返す", async () => {
+		const { client, mnemonicSelectChain } = createRevealCardClient({
+			illustrationKey: "key-1",
+			illustration: { status: "ready", storage_path: "user-1/ready.png" },
+			mnemonic: {
+				explanation: {
+					summary: "目で見たものが、頭の中で光って記憶に残る。",
+					mappings: [
+						{ part: "下の「見」", meaning: "目で見る" },
+						{ part: "上の光", meaning: "頭の中で気づき、記憶する" },
+					],
+				},
+			},
+		});
+		getSignedUrlMock.mockResolvedValue("https://signed.example/ready.png");
+		createServerClientMock.mockReturnValue(client);
+
+		const result = await revealCard("session-2");
+
+		expect(result.illustrationStatus).toBe("ready");
+		expect(result.explanation).toEqual({
+			summary: "目で見たものが、頭の中で光って記憶に残る。",
+			mappings: [
+				{ part: "下の「見」", meaning: "目で見る" },
+				{ part: "上の光", meaning: "頭の中で気づき、記憶する" },
+			],
+		});
+		expect(mnemonicSelectChain.selectMock).toHaveBeenCalledWith("explanation");
+		expect(mnemonicSelectChain.eqOwnerMock).toHaveBeenCalledWith("owner_user_id", "user-1");
+		expect(mnemonicSelectChain.eqIllustrationKeyMock).toHaveBeenCalledWith(
+			"illustration_key",
+			"key-1"
+		);
+	});
+
+	it("IT-S16F-AC02: card_mnemonics 行がなければ explanation は null を返す", async () => {
+		const { client, mnemonicSelectChain } = createRevealCardClient({
+			illustrationKey: "key-1",
+			illustration: { status: "ready", storage_path: "user-1/ready.png" },
+			mnemonic: null,
+		});
+		getSignedUrlMock.mockResolvedValue("https://signed.example/ready.png");
+		createServerClientMock.mockReturnValue(client);
+
+		const result = await revealCard("session-2");
+
+		expect(result.explanation).toBeNull();
+		expect(mnemonicSelectChain.eqOwnerMock).toHaveBeenCalledWith("owner_user_id", "user-1");
+	});
+
+	it("IT-S16F-AC03: illustration_key=null では card_mnemonics を参照せず explanation は null", async () => {
+		const { client } = createRevealCardClient({
+			illustrationKey: null,
+			illustration: null,
+		});
+		createServerClientMock.mockReturnValue(client);
+
+		const result = await revealCard("session-2");
+
+		expect(result.explanation).toBeNull();
+		expect(client.from).not.toHaveBeenCalledWith("card_mnemonics");
+	});
+
+	it("IT-S16F-AC04: explanation の形が不正なら null に正規化する", async () => {
+		const { client } = createRevealCardClient({
+			illustrationKey: "key-1",
+			illustration: { status: "ready", storage_path: "user-1/ready.png" },
+			mnemonic: {
+				explanation: { summary: "こわれた", mappings: [{ part: "部分" }] },
+			},
+		});
+		getSignedUrlMock.mockResolvedValue("https://signed.example/ready.png");
+		createServerClientMock.mockReturnValue(client);
+
+		const result = await revealCard("session-2");
+
+		expect(result.explanation).toBeNull();
 	});
 
 	it("UT-S09-BACK-PHASE-CONSISTENCY: getStudySessionState(phase=back) は revealCard と同値の正規化結果を返す", async () => {

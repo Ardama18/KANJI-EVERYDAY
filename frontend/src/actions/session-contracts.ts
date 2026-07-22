@@ -9,3 +9,17 @@ export const ILLUSTRATION_DISPLAY_STATUSES = [
 ] as const;
 
 export type IllustrationDisplayStatus = (typeof ILLUSTRATION_DISPLAY_STATUSES)[number];
+
+/**
+ * 答え側カードに表示するニーモニック説明（S-16F）。
+ * `card_mnemonics.explanation`（S-16A）の表示用に検証済みの形。
+ */
+export interface MnemonicExplanationMapping {
+	part: string;
+	meaning: string;
+}
+
+export interface MnemonicExplanation {
+	summary: string;
+	mappings: MnemonicExplanationMapping[];
+}
