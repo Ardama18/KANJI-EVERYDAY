@@ -5,10 +5,11 @@
 
 ## Phase 1: migration 新規作成
 
-**ファイル（新規）**: `supabase/migrations/20260721000000_s16_card_mnemonics.sql`
+**ファイル（新規）**: `supabase/migrations/20260721000001_s16_card_mnemonics.sql`
 
-> 注: Issue 記載のファイル名は `20260721000000_s16_card_mnemonics.sql`。既存の `20260721000000_s17_daily_study_limit.sql` と
-> UTC timestamp prefix が同一だが、suffix が異なるため別ファイルとして共存する（Issue 指定のファイル名を正とする）。
+> 注: Issue 記載のファイル名は `20260721000000_s16_card_mnemonics.sql` だが、既存の `20260721000000_s17_daily_study_limit.sql`（#39・main 済）と
+> UTC timestamp prefix（＝Supabase の migration version）が完全一致し、`supabase db push` が version 重複で s16 を適用スキップする実害があるため、
+> prefix を `20260721000001` に採番し直して衝突を解消した。
 
 内容（S-02 のスキーマ/RLS 流儀、`20260718000002_fix_runtime_authenticated_grants.sql` の grant 流儀に厳密に倣う）:
 
@@ -152,7 +153,7 @@ migration SQL / seed SQL / Database 型を静的に検証する。
 
 ## 実装対象ファイル一覧
 
-- 新規: `supabase/migrations/20260721000000_s16_card_mnemonics.sql`
+- 新規: `supabase/migrations/20260721000001_s16_card_mnemonics.sql`
 - 変更: `frontend/src/types/database.ts`
 - 変更: `supabase/seed.sql`
 - 新規: `frontend/src/lib/card-mnemonics/migration-contract.test.ts`

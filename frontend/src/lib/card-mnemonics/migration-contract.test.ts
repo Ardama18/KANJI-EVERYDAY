@@ -7,7 +7,7 @@ import type { Database, Json } from "@/types/database";
 
 const MIGRATION_PATH = resolve(
 	process.cwd(),
-	"../supabase/migrations/20260721000000_s16_card_mnemonics.sql"
+	"../supabase/migrations/20260721000001_s16_card_mnemonics.sql"
 );
 const SEED_PATH = resolve(process.cwd(), "../supabase/seed.sql");
 
