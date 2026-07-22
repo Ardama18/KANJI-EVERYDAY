@@ -83,6 +83,24 @@ describe("S-16D MnemonicApprovalList render (AC-1 / AC-4)", () => {
 		expect(html).toContain("この内容を承認する");
 	});
 
+	it("C-01b renders a manual single-kanji toggle reflecting isSingleKanji state", () => {
+		const single = render(
+			[{ conceptId: "concept-1", image: "ai" }],
+			new Map([["concept-1", entry({ slots: slots({ isSingleKanji: true }) })]])
+		);
+		expect(single).toContain("単一の漢字として扱う（オフで熟語）");
+		expect(single).toMatch(
+			/<input id="mnemonic-single-kanji-concept-1"[^>]*type="checkbox"[^>]*checked=""/u
+		);
+		const compound = render(
+			[{ conceptId: "concept-1", image: "ai" }],
+			new Map([["concept-1", entry({ slots: slots({ kanji: "山川", isSingleKanji: false }) })]])
+		);
+		expect(compound).not.toMatch(
+			/<input id="mnemonic-single-kanji-concept-1"[^>]*type="checkbox"[^>]*checked=""/u
+		);
+	});
+
 	it("C-02 warns that image='ai' unapproved concepts get no illustration", () => {
 		const html = render([{ conceptId: "concept-1", image: "ai" }], new Map([["concept-1", entry()]]));
 		expect(html).toContain("ニーモニック未承認：画像は生成されません");

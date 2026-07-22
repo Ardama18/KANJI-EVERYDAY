@@ -96,6 +96,7 @@ function ConceptApproval({
 		emit({ ...entry, slots: { ...entry.slots, ...patch } });
 	const updateKanji = (kanji: string): void =>
 		updateSlots({ kanji, isSingleKanji: Array.from(kanji).length === 1 });
+	const updateSingleKanji = (isSingleKanji: boolean): void => updateSlots({ isSingleKanji });
 	const updateShapeHint = (patch: Partial<MnemonicSlotsDraft["shapeHint"]>): void =>
 		updateSlots({ shapeHint: { ...entry.slots.shapeHint, ...patch } });
 	const updateExplanation = (patch: Partial<MnemonicExplanationDraft>): void =>
@@ -130,8 +131,24 @@ function ConceptApproval({
 				disabled={disabled}
 				onChange={updateKanji}
 			/>
+			<div className="mt-2 flex items-center gap-2">
+				<input
+					id={`mnemonic-single-kanji-${concept.conceptId}`}
+					type="checkbox"
+					checked={entry.slots.isSingleKanji}
+					disabled={disabled}
+					onChange={(event) => updateSingleKanji(event.target.checked)}
+					className="h-5 w-5"
+				/>
+				<label
+					htmlFor={`mnemonic-single-kanji-${concept.conceptId}`}
+					className="text-sm font-medium text-slate-700"
+				>
+					単一の漢字として扱う（オフで熟語）
+				</label>
+			</div>
 			<p className="mt-1 text-xs text-slate-500">
-				{entry.slots.isSingleKanji ? "単一の漢字として扱います。" : "熟語として扱います。"}
+				漢字を編集すると自動判定されます。必要に応じて手動で切り替えてください。
 			</p>
 			<TextField
 				label="形のヒント（部品）"
