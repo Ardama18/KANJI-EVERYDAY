@@ -30,6 +30,29 @@ export function createAppAiImportRepository(
 				p_import_request_hash: input.importRequestHash,
 				p_request: normalizedCommitRequest(input.request),
 				p_card_reservation_key: input.cardReservationKey,
+				p_mnemonics:
+					input.mnemonics === undefined
+						? null
+						: input.mnemonics.map((entry) => ({
+								conceptId: entry.conceptId,
+								slots: {
+									kanji: entry.slots.kanji,
+									isSingleKanji: entry.slots.isSingleKanji,
+									shapeHint: {
+										part: entry.slots.shapeHint.part,
+										picture: entry.slots.shapeHint.picture,
+									},
+									meaningHint: entry.slots.meaningHint,
+									story: entry.slots.story,
+								},
+								explanation: {
+									summary: entry.explanation.summary,
+									mappings: entry.explanation.mappings.map((mapping) => ({
+										part: mapping.part,
+										meaning: mapping.meaning,
+									})),
+								},
+							})),
 			});
 			return { data, error };
 		},

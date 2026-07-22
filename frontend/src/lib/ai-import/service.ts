@@ -1,4 +1,8 @@
-import type { PreviewEnvelope } from "../ai-card-generation/contracts";
+import type {
+	MnemonicExplanationDraft,
+	MnemonicSlotsDraft,
+	PreviewEnvelope,
+} from "../ai-card-generation/contracts";
 import {
 	type CommitAsyncResponse,
 	type ImportStatusResponse,
@@ -13,6 +17,7 @@ import {
 	type AiImportErrorCode,
 	mapAiImportError,
 } from "./errors";
+import { isUnicodeScalarText, normalizeDisplayText } from "./normalize";
 import {
 	PreviewValidationError,
 	createImportPreview,
@@ -36,6 +41,21 @@ export interface AiImportRepositoryResult<T> {
 }
 
 /**
+ * Approved mnemonic carried alongside the commit body (ADR-012 decision 4).
+ * It never rides on the preview token; the server re-validates and re-sanitizes
+ * it independently. The owner is set by the RPC from the authenticated actor,
+ * so no owner is present here.
+ */
+export interface CommitMnemonicEntry {
+	readonly conceptId: string;
+	readonly slots: MnemonicSlotsDraft;
+	readonly explanation: MnemonicExplanationDraft;
+}
+
+/** NFKC-normalized, length-capped and mappings 2-4 verified entry. */
+export type SanitizedMnemonicEntry = CommitMnemonicEntry;
+
+/**
  * A repository is actor-bound when an adapter creates it.  In particular, this
  * interface intentionally has no caller-selected owner, source, or quota policy.
  */
@@ -56,6 +76,7 @@ export interface AiImportRepository {
 			request: NormalizedImportRequest;
 			cardReservationKey: string;
 			previewToken: string;
+			mnemonics?: readonly SanitizedMnemonicEntry[];
 		}>
 	): Promise<AiImportRepositoryResult<unknown>>;
 	getStatus(
@@ -185,6 +206,13 @@ export async function commitCardImport(
 			if (error instanceof PreviewTokenError) return failure("UNAUTHORIZED", 401);
 			throw error;
 		}
+		let mnemonics: readonly SanitizedMnemonicEntry[] | undefined;
+		if (parsed.mnemonics !== undefined) {
+			const allowedConceptIds = new Set(validated.data.items.map((item) => item.conceptId));
+			const sanitized = sanitizeMnemonics(parsed.mnemonics, allowedConceptIds);
+			if (sanitized === undefined) return validationFailure();
+			mnemonics = sanitized;
+		}
 		let result: AiImportRepositoryResult<unknown>;
 		try {
 			result = await input.repository.commit({
@@ -193,6 +221,7 @@ export async function commitCardImport(
 				request: validated.data,
 				cardReservationKey: parsed.cardReservationKey,
 				previewToken: parsed.previewToken,
+				mnemonics,
 			});
 		} catch {
 			return failure("SERVICE_UNAVAILABLE", 503);
@@ -235,6 +264,135 @@ export function normalizedCommitRequest(request: NormalizedImportRequest) {
 	return normalizedRequestToJson(request);
 }
 
+const MNEMONIC_TEXT_LIMITS = {
+	kanjiMin: 1,
+	kanjiMax: 16,
+	textMin: 1,
+	textMax: 100,
+	summaryMin: 1,
+	summaryMax: 120,
+	mappingsMin: 2,
+	mappingsMax: 4,
+} as const;
+
+/**
+ * Server-side first defence line for approved mnemonics (ADR-012 decision 5).
+ * Rejects with `undefined` (mapped to VALIDATION_ERROR by the caller) when any
+ * entry is malformed. Each text field is checked for Unicode scalar validity,
+ * NFKC-normalized, and length-capped on code points; `mappings` must be 2-4.
+ * `conceptId` must be present in `allowedConceptIds` (validated request items)
+ * and must not repeat. The owner is never taken from here.
+ */
+export function sanitizeMnemonics(
+	entries: readonly unknown[],
+	allowedConceptIds: ReadonlySet<string>
+): readonly SanitizedMnemonicEntry[] | undefined {
+	const result: SanitizedMnemonicEntry[] = [];
+	const seen = new Set<string>();
+	for (const entry of entries) {
+		if (!isRecord(entry)) return undefined;
+		const conceptId = entry.conceptId;
+		if (typeof conceptId !== "string" || !allowedConceptIds.has(conceptId) || seen.has(conceptId)) {
+			return undefined;
+		}
+		seen.add(conceptId);
+		const slots = sanitizeMnemonicSlots(entry.slots);
+		if (slots === undefined) return undefined;
+		const explanation = sanitizeMnemonicExplanation(entry.explanation);
+		if (explanation === undefined) return undefined;
+		result.push({ conceptId, slots, explanation });
+	}
+	return result;
+}
+
+function sanitizeMnemonicSlots(value: unknown): MnemonicSlotsDraft | undefined {
+	if (!isRecord(value) || typeof value.isSingleKanji !== "boolean" || !isRecord(value.shapeHint)) {
+		return undefined;
+	}
+	const kanji = normalizeCapped(
+		value.kanji,
+		MNEMONIC_TEXT_LIMITS.kanjiMin,
+		MNEMONIC_TEXT_LIMITS.kanjiMax
+	);
+	const part = normalizeCapped(
+		value.shapeHint.part,
+		MNEMONIC_TEXT_LIMITS.textMin,
+		MNEMONIC_TEXT_LIMITS.textMax
+	);
+	const picture = normalizeCapped(
+		value.shapeHint.picture,
+		MNEMONIC_TEXT_LIMITS.textMin,
+		MNEMONIC_TEXT_LIMITS.textMax
+	);
+	const meaningHint = normalizeCapped(
+		value.meaningHint,
+		MNEMONIC_TEXT_LIMITS.textMin,
+		MNEMONIC_TEXT_LIMITS.textMax
+	);
+	const story = normalizeCapped(
+		value.story,
+		MNEMONIC_TEXT_LIMITS.textMin,
+		MNEMONIC_TEXT_LIMITS.textMax
+	);
+	if (
+		kanji === undefined ||
+		part === undefined ||
+		picture === undefined ||
+		meaningHint === undefined ||
+		story === undefined
+	) {
+		return undefined;
+	}
+	return {
+		kanji,
+		isSingleKanji: value.isSingleKanji,
+		shapeHint: { part, picture },
+		meaningHint,
+		story,
+	};
+}
+
+function sanitizeMnemonicExplanation(value: unknown): MnemonicExplanationDraft | undefined {
+	if (!isRecord(value) || !Array.isArray(value.mappings)) return undefined;
+	if (
+		value.mappings.length < MNEMONIC_TEXT_LIMITS.mappingsMin ||
+		value.mappings.length > MNEMONIC_TEXT_LIMITS.mappingsMax
+	) {
+		return undefined;
+	}
+	const summary = normalizeCapped(
+		value.summary,
+		MNEMONIC_TEXT_LIMITS.summaryMin,
+		MNEMONIC_TEXT_LIMITS.summaryMax
+	);
+	if (summary === undefined) return undefined;
+	const mappings: { readonly part: string; readonly meaning: string }[] = [];
+	for (const mapping of value.mappings) {
+		if (!isRecord(mapping)) return undefined;
+		const part = normalizeCapped(
+			mapping.part,
+			MNEMONIC_TEXT_LIMITS.textMin,
+			MNEMONIC_TEXT_LIMITS.textMax
+		);
+		const meaning = normalizeCapped(
+			mapping.meaning,
+			MNEMONIC_TEXT_LIMITS.textMin,
+			MNEMONIC_TEXT_LIMITS.textMax
+		);
+		if (part === undefined || meaning === undefined) return undefined;
+		mappings.push({ part, meaning });
+	}
+	return { summary, mappings };
+}
+
+function normalizeCapped(value: unknown, min: number, max: number): string | undefined {
+	if (typeof value !== "string" || !isUnicodeScalarText(value)) return undefined;
+	const normalized = normalizeDisplayText(value);
+	const length = Array.from(normalized).length;
+	if (length < min || length > max) return undefined;
+	return normalized;
+}
+
 function parseCommitInput(value: unknown):
 	| Readonly<{
 			confirmedWarnings: boolean;
@@ -243,6 +401,7 @@ function parseCommitInput(value: unknown):
 			cardReservationKey: string;
 			previewToken: string;
 			request: unknown;
+			mnemonics?: readonly unknown[];
 	  }>
 	| undefined {
 	if (!isRecord(value)) return undefined;
@@ -258,6 +417,13 @@ function parseCommitInput(value: unknown):
 	) {
 		return undefined;
 	}
+	// mnemonics is optional (unset means a legacy/non-approval commit). When
+	// present it must be an array; anything else is a VALIDATION_ERROR.
+	let mnemonics: readonly unknown[] | undefined;
+	if (value.mnemonics !== undefined) {
+		if (!Array.isArray(value.mnemonics)) return undefined;
+		mnemonics = value.mnemonics;
+	}
 	return {
 		confirmedWarnings: value.confirmedWarnings === true,
 		idempotencyKey,
@@ -265,6 +431,7 @@ function parseCommitInput(value: unknown):
 		cardReservationKey,
 		previewToken,
 		request: value.request,
+		mnemonics,
 	};
 }
 

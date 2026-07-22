@@ -5,7 +5,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import AiCardForm, { type AiCardFormSubmission } from "@/components/ai-card-import/AiCardForm";
 import DraftCardList from "@/components/ai-card-import/DraftCardList";
 import ImportStatus from "@/components/ai-card-import/ImportStatus";
+import MnemonicApprovalList, {
+	type MnemonicApprovalEntry,
+	type MnemonicConceptView,
+} from "@/components/ai-card-import/MnemonicApprovalList";
 import WarningConfirmation from "@/components/ai-card-import/WarningConfirmation";
+import type {
+	MnemonicDraftEntry,
+	MnemonicExplanationDraft,
+	MnemonicSlotsDraft,
+} from "@/lib/ai-card-generation/contracts";
 import {
 	type AiCardImportFocusTarget,
 	focusAiCardImportTarget,
@@ -54,6 +63,11 @@ export default function AiCardImportClient({ deckId }: AiCardImportClientProps) 
 	const [requiredIllustrationConceptIds, setRequiredIllustrationConceptIds] = useState<
 		readonly string[]
 	>([]);
+	// Approval state is keyed by conceptId so it survives re-previews (which do
+	// not return mnemonicDraft). It is only seeded from the generation envelope.
+	const [mnemonicApprovals, setMnemonicApprovals] = useState<
+		ReadonlyMap<string, MnemonicApprovalEntry>
+	>(new Map());
 	const generationAttemptRef = useRef<{ readonly fingerprint: string; readonly key: string }>();
 	const commitIdempotencyKeyRef = useRef<string>();
 	const statusAbortRef = useRef<AbortController>();
@@ -156,6 +170,7 @@ export default function AiCardImportClient({ deckId }: AiCardImportClientProps) 
 			setPreview(generated.preview);
 			setCardReservationKey(generationReservationKey);
 			setRequiredIllustrationConceptIds(generated.requiresIllustrationUploads);
+			setMnemonicApprovals(seedMnemonicApprovals(generated.mnemonicDraft));
 			commitIdempotencyKeyRef.current = crypto.randomUUID();
 			setConfirmed(false);
 			setStatus(
@@ -185,6 +200,7 @@ export default function AiCardImportClient({ deckId }: AiCardImportClientProps) 
 		setCardReservationKey(undefined);
 		setConfirmed(false);
 		setRequiredIllustrationConceptIds([]);
+		setMnemonicApprovals(new Map());
 		generationAttemptRef.current = undefined;
 		commitIdempotencyKeyRef.current = undefined;
 		setStatus("作成を取り消しました。教材画像は削除処理へ移しました。");
@@ -195,6 +211,14 @@ export default function AiCardImportClient({ deckId }: AiCardImportClientProps) 
 		setRequest({ ...request, items: [...items] });
 		setPreview(undefined);
 		setConfirmed(false);
+	}
+
+	function changeMnemonicEntry(conceptId: string, entry: MnemonicApprovalEntry): void {
+		setMnemonicApprovals((current) => {
+			const next = new Map(current);
+			next.set(conceptId, entry);
+			return next;
+		});
 	}
 
 	async function uploadIllustration(conceptId: string, file: File): Promise<void> {
@@ -278,6 +302,7 @@ export default function AiCardImportClient({ deckId }: AiCardImportClientProps) 
 					cardReservationKey: preview.cardReservationKey,
 					idempotencyKey,
 					confirmedWarnings: true,
+					mnemonics: buildApprovedMnemonics(request.items, mnemonicApprovals),
 				}),
 			});
 			const value: unknown = await response.json();
@@ -294,6 +319,7 @@ export default function AiCardImportClient({ deckId }: AiCardImportClientProps) 
 			setCardReservationKey(undefined);
 			setConfirmed(false);
 			setRequiredIllustrationConceptIds([]);
+			setMnemonicApprovals(new Map());
 			generationAttemptRef.current = undefined;
 			commitIdempotencyKeyRef.current = undefined;
 			setStatus("登録処理を開始しました。");
@@ -447,6 +473,12 @@ export default function AiCardImportClient({ deckId }: AiCardImportClientProps) 
 						requiredIllustrationConceptIds={requiredIllustrationConceptIds}
 						disabled={busy}
 					/>
+					<MnemonicApprovalList
+						concepts={conceptViews(request.items)}
+						entries={mnemonicApprovals}
+						onEntryChange={changeMnemonicEntry}
+						disabled={busy}
+					/>
 					<WarningConfirmation
 						confirmed={confirmed}
 						onChange={setConfirmed}
@@ -488,16 +520,18 @@ function parsePreparedUploads(
 	}
 	return uploads;
 }
-function parseGeneratedResult(value: unknown):
+export function parseGeneratedResult(value: unknown):
 	| {
 			readonly request: ClientImportRequestInput;
 			readonly preview?: ClientPreview;
 			readonly requiresIllustrationUploads: readonly string[];
+			readonly mnemonicDraft?: readonly MnemonicDraftEntry[];
 	  }
 	| undefined {
 	if (!isRecord(value)) return undefined;
 	const request = parseClientRequest(value.request);
 	if (request === undefined) return undefined;
+	const mnemonicDraft = parseMnemonicDraft(value.mnemonicDraft);
 	if (
 		typeof value.previewToken === "string" &&
 		typeof value.importRequestHash === "string" &&
@@ -507,6 +541,7 @@ function parseGeneratedResult(value: unknown):
 		return {
 			request,
 			requiresIllustrationUploads: [],
+			mnemonicDraft,
 			preview: {
 				previewToken: value.previewToken,
 				importRequestHash: value.importRequestHash,
@@ -518,8 +553,105 @@ function parseGeneratedResult(value: unknown):
 		Array.isArray(value.requiresIllustrationUploads) &&
 		value.requiresIllustrationUploads.every((conceptId) => typeof conceptId === "string")
 	)
-		return { request, requiresIllustrationUploads: value.requiresIllustrationUploads };
+		return {
+			request,
+			requiresIllustrationUploads: value.requiresIllustrationUploads,
+			mnemonicDraft,
+		};
 	return undefined;
+}
+
+function parseMnemonicDraft(value: unknown): readonly MnemonicDraftEntry[] | undefined {
+	if (!Array.isArray(value)) return undefined;
+	const entries: MnemonicDraftEntry[] = [];
+	for (const raw of value) {
+		if (!isRecord(raw) || typeof raw.conceptId !== "string") return undefined;
+		const slots = parseMnemonicSlots(raw.slots);
+		const explanation = parseMnemonicExplanation(raw.explanation);
+		if (slots === undefined || explanation === undefined) return undefined;
+		entries.push({ conceptId: raw.conceptId, slots, explanation });
+	}
+	return entries;
+}
+
+function parseMnemonicSlots(value: unknown): MnemonicSlotsDraft | undefined {
+	if (
+		!isRecord(value) ||
+		typeof value.kanji !== "string" ||
+		typeof value.isSingleKanji !== "boolean" ||
+		!isRecord(value.shapeHint) ||
+		typeof value.shapeHint.part !== "string" ||
+		typeof value.shapeHint.picture !== "string" ||
+		typeof value.meaningHint !== "string" ||
+		typeof value.story !== "string"
+	)
+		return undefined;
+	return {
+		kanji: value.kanji,
+		isSingleKanji: value.isSingleKanji,
+		shapeHint: { part: value.shapeHint.part, picture: value.shapeHint.picture },
+		meaningHint: value.meaningHint,
+		story: value.story,
+	};
+}
+
+function parseMnemonicExplanation(value: unknown): MnemonicExplanationDraft | undefined {
+	if (!isRecord(value) || typeof value.summary !== "string" || !Array.isArray(value.mappings))
+		return undefined;
+	const mappings: { readonly part: string; readonly meaning: string }[] = [];
+	for (const mapping of value.mappings) {
+		if (
+			!isRecord(mapping) ||
+			typeof mapping.part !== "string" ||
+			typeof mapping.meaning !== "string"
+		)
+			return undefined;
+		mappings.push({ part: mapping.part, meaning: mapping.meaning });
+	}
+	return { summary: value.summary, mappings };
+}
+
+export function seedMnemonicApprovals(
+	draft: readonly MnemonicDraftEntry[] | undefined
+): ReadonlyMap<string, MnemonicApprovalEntry> {
+	const map = new Map<string, MnemonicApprovalEntry>();
+	for (const entry of draft ?? [])
+		map.set(entry.conceptId, {
+			slots: entry.slots,
+			explanation: entry.explanation,
+			approved: false,
+		});
+	return map;
+}
+
+export function conceptViews(
+	items: readonly ClientImportItemInput[]
+): readonly MnemonicConceptView[] {
+	const views = new Map<string, MnemonicConceptView>();
+	for (const item of items)
+		if (!views.has(item.conceptId))
+			views.set(item.conceptId, { conceptId: item.conceptId, image: item.image.mode });
+	return [...views.values()];
+}
+
+export function buildApprovedMnemonics(
+	items: readonly ClientImportItemInput[],
+	approvals: ReadonlyMap<string, MnemonicApprovalEntry>
+): readonly {
+	readonly conceptId: string;
+	readonly slots: MnemonicSlotsDraft;
+	readonly explanation: MnemonicExplanationDraft;
+}[] {
+	const present = new Set(items.map((item) => item.conceptId));
+	const result: {
+		readonly conceptId: string;
+		readonly slots: MnemonicSlotsDraft;
+		readonly explanation: MnemonicExplanationDraft;
+	}[] = [];
+	for (const [conceptId, entry] of approvals)
+		if (entry.approved && present.has(conceptId))
+			result.push({ conceptId, slots: entry.slots, explanation: entry.explanation });
+	return result;
 }
 
 async function releaseSourceUploads(uploadIds: readonly string[]): Promise<void> {
