@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { deflateSync } from "node:zlib";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hashImportRequest } from "../../../../frontend/src/lib/ai-import/canonical-request";
 import { parseImportStatusResponse } from "../../../../frontend/src/lib/ai-import/async-contract";
@@ -36,7 +36,12 @@ import {
 	pngFixture,
 	safeFailure,
 } from "./helpers/s11-edge-testkit";
-import { createS11DbClient } from "./helpers/s11-db-testkit";
+import { type S11DbClient, createS11DbClient } from "./helpers/s11-db-testkit";
+import {
+	S10_ACTORS,
+	ensureS10ActorFixtures,
+	sqlLiteral,
+} from "../../S-10-ai-card-import-foundation/tests/helpers/s10-db-testkit";
 import {
 	assertOwnerProjectionBoundary,
 	assertStorageMutationDeniedResponse,
@@ -4510,3 +4515,298 @@ function workerEventLogs(logs: readonly string[], event: string): Record<string,
 		.map((line) => JSON.parse(line) as Record<string, unknown>)
 		.filter((entry) => entry.event === event);
 }
+
+// ---------------------------------------------------------------------------
+// S-16H: claim_ai_import_concept が承認済み card_mnemonics.slots を返す（design.md D1）。
+// S10_TEST_DATABASE_URL（隔離 DB）がある場合のみ実行し、未設定環境では skip する。
+// ---------------------------------------------------------------------------
+
+const s16hDatabaseUrl = process.env.S10_TEST_DATABASE_URL?.trim();
+const s16hOwnerA = S10_ACTORS.ownerA.userId ?? "";
+const s16hOwnerB = S10_ACTORS.ownerB.userId ?? "";
+
+const S16H_DECK_ID = "5c160000-0000-4000-8000-000000000001";
+const S16H_BATCH_ID = "5c160000-0000-4000-8000-000000000002";
+const S16H_ITEM_APPROVED = "5c160000-0000-4000-8000-000000000003";
+const S16H_ITEM_CROSS_OWNER = "5c160000-0000-4000-8000-000000000004";
+const S16H_ITEM_DRAFT = "5c160000-0000-4000-8000-000000000005";
+const S16H_JOB_APPROVED = "5c160000-0000-4000-8000-000000000006";
+const S16H_JOB_CROSS_OWNER = "5c160000-0000-4000-8000-000000000007";
+const S16H_JOB_DRAFT = "5c160000-0000-4000-8000-000000000008";
+const S16H_ILLUSTRATION_APPROVED = "5c160000-0000-4000-8000-000000000009";
+const S16H_ILLUSTRATION_CROSS_OWNER = "5c160000-0000-4000-8000-00000000000a";
+const S16H_ILLUSTRATION_DRAFT = "5c160000-0000-4000-8000-00000000000b";
+const S16H_ITEM_JOB_OWNER_MISMATCH = "5c160000-0000-4000-8000-00000000000c";
+const S16H_JOB_JOB_OWNER_MISMATCH = "5c160000-0000-4000-8000-00000000000d";
+const S16H_ILLUSTRATION_JOB_OWNER_MISMATCH = "5c160000-0000-4000-8000-00000000000e";
+const S16H_CLAIM_TOKEN_APPROVED = "5c160000-0000-4000-8000-0000000000c1";
+const S16H_CLAIM_TOKEN_CROSS_OWNER = "5c160000-0000-4000-8000-0000000000c2";
+const S16H_CLAIM_TOKEN_DRAFT = "5c160000-0000-4000-8000-0000000000c3";
+const S16H_CLAIM_TOKEN_JOB_OWNER_MISMATCH = "5c160000-0000-4000-8000-0000000000c4";
+const S16H_MESSAGE_APPROVED = 951601;
+const S16H_MESSAGE_CROSS_OWNER = 951602;
+const S16H_MESSAGE_DRAFT = 951603;
+const S16H_MESSAGE_JOB_OWNER_MISMATCH = 951604;
+const S16H_KEY_APPROVED = "s16h-approved";
+const S16H_KEY_CROSS_OWNER = "s16h-cross-owner";
+const S16H_KEY_DRAFT = "s16h-draft";
+const S16H_KEY_JOB_OWNER_MISMATCH = "s16h-job-owner-mismatch";
+const S16H_RESERVATION_KEY = "s16h-illustration";
+
+const S16H_APPROVED_SLOTS = {
+	kanji: "山",
+	isSingleKanji: true,
+	shapeHint: { part: "三つの峰", picture: "山並み" },
+	meaningHint: "たかい土地",
+	story: "峰が三つ並んでそびえる",
+};
+
+async function s16hCleanup(db: S11DbClient): Promise<void> {
+	await db.execute(`
+		DELETE FROM public.card_mnemonics
+		WHERE illustration_key IN (
+			${sqlLiteral(S16H_KEY_APPROVED)},${sqlLiteral(S16H_KEY_CROSS_OWNER)},${sqlLiteral(S16H_KEY_DRAFT)},
+			${sqlLiteral(S16H_KEY_JOB_OWNER_MISMATCH)}
+		);
+		DELETE FROM public.ai_import_concept_jobs WHERE batch_id=${sqlLiteral(S16H_BATCH_ID)}::uuid;
+		DELETE FROM public.ai_import_items WHERE batch_id=${sqlLiteral(S16H_BATCH_ID)}::uuid;
+		DELETE FROM public.ai_import_batches WHERE id=${sqlLiteral(S16H_BATCH_ID)}::uuid;
+		DELETE FROM public.illustrations WHERE illustration_key IN (
+			${sqlLiteral(S16H_KEY_APPROVED)},${sqlLiteral(S16H_KEY_CROSS_OWNER)},${sqlLiteral(S16H_KEY_DRAFT)},
+			${sqlLiteral(S16H_KEY_JOB_OWNER_MISMATCH)}
+		);
+		DELETE FROM public.decks WHERE id=${sqlLiteral(S16H_DECK_ID)}::uuid;
+	`);
+}
+
+async function s16hSeed(db: S11DbClient): Promise<void> {
+	await ensureS10ActorFixtures(db);
+	await s16hCleanup(db);
+	await db.execute(`
+		INSERT INTO public.decks(id,owner_user_id,name)
+		VALUES(${sqlLiteral(S16H_DECK_ID)}::uuid,${sqlLiteral(s16hOwnerA)}::uuid,'S16H claim slots');
+
+		INSERT INTO public.illustrations(id,owner_user_id,illustration_key,status)
+		VALUES
+			(${sqlLiteral(S16H_ILLUSTRATION_APPROVED)}::uuid,${sqlLiteral(s16hOwnerA)}::uuid,${sqlLiteral(S16H_KEY_APPROVED)},'pending'),
+			(${sqlLiteral(S16H_ILLUSTRATION_CROSS_OWNER)}::uuid,${sqlLiteral(s16hOwnerA)}::uuid,${sqlLiteral(S16H_KEY_CROSS_OWNER)},'pending'),
+			(${sqlLiteral(S16H_ILLUSTRATION_DRAFT)}::uuid,${sqlLiteral(s16hOwnerA)}::uuid,${sqlLiteral(S16H_KEY_DRAFT)},'pending'),
+			-- illustration も mnemonic も ownerB。ジョブだけ ownerA なので ON 条件は成立し、
+			-- WHERE 句の owner-scope だけが除外の根拠になる（IT-S16H-05）。
+			(${sqlLiteral(S16H_ILLUSTRATION_JOB_OWNER_MISMATCH)}::uuid,${sqlLiteral(s16hOwnerB)}::uuid,${sqlLiteral(S16H_KEY_JOB_OWNER_MISMATCH)},'pending');
+
+		-- 承認済み（ownerA 自身）: 返り値に入るべき行
+		INSERT INTO public.card_mnemonics(owner_user_id,illustration_key,slots,explanation,status)
+		VALUES(
+			${sqlLiteral(s16hOwnerA)}::uuid,${sqlLiteral(S16H_KEY_APPROVED)},
+			${sqlLiteral(JSON.stringify(S16H_APPROVED_SLOTS))}::jsonb,
+			'{"summary":"三つの峰。","mappings":[]}'::jsonb,'approved'
+		);
+		-- 別 owner（ownerB）の同一 illustration_key: owner-scope 条件で除外されるべき行
+		INSERT INTO public.card_mnemonics(owner_user_id,illustration_key,slots,explanation,status)
+		VALUES(
+			${sqlLiteral(s16hOwnerB)}::uuid,${sqlLiteral(S16H_KEY_CROSS_OWNER)},
+			${sqlLiteral(JSON.stringify({ ...S16H_APPROVED_SLOTS, kanji: "川" }))}::jsonb,
+			'{"summary":"他人の説明。","mappings":[]}'::jsonb,'approved'
+		);
+		-- 未承認（draft）: status 条件で除外されるべき行
+		INSERT INTO public.card_mnemonics(owner_user_id,illustration_key,slots,explanation,status)
+		VALUES(
+			${sqlLiteral(s16hOwnerA)}::uuid,${sqlLiteral(S16H_KEY_DRAFT)},
+			${sqlLiteral(JSON.stringify({ ...S16H_APPROVED_SLOTS, kanji: "空" }))}::jsonb,
+			'{"summary":"下書きの説明。","mappings":[]}'::jsonb,'draft'
+		);
+		-- ownerB の承認済み行。同 key の illustration も ownerB なので join の ON 条件
+		-- （ill.owner_user_id = mnemonics.owner_user_id）は成立する。ジョブ側 owner だけが
+		-- 異なるため、WHERE mnemonics.owner_user_id = job.owner_user_id が唯一の除外根拠になる。
+		INSERT INTO public.card_mnemonics(owner_user_id,illustration_key,slots,explanation,status)
+		VALUES(
+			${sqlLiteral(s16hOwnerB)}::uuid,${sqlLiteral(S16H_KEY_JOB_OWNER_MISMATCH)},
+			${sqlLiteral(JSON.stringify({ ...S16H_APPROVED_SLOTS, kanji: "森" }))}::jsonb,
+			'{"summary":"別 owner のジョブ越え。","mappings":[]}'::jsonb,'approved'
+		);
+
+		INSERT INTO public.ai_import_batches(
+			id,owner_user_id,source,target_deck_id,status,idempotency_key,import_request_hash,
+			requested_card_count,requested_image_count
+		) VALUES(
+			${sqlLiteral(S16H_BATCH_ID)}::uuid,${sqlLiteral(s16hOwnerA)}::uuid,'app_ai',
+			${sqlLiteral(S16H_DECK_ID)}::uuid,'processing','s16h-claim-slots',repeat('a',64),4,4
+		);
+
+		-- illustration_reservation_key を先に埋め、claim 内の quota 予約経路を通らないようにする。
+		INSERT INTO public.ai_import_items(
+			id,owner_user_id,batch_id,client_item_id,concept_id,ordinal,pattern,skill,
+			front_text,back_text,card_key,image_mode,illustration_reservation_key,status
+		) VALUES
+			(
+				${sqlLiteral(S16H_ITEM_APPROVED)}::uuid,${sqlLiteral(s16hOwnerA)}::uuid,${sqlLiteral(S16H_BATCH_ID)}::uuid,
+				's16h-approved-r1','s16h-approved',0,'R1','reading','山','やま',repeat('b',64),'ai',
+				${sqlLiteral(`${S16H_RESERVATION_KEY}-approved`)},'committed'
+			),
+			(
+				${sqlLiteral(S16H_ITEM_CROSS_OWNER)}::uuid,${sqlLiteral(s16hOwnerA)}::uuid,${sqlLiteral(S16H_BATCH_ID)}::uuid,
+				's16h-cross-r1','s16h-cross',1,'R1','reading','川','かわ',repeat('c',64),'ai',
+				${sqlLiteral(`${S16H_RESERVATION_KEY}-cross`)},'committed'
+			),
+			(
+				${sqlLiteral(S16H_ITEM_DRAFT)}::uuid,${sqlLiteral(s16hOwnerA)}::uuid,${sqlLiteral(S16H_BATCH_ID)}::uuid,
+				's16h-draft-r1','s16h-draft',2,'R1','reading','空','そら',repeat('d',64),'ai',
+				${sqlLiteral(`${S16H_RESERVATION_KEY}-draft`)},'committed'
+			),
+			(
+				${sqlLiteral(S16H_ITEM_JOB_OWNER_MISMATCH)}::uuid,${sqlLiteral(s16hOwnerA)}::uuid,${sqlLiteral(S16H_BATCH_ID)}::uuid,
+				's16h-job-owner-r1','s16h-job-owner',3,'R1','reading','森','もり',repeat('e',64),'ai',
+				${sqlLiteral(`${S16H_RESERVATION_KEY}-job-owner`)},'committed'
+			);
+
+		INSERT INTO public.ai_import_concept_jobs(
+			id,owner_user_id,batch_id,concept_id,state,queue_message_id,illustration_id
+		) VALUES
+			(
+				${sqlLiteral(S16H_JOB_APPROVED)}::uuid,${sqlLiteral(s16hOwnerA)}::uuid,${sqlLiteral(S16H_BATCH_ID)}::uuid,
+				's16h-approved','queued',${S16H_MESSAGE_APPROVED},${sqlLiteral(S16H_ILLUSTRATION_APPROVED)}::uuid
+			),
+			(
+				${sqlLiteral(S16H_JOB_CROSS_OWNER)}::uuid,${sqlLiteral(s16hOwnerA)}::uuid,${sqlLiteral(S16H_BATCH_ID)}::uuid,
+				's16h-cross','queued',${S16H_MESSAGE_CROSS_OWNER},${sqlLiteral(S16H_ILLUSTRATION_CROSS_OWNER)}::uuid
+			),
+			(
+				${sqlLiteral(S16H_JOB_DRAFT)}::uuid,${sqlLiteral(s16hOwnerA)}::uuid,${sqlLiteral(S16H_BATCH_ID)}::uuid,
+				's16h-draft','queued',${S16H_MESSAGE_DRAFT},${sqlLiteral(S16H_ILLUSTRATION_DRAFT)}::uuid
+			),
+			(
+				${sqlLiteral(S16H_JOB_JOB_OWNER_MISMATCH)}::uuid,${sqlLiteral(s16hOwnerA)}::uuid,${sqlLiteral(S16H_BATCH_ID)}::uuid,
+				's16h-job-owner','queued',${S16H_MESSAGE_JOB_OWNER_MISMATCH},
+				${sqlLiteral(S16H_ILLUSTRATION_JOB_OWNER_MISMATCH)}::uuid
+			);
+	`);
+}
+
+async function s16hClaim(
+	db: S11DbClient,
+	jobId: string,
+	messageId: number,
+	claimToken: string
+): Promise<Record<string, unknown>> {
+	const rows = await db.query<{ claim: Record<string, unknown> }>(
+		`SELECT public.claim_ai_import_concept(
+			${sqlLiteral(jobId)}::uuid,${messageId}::bigint,${sqlLiteral(claimToken)}::uuid
+		) AS claim`,
+		{ actor: S10_ACTORS.service }
+	);
+	const claim = rows[0]?.claim;
+	if (claim === undefined) throw new Error("claim_ai_import_concept returned no row");
+	return claim;
+}
+
+const s16hRunIf = s16hDatabaseUrl ? describe : describe.skip;
+
+s16hRunIf("S-16H claim_ai_import_concept returns approved mnemonic slots", () => {
+	let db: S11DbClient;
+
+	beforeAll(async () => {
+		if (!s16hDatabaseUrl) return;
+		db = createS11DbClient(s16hDatabaseUrl);
+		await s16hSeed(db);
+	});
+
+	afterAll(async () => {
+		if (!s16hDatabaseUrl) return;
+		await s16hCleanup(db);
+	});
+
+	it("IT-S16H-01 returns mnemonicSlots for the owner's approved row and keeps the existing keys", async () => {
+		const claim = await s16hClaim(
+			db,
+			S16H_JOB_APPROVED,
+			S16H_MESSAGE_APPROVED,
+			S16H_CLAIM_TOKEN_APPROVED
+		);
+
+		expect(claim.outcome).toBe("claimed");
+		expect(claim.mnemonicSlots).toEqual(S16H_APPROVED_SLOTS);
+		expect(claim.imageMode).toBe("ai");
+		expect(claim.backText).toBe("やま");
+		expect(claim.skill).toBe("reading");
+		expect(claim.jobId).toBe(S16H_JOB_APPROVED);
+		expect(claim.claimToken).toBe(S16H_CLAIM_TOKEN_APPROVED);
+		expect(claim.illustrationId).toBe(S16H_ILLUSTRATION_APPROVED);
+	});
+
+	it("IT-S16H-02 omits mnemonicSlots when the approved row belongs to another owner", async () => {
+		const claim = await s16hClaim(
+			db,
+			S16H_JOB_CROSS_OWNER,
+			S16H_MESSAGE_CROSS_OWNER,
+			S16H_CLAIM_TOKEN_CROSS_OWNER
+		);
+
+		// 別 owner（ownerB）の承認済み行は owner-scope 条件で除外され、キー自体が現れない。
+		expect(claim.outcome).toBe("claimed");
+		expect("mnemonicSlots" in claim).toBe(false);
+		expect(claim.backText).toBe("かわ");
+	});
+
+	it("IT-S16H-03 omits mnemonicSlots for a draft row", async () => {
+		const claim = await s16hClaim(db, S16H_JOB_DRAFT, S16H_MESSAGE_DRAFT, S16H_CLAIM_TOKEN_DRAFT);
+
+		expect(claim.outcome).toBe("claimed");
+		expect("mnemonicSlots" in claim).toBe(false);
+	});
+
+	it("IT-S16H-04 lets the worker build the S-16B prompt from the real claim payload", async () => {
+		// IT-S16H-01 で processing になっているため、claim 可能な状態へ戻してから再取得する。
+		await db.execute(`
+			UPDATE public.ai_import_concept_jobs
+			SET state='queued',claim_token=NULL,claim_expires_at=NULL
+			WHERE id=${sqlLiteral(S16H_JOB_APPROVED)}::uuid
+		`);
+		const claim = await s16hClaim(
+			db,
+			S16H_JOB_APPROVED,
+			S16H_MESSAGE_APPROVED,
+			S16H_CLAIM_TOKEN_APPROVED
+		);
+		const database = createSupabaseDatabase({
+			supabaseUrl: "http://supabase.local",
+			serviceRoleKey: "service-fixture",
+			fetchImplementation: async () => Response.json(claim),
+		});
+		const result = await database.claim({
+			jobId: S16H_JOB_APPROVED,
+			messageId: S16H_MESSAGE_APPROVED,
+			claimToken: S16H_CLAIM_TOKEN_APPROVED,
+		});
+
+		expect(result.outcome).toBe("claimed");
+		if (result.outcome !== "claimed") return;
+		const lines = (result.prompt ?? "").split("\n");
+		expect(lines[0]).toBe(
+			"「山」という漢字を、形と意味を視覚的に結びつけて覚えられる学習用インフォグラフィックとして作成してください。"
+		);
+		expect(lines[lines.length - 1]).toBe(
+			"画像内の文字は正確な「山」のみとし、正方形、高解像度で作成してください。"
+		);
+		expect(result.prompt).not.toContain("文字・テキストは一切描かないでください。");
+	});
+
+	it("IT-S16H-05 omits mnemonicSlots when only the job owner differs from the mnemonic owner", async () => {
+		// owner 分離は join の ON 条件（ill.owner_user_id = mnemonics.owner_user_id）と
+		// WHERE 句（mnemonics.owner_user_id = job.owner_user_id）の二重防御。
+		// この fixture は illustration と card_mnemonics をどちらも ownerB に揃えて ON 条件を成立させ、
+		// ジョブ側 owner（ownerA）だけを異なる値にする。したがって WHERE 句を削除すると
+		// mnemonicSlots が返ってしまい、このテストだけが落ちる。
+		const claim = await s16hClaim(
+			db,
+			S16H_JOB_JOB_OWNER_MISMATCH,
+			S16H_MESSAGE_JOB_OWNER_MISMATCH,
+			S16H_CLAIM_TOKEN_JOB_OWNER_MISMATCH
+		);
+
+		expect(claim.outcome).toBe("claimed");
+		expect(claim.imageMode).toBe("ai");
+		expect(claim.backText).toBe("もり");
+		expect("mnemonicSlots" in claim).toBe(false);
+	});
+});

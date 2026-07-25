@@ -68,6 +68,18 @@ describe("generatePrompt（単字）", () => {
 		expect(prompt).toContain("・ロゴ、透かし");
 	});
 
+	it("UT-AC05-SINGLE-SAFETY-DIRECTIVE: 【禁止事項】に安全系の禁止表現を含む", () => {
+		const prompt = generatePrompt(singleKanjiSlots);
+		const lines = prompt.split("\n");
+		const forbiddenIndex = lines.indexOf("【禁止事項】");
+		const safetyIndex = lines.indexOf("・怖い表現、暴力的表現、不適切な表現");
+
+		expect(forbiddenIndex).toBeGreaterThanOrEqual(0);
+		expect(safetyIndex).toBeGreaterThan(forbiddenIndex);
+		// 安全系は末尾行より前に置き、末尾の文字・解像度指定を最終行のまま保つ。
+		expect(safetyIndex).toBeLessThan(lines.length - 1);
+	});
+
 	it("UT-AC04-SINGLE-FOOTER: 末尾に文字指定と正方形・高解像度を含む", () => {
 		const prompt = generatePrompt(singleKanjiSlots);
 

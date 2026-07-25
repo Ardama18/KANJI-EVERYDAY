@@ -1,6 +1,9 @@
-// このファイルが S-16B ニーモニックプロンプトテンプレの正本。
-// Edge Function 実装 `supabase/functions/_shared/mnemonic-prompt.ts` と出力一致を保つこと。
-// 変更時は `worker-prompt-parity.test.ts`（drift テスト）が両実装の一致を強制する。
+// S-16B ニーモニックプロンプトテンプレの Edge Function 実装。
+// 正本は `frontend/src/lib/illustration/prompt.ts`（`generatePrompt` / `sanitizePromptInput`）。
+// Edge Function は `supabase/functions/` 配下のみがデプロイ対象のため frontend から直接 import
+// できず、等価な pure TS として複製している。片側だけを変更すると
+// `frontend/src/lib/illustration/worker-prompt-parity.test.ts`（drift テスト）が失敗する。
+// このファイルは依存 import を持たない（Deno / Vitest 双方から読み込める前提）。
 
 export type MnemonicShapeHint = {
 	part: string;
@@ -28,7 +31,7 @@ export const sanitizePromptInput = (text: string): string =>
 		.join("")
 		.slice(0, MAX_PROMPT_INPUT_LENGTH);
 
-export const generatePrompt = (slots: MnemonicSlots): string => {
+export const buildMnemonicPrompt = (slots: MnemonicSlots): string => {
 	const kanji = sanitizePromptInput(slots.kanji);
 	const part = sanitizePromptInput(slots.shapeHint.part);
 	const picture = sanitizePromptInput(slots.shapeHint.picture);
@@ -76,4 +79,35 @@ export const generatePrompt = (slots: MnemonicSlots): string => {
 	);
 
 	return lines.join("\n");
+};
+
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * DB の `card_mnemonics.slots`（jsonb、形状 CHECK なし）を防御的に検証する。
+ * 1 つでも欠落・型不正があれば `undefined` を返し、呼び出し元をフォールバックさせる。
+ */
+export const parseMnemonicSlots = (value: unknown): MnemonicSlots | undefined => {
+	if (!isRecord(value)) return undefined;
+	const shapeHint = value.shapeHint;
+	if (!isRecord(shapeHint)) return undefined;
+	const kanji = value.kanji;
+	const isSingleKanji = value.isSingleKanji;
+	const meaningHint = value.meaningHint;
+	const story = value.story;
+	const part = shapeHint.part;
+	const picture = shapeHint.picture;
+	if (
+		typeof kanji !== "string" ||
+		typeof isSingleKanji !== "boolean" ||
+		typeof meaningHint !== "string" ||
+		typeof story !== "string" ||
+		typeof part !== "string" ||
+		typeof picture !== "string"
+	) {
+		return undefined;
+	}
+	if (sanitizePromptInput(kanji).length === 0) return undefined;
+	return { kanji, isSingleKanji, shapeHint: { part, picture }, meaningHint, story };
 };

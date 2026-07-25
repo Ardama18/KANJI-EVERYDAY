@@ -1,5 +1,6 @@
 import { SAFE_IMPORT_ERROR_CODES, type SafeImportErrorCode } from "./contracts.ts";
 import { generateIllustrationPrompt } from "../illustration-prompt-policy.ts";
+import { buildMnemonicPrompt, parseMnemonicSlots } from "../mnemonic-prompt.ts";
 import type {
 	ClaimResult,
 	PendingWorkerEvent,
@@ -281,6 +282,10 @@ function parseClaimPrompt(
 	imageMode: "none" | "ai" | "upload"
 ): string | undefined {
 	if (imageMode !== "ai") return undefined;
+	// 承認済みニーモニック slots があれば S-16B テンプレでプロンプトを組む（S-16H AC-1〜AC-3）。
+	const slots = parseMnemonicSlots(row.mnemonicSlots ?? row.mnemonic_slots);
+	if (slots !== undefined) return buildMnemonicPrompt(slots);
+	// 未承認 / 不正形は旧汎用プロンプトへフォールバックし、生成は続行する（S-16H AC-4 / design.md D3）。
 	const backText = stringValue(row.backText ?? row.back_text);
 	const skill = stringValue(row.skill);
 	if (backText === undefined || (skill !== "reading" && skill !== "writing")) {
