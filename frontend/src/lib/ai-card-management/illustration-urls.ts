@@ -1,5 +1,3 @@
-import type { AiCardListPage, ManagedAiCard } from "./types";
-
 /**
  * Server-only helper for the AI card management list.
  *
@@ -8,6 +6,8 @@ import type { AiCardListPage, ManagedAiCard } from "./types";
  * this module never touches Supabase, secrets, or `storage_path` sources by
  * itself. Only `"use server"` callers may supply loaders that do.
  */
+
+import type { AiCardListPage, ManagedAiCard } from "./types";
 
 /** Matches the study screen expiry (S-09) without importing its constant. */
 export const AI_CARD_ILLUSTRATION_SIGNED_URL_EXPIRES_IN_SECONDS = 3600;

@@ -70,8 +70,19 @@ async function loadReadyIllustrationPaths(
 		.eq("owner_user_id", userId)
 		.eq("status", "ready")
 		.not("storage_path", "is", null);
-	if (error || data === null) return paths;
+	if (error || data === null) {
+		// Degradation is silent for the user, so a permanent grant/RLS regression
+		// would otherwise leave no trace at all.  Only the Supabase error code and
+		// message are logged; ids, storage paths, and signed URLs never are.
+		console.error("S-18 illustration path lookup failed", {
+			code: error?.code,
+			message: error?.message,
+		});
+		return paths;
+	}
 	for (const row of data) {
+		// `status='ready'` with `storage_path IS NULL` exists in production, so the
+		// row is skipped instead of being signed with an empty path.
 		if (row.storage_path) paths.set(row.id, row.storage_path);
 	}
 	return paths;

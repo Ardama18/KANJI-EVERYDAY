@@ -18,27 +18,37 @@ import {
 } from "./ai-card-management-actions";
 
 describe("S-13 management Server Action boundary", () => {
-	beforeEach(() => createServerClientMock.mockReset());
+	beforeEach(() => {
+		createServerClientMock.mockReset();
+		getSignedUrlMock.mockReset();
+	});
 	afterEach(() => Reflect.deleteProperty(process.env, "AI_CARD_MANAGEMENT_ENABLED"));
 
 	it("checks the fail-closed flag before creating a DB client", async () => {
 		process.env.AI_CARD_MANAGEMENT_ENABLED = " true ";
 		expect(await getAiCardListAction({})).toMatchObject({ ok: false, error: { code: "DISABLED" } });
 		expect(createServerClientMock).not.toHaveBeenCalled();
+		expect(getSignedUrlMock).not.toHaveBeenCalled();
 	});
 
 	it("checks auth before validating or calling the RPC", async () => {
 		process.env.AI_CARD_MANAGEMENT_ENABLED = "true";
 		const rpc = vi.fn();
+		const from = vi.fn();
 		createServerClientMock.mockReturnValue({
 			auth: { getUser: vi.fn().mockResolvedValue({ data: { user: null }, error: null }) },
 			rpc,
+			from,
 		});
 		expect(await getAiCardListAction({ limit: 0 })).toMatchObject({
 			ok: false,
 			error: { code: "UNAUTHORIZED" },
 		});
 		expect(rpc).not.toHaveBeenCalled();
+		// Signing is an external API behind the same boundary (testing-guide:
+		// 未認証なら DML と external API が 0 回).
+		expect(from).not.toHaveBeenCalled();
+		expect(getSignedUrlMock).not.toHaveBeenCalled();
 	});
 
 	it("maps owner-hidden DB failures to the safe not-found shape", async () => {
@@ -210,6 +220,7 @@ describe("S-18 AI card list illustration signed URLs", () => {
 			{ id: "ill-1", status: "ready" },
 			{ data: null, error: { message: "raw db failure" } }
 		);
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
 		const result = await getAiCardListAction({});
 
@@ -220,6 +231,29 @@ describe("S-18 AI card list illustration signed URLs", () => {
 			status: "ready",
 			url: null,
 		});
+		expect(getSignedUrlMock).not.toHaveBeenCalled();
+		// The failure is observable in the logs, but redacted.
+		expect(consoleError).toHaveBeenCalledTimes(1);
+		expect(JSON.stringify(consoleError.mock.calls[0])).not.toContain("owner-1/");
+		consoleError.mockRestore();
+	});
+
+	it("AC-4: skips a ready illustration whose storage path is null", async () => {
+		const { from } = createListClientMock(
+			{ id: "ill-1", status: "ready" },
+			{ data: [{ id: "ill-1", storage_path: null }], error: null }
+		);
+
+		const result = await getAiCardListAction({});
+
+		expect(result).toMatchObject({ ok: true });
+		if (!result.ok) throw new Error("expected the list to succeed");
+		expect(result.data.items[0].illustration).toEqual({
+			id: "ill-1",
+			status: "ready",
+			url: null,
+		});
+		expect(from).toHaveBeenCalledWith("illustrations");
 		expect(getSignedUrlMock).not.toHaveBeenCalled();
 	});
 

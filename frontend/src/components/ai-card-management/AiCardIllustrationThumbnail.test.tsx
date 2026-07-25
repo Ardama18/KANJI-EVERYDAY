@@ -27,16 +27,18 @@ describe("frontend/src/components/ai-card-management/AiCardIllustrationThumbnail
 		imageMock.mockClear();
 	});
 
-	it("AC-1: renders the thumbnail with the signed URL and the card front text as alt", () => {
+	it("AC-1: renders the thumbnail with the signed URL and an image-specific alt", () => {
 		const html = render({ id: "ill-1", status: "ready", url: SIGNED_URL });
 
 		expect(html).toContain('data-testid="ai-card-illustration-thumbnail"');
 		expect(html).toContain("イラスト: ");
 		expect(html).toContain("設定済み");
 		expect(imageMock).toHaveBeenCalledTimes(1);
+		// The card front text is already the adjacent heading, so the accessible
+		// name has to say that this node is the illustration of that card.
 		expect(imageMock.mock.calls[0][0]).toMatchObject({
 			src: SIGNED_URL,
-			alt: "山",
+			alt: "山のイラスト",
 			width: 96,
 			height: 96,
 		});

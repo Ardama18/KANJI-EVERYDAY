@@ -29,7 +29,7 @@ export function AiCardIllustrationThumbnail({ illustration, altText }: Props) {
 				<Image
 					data-testid={AI_CARD_ILLUSTRATION_THUMBNAIL_TEST_ID}
 					src={url}
-					alt={altText}
+					alt={`${altText}のイラスト`}
 					width={96}
 					height={96}
 					sizes="96px"

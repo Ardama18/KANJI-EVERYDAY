@@ -166,6 +166,11 @@
    - ローカル Supabase を使う場合、`next.config.mjs` の `remotePatterns` は
      `*.supabase.co` のみなので localhost 署名 URL は `next/image` が拒否する。
      その場合は remote Supabase 環境で確認し、事実を報告に残す（config は変更しない）。
+   - **AC-4 の client 側 `onError` 縮退は手動検証のみ**（`@testing-library/react` と
+     jsdom が未導入で interaction test を書けない。依存追加は停止条件のため行わない）。
+     手順: `/ai/cards` を開いた後 1 時間以上放置するか DevTools で画像リクエストを
+     block し、サムネイルが消えて `イラスト: 設定済み` の文言行だけが残り、検索・編集・
+     削除・イラスト設定が続行できることを確認する。結果を検証記録へ残す。
 4. `git diff` / `git status` で変更範囲を確認（想定 11 ファイル・migration なし）。
 
 ## 変更ファイル一覧（想定）
@@ -195,7 +200,7 @@
 | AC-1 ready にサムネイル | `illustration-urls.test.ts` (1)、`ai-card-management-actions.test.ts` (1)、`AiCardIllustrationThumbnail.test.tsx` (1) |
 | AC-2 未設定/未 ready は従来どおり・レイアウト非破壊 | `illustration-urls.test.ts` (2)(6)、`AiCardIllustrationThumbnail.test.tsx` (2)(3)、`AiCardManagementClient.test.tsx` (5) + 実機確認 |
 | AC-3 owner のみ・`storage_path` 非漏洩 | `ai-card-management-actions.test.ts` (2)(6)、`illustration-urls.test.ts` (3)、`management.test.ts`（parser の default-deny 回帰）、RLS `illustrations_select_owner`（既存） |
-| AC-4 サーバ署名・期限付き・失効時も管理継続 | `ai-card-management-actions.test.ts` (1 の 3600 検証)(3)(4)、`illustration-urls.test.ts` (4)(7)(8)、`AiCardIllustrationThumbnail.test.tsx` (2) |
+| AC-4 サーバ署名・期限付き・失効時も管理継続 | `ai-card-management-actions.test.ts` (1 の 3600 検証)(3)(4)(5 `storage_path IS NULL`)、`illustration-urls.test.ts` (4)(7)(8)、`AiCardIllustrationThumbnail.test.tsx` (2)。**client 側 `onError` 縮退は Phase 5-3 の手動検証のみ**（jsdom 未導入） |
 | AC-5 既存機能に回帰なし・MCP 出力に URL を出さない | 既存 action/service/MCP テスト全 pass（service 層無変更）、`management.test.ts`（共有 parser が常に `url: null`）、`AiCardManagementClient.test.tsx` (4)(5) |
 | AC-6 `check` 通過 | Phase 5-1 |
 
