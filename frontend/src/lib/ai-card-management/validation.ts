@@ -225,10 +225,16 @@ export function parseManagedAiCards(value: Json): { items: ManagedAiCard[]; hasM
 			itemId: row.itemId,
 			decks: row.decks,
 			tags: row.tags,
+			// url is default-deny: the RPC contract never carries a URL, so any value
+			// coming from the database is ignored. Only the Server Action layer signs.
 			illustration:
 				illustration === null
 					? null
-					: { id: illustration.id as string, status: illustration.status as string },
+					: {
+							id: illustration.id as string,
+							status: illustration.status as string,
+							url: null,
+						},
 		};
 	});
 	return { items, hasMore: record.hasMore };

@@ -99,6 +99,44 @@ describe("S-13 management pure contracts", () => {
 		expect(parsed.items[0]).not.toHaveProperty("storagePath");
 	});
 
+	it("S-18: never adopts an illustration url coming from the RPC contract", () => {
+		const parsed = parseManagedAiCards({
+			hasMore: false,
+			items: [
+				{
+					id: CARD_ID,
+					frontText: "山",
+					backText: "やま",
+					skill: "reading",
+					pattern: "R1",
+					createdAt: CREATED_AT,
+					updatedAt: CREATED_AT,
+					source: "app_ai",
+					batchId: SECOND_ID,
+					itemId: CARD_ID,
+					decks: [],
+					tags: [],
+					illustration: {
+						id: SECOND_ID,
+						status: "ready",
+						url: "https://leaked.example/x.png",
+						storage_path: "other-owner/x.png",
+					},
+				},
+			],
+		});
+
+		// default-deny: only the Server Action layer may fill url, so the shared
+		// service (and therefore Remote MCP) always emits null.
+		expect(parsed.items[0].illustration).toEqual({
+			id: SECOND_ID,
+			status: "ready",
+			url: null,
+		});
+		expect(JSON.stringify(parsed)).not.toContain("leaked.example");
+		expect(JSON.stringify(parsed)).not.toContain("storage_path");
+	});
+
 	it("allowlists active detail and hides unexpected database failures", () => {
 		expect(
 			mapAiCardManagementError({

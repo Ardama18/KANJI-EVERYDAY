@@ -10,6 +10,12 @@ export interface AiCardRelationOption {
 export interface AiCardIllustration {
 	readonly id: string;
 	readonly status: string;
+	/**
+	 * Server-signed, expiring URL. Non-null only when the illustration is ready,
+	 * owned by the caller, and signing succeeded in the Server Action layer.
+	 * The RPC / service layer (shared with Remote MCP) always leaves this null.
+	 */
+	readonly url: string | null;
 }
 
 export interface ManagedAiCard {

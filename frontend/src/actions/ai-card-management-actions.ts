@@ -3,6 +3,10 @@
 import { createAppAiCardManagementRepository } from "@/lib/ai-card-management/app-ai-repository";
 import { mapAiCardManagementError } from "@/lib/ai-card-management/errors";
 import {
+	AI_CARD_ILLUSTRATION_SIGNED_URL_EXPIRES_IN_SECONDS,
+	attachIllustrationUrls,
+} from "@/lib/ai-card-management/illustration-urls";
+import {
 	deleteAiCards,
 	listAiCards,
 	setAiCardDecks,
@@ -18,6 +22,7 @@ import type {
 	AiCardManagementOptions,
 } from "@/lib/ai-card-management/types";
 import { isAiCardManagementEnabled } from "@/lib/env";
+import { getSignedUrl } from "@/lib/illustration/storage";
 import { createServerClient } from "@/lib/supabase/server";
 import type { Json } from "@/types/database";
 import { unstable_noStore as noStore, revalidatePath } from "next/cache";
@@ -46,13 +51,61 @@ async function createAuthenticatedBoundary<T>(): Promise<
 	return { ok: true, supabase, userId: data.user.id };
 }
 
+/**
+ * Owner-scoped lookup of the storage paths behind ready illustrations of one
+ * page.  Authentication, the explicit `owner_user_id` filter, and the
+ * `illustrations_select_owner` RLS policy keep other owners out.  A failure
+ * degrades to "no signed URL" (AC-4) and never surfaces a storage path.
+ */
+async function loadReadyIllustrationPaths(
+	supabase: ReturnType<typeof createServerClient>,
+	userId: string,
+	illustrationIds: readonly string[]
+): Promise<ReadonlyMap<string, string>> {
+	const paths = new Map<string, string>();
+	const { data, error } = await supabase
+		.from("illustrations")
+		.select("id, storage_path")
+		.in("id", [...illustrationIds])
+		.eq("owner_user_id", userId)
+		.eq("status", "ready")
+		.not("storage_path", "is", null);
+	if (error || data === null) {
+		// Degradation is silent for the user, so a permanent grant/RLS regression
+		// would otherwise leave no trace at all.  Only the Supabase error code and
+		// message are logged; ids, storage paths, and signed URLs never are.
+		console.error("S-18 illustration path lookup failed", {
+			code: error?.code,
+			message: error?.message,
+		});
+		return paths;
+	}
+	for (const row of data) {
+		// `status='ready'` with `storage_path IS NULL` exists in production, so the
+		// row is skipped instead of being signed with an empty path.
+		if (row.storage_path) paths.set(row.id, row.storage_path);
+	}
+	return paths;
+}
+
 export async function getAiCardListAction(
 	input: unknown
 ): Promise<AiCardActionResult<AiCardListPage>> {
 	noStore();
 	const boundary = await createAuthenticatedBoundary<AiCardListPage>();
 	if (!boundary.ok) return boundary.result;
-	return await listAiCards(createAppAiCardManagementRepository(boundary.supabase), input);
+	const { supabase, userId } = boundary;
+	const result = await listAiCards(createAppAiCardManagementRepository(supabase), input);
+	if (!result.ok) return result;
+	// Signing lives here, not in the shared service: Remote MCP uses the same
+	// service and must not receive signed URLs or storage paths.
+	const data = await attachIllustrationUrls(result.data, {
+		loadPaths: async (illustrationIds) =>
+			await loadReadyIllustrationPaths(supabase, userId, illustrationIds),
+		sign: async (storagePath) =>
+			await getSignedUrl(storagePath, AI_CARD_ILLUSTRATION_SIGNED_URL_EXPIRES_IN_SECONDS),
+	});
+	return { ok: true, data };
 }
 
 export async function getAiCardManagementOptionsAction(): Promise<

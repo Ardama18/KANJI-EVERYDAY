@@ -18,6 +18,7 @@ import type {
 	ManagedAiCard,
 } from "@/lib/ai-card-management/types";
 import { useMemo, useRef, useState } from "react";
+import { AiCardIllustrationThumbnail } from "./AiCardIllustrationThumbnail";
 
 interface Props {
 	readonly initialPage: AiCardListPage;
@@ -355,9 +356,10 @@ export function AiCardManagementClient({ initialPage, initialError, initialOptio
 										デッキ: {card.decks.map((item) => item.name).join("、") || "なし"} / タグ:{" "}
 										{card.tags.map((item) => item.name).join("、") || "なし"}
 									</p>
-									<p className="mt-1 text-xs text-slate-500">
-										イラスト: {card.illustration?.status === "ready" ? "設定済み" : "なし"}
-									</p>
+									<AiCardIllustrationThumbnail
+										illustration={card.illustration}
+										altText={card.frontText}
+									/>
 								</div>
 							</div>
 							<details className="mt-4 border-t border-slate-200 pt-3">

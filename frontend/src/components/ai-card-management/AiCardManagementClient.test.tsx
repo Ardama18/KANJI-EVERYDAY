@@ -1,11 +1,22 @@
+import type { ComponentPropsWithoutRef } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+type MockImageProps = ComponentPropsWithoutRef<"img"> & {
+	src: string;
+};
+
+vi.mock("next/image", () => ({
+	default: (props: MockImageProps) => <img {...props} alt={props.alt ?? ""} />,
+}));
 
 import { AiCardManagementClient, managedCardSyncKey } from "./AiCardManagementClient";
 
 const CARD_ID = "123e4567-e89b-42d3-a456-426614174000";
+const SECOND_CARD_ID = "323e4567-e89b-42d3-a456-426614174002";
 const BATCH_ID = "223e4567-e89b-42d3-a456-426614174001";
 const CREATED_AT = "2026-07-19T03:04:05.000Z";
+const SIGNED_URL = "https://project.supabase.co/storage/v1/object/sign/illustrations/x?token=t";
 
 describe("S-13 AI card management UI", () => {
 	it("remounts uncontrolled editors when refreshed server state changes", () => {
@@ -42,9 +53,94 @@ describe("S-13 AI card management UI", () => {
 		expect(
 			managedCardSyncKey({
 				...card,
-				illustration: { id: BATCH_ID, status: "ready" },
+				illustration: { id: BATCH_ID, status: "ready", url: null },
 			})
 		).not.toBe(initialKey);
+	});
+
+	it("S-18: keeps the editor mount key stable when only the signed URL changes", () => {
+		const card = {
+			id: CARD_ID,
+			frontText: "山",
+			backText: "やま",
+			skill: "reading" as const,
+			pattern: "R1" as const,
+			createdAt: CREATED_AT,
+			updatedAt: CREATED_AT,
+			source: "app_ai" as const,
+			batchId: BATCH_ID,
+			itemId: CARD_ID,
+			decks: [],
+			tags: [],
+			illustration: { id: BATCH_ID, status: "ready", url: null },
+		};
+
+		const keyWithUrl = managedCardSyncKey({
+			...card,
+			illustration: { id: BATCH_ID, status: "ready", url: SIGNED_URL },
+		});
+		const keyWithRotatedUrl = managedCardSyncKey({
+			...card,
+			illustration: { id: BATCH_ID, status: "ready", url: `${SIGNED_URL}-rotated` },
+		});
+
+		expect(keyWithUrl).toBe(managedCardSyncKey(card));
+		expect(keyWithRotatedUrl).toBe(managedCardSyncKey(card));
+		expect(managedCardSyncKey(card)).not.toContain(SIGNED_URL);
+	});
+
+	it("S-18: shows a thumbnail only for the ready card and keeps every existing control", () => {
+		const baseCard = {
+			frontText: "山",
+			backText: "やま",
+			skill: "reading" as const,
+			pattern: "R1" as const,
+			createdAt: CREATED_AT,
+			updatedAt: CREATED_AT,
+			source: "app_ai" as const,
+			batchId: BATCH_ID,
+			decks: [],
+			tags: [],
+		};
+		const html = renderToStaticMarkup(
+			<AiCardManagementClient
+				initialPage={{
+					nextCursor: "opaque",
+					items: [
+						{
+							...baseCard,
+							id: CARD_ID,
+							itemId: CARD_ID,
+							illustration: { id: BATCH_ID, status: "ready", url: SIGNED_URL },
+						},
+						{
+							...baseCard,
+							id: SECOND_CARD_ID,
+							itemId: SECOND_CARD_ID,
+							frontText: "川",
+							illustration: { id: BATCH_ID, status: "pending", url: null },
+						},
+					],
+				}}
+				initialError={null}
+				initialOptions={{
+					status: "ready",
+					data: { decks: [], tags: [], illustrations: [] },
+				}}
+			/>
+		);
+
+		expect(html.match(/data-testid="ai-card-illustration-thumbnail"/g)).toHaveLength(1);
+		expect(html).toContain(`src="${SIGNED_URL}"`);
+		expect(html).toContain("設定済み");
+		expect(html).toContain("なし");
+		expect(html).toContain("本文を保存");
+		expect(html).toContain("タグを保存");
+		expect(html).toContain("イラストを保存");
+		expect(html).toContain("このカードを削除");
+		expect(html).toContain("登録バッチを取り消す");
+		expect(html).toContain("次の20件を読み込む");
+		expect(html).not.toContain("storage_path");
 	});
 
 	it("distinguishes the empty result and exposes all AND filters", () => {
