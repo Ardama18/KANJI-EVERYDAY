@@ -1,7 +1,7 @@
 import type { Json } from "@/types/database";
 
 import { decodeAiCardCursor, isPostgresTimestamp } from "./cursor";
-import type { AiCardPattern, AiCardSkill, ManagedAiCard } from "./types";
+import type { AiCardPattern, AiCardSkill, ManagedAiCard, ManagedCardMnemonic } from "./types";
 
 export const UUID_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -167,6 +167,86 @@ export function parseBulkDeleteInput(value: unknown): Json {
 	});
 }
 
+/**
+ * S-19 fields are parsed "default when absent, strict when present" so an app
+ * deployed ahead of `20260726000000` still renders the list instead of failing
+ * every row (ADR-013 implementation guidance).
+ */
+const parseIllustrationKey = (value: Json | undefined): string | null => {
+	if (value === undefined || value === null) return null;
+	if (typeof value !== "string") throw new Error("Invalid illustration key contract");
+	return value;
+};
+
+const parseSharedCardCount = (value: Json | undefined): number => {
+	if (value === undefined || value === null) return 0;
+	if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+		throw new Error("Invalid mnemonic shared card count contract");
+	}
+	return value;
+};
+
+const parseMnemonic = (value: Json | undefined): ManagedCardMnemonic | null => {
+	if (value === undefined || value === null) return null;
+	if (typeof value !== "object" || Array.isArray(value)) {
+		throw new Error("Invalid mnemonic contract");
+	}
+	const row = value as Record<string, Json | undefined>;
+	const slots = row.slots;
+	const explanation = row.explanation;
+	if (
+		typeof slots !== "object" ||
+		slots === null ||
+		Array.isArray(slots) ||
+		typeof explanation !== "object" ||
+		explanation === null ||
+		Array.isArray(explanation) ||
+		(row.status !== "draft" && row.status !== "approved")
+	) {
+		throw new Error("Invalid mnemonic contract");
+	}
+	const shapeHint = slots.shapeHint;
+	if (
+		typeof slots.kanji !== "string" ||
+		typeof slots.isSingleKanji !== "boolean" ||
+		typeof shapeHint !== "object" ||
+		shapeHint === null ||
+		Array.isArray(shapeHint) ||
+		typeof shapeHint.part !== "string" ||
+		typeof shapeHint.picture !== "string" ||
+		typeof slots.meaningHint !== "string" ||
+		typeof slots.story !== "string" ||
+		typeof explanation.summary !== "string" ||
+		!Array.isArray(explanation.mappings) ||
+		!explanation.mappings.every(isMnemonicMapping)
+	) {
+		throw new Error("Invalid mnemonic contract");
+	}
+	return {
+		slots: {
+			kanji: slots.kanji,
+			isSingleKanji: slots.isSingleKanji,
+			shapeHint: { part: shapeHint.part, picture: shapeHint.picture },
+			meaningHint: slots.meaningHint,
+			story: slots.story,
+		},
+		explanation: {
+			summary: explanation.summary,
+			mappings: explanation.mappings.map((mapping) => ({
+				part: mapping.part,
+				meaning: mapping.meaning,
+			})),
+		},
+		status: row.status,
+	};
+};
+
+const isMnemonicMapping = (value: unknown): value is { part: string; meaning: string } =>
+	typeof value === "object" &&
+	value !== null &&
+	typeof (value as Record<string, unknown>).part === "string" &&
+	typeof (value as Record<string, unknown>).meaning === "string";
+
 const isRelation = (value: unknown): value is { id: string; name: string } =>
 	typeof value === "object" &&
 	value !== null &&
@@ -235,6 +315,9 @@ export function parseManagedAiCards(value: Json): { items: ManagedAiCard[]; hasM
 							status: illustration.status as string,
 							url: null,
 						},
+			illustrationKey: parseIllustrationKey(row.illustrationKey),
+			mnemonic: parseMnemonic(row.mnemonic),
+			mnemonicSharedCardCount: parseSharedCardCount(row.mnemonicSharedCardCount),
 		};
 	});
 	return { items, hasMore: record.hasMore };

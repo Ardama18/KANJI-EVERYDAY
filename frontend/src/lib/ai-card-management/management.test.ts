@@ -15,6 +15,42 @@ const CARD_ID = "123e4567-e89b-42d3-a456-426614174000";
 const SECOND_ID = "223e4567-e89b-42d3-a456-426614174001";
 const CREATED_AT = "2026-07-19T03:04:05.000Z";
 
+const MNEMONIC_JSON = {
+	slots: {
+		kanji: "見",
+		isSingleKanji: true,
+		shapeHint: { part: "下の「見」", picture: "目" },
+		meaningHint: "見る",
+		story: "目で見る",
+	},
+	explanation: {
+		summary: "目で見る。",
+		mappings: [
+			{ part: "下の「見」", meaning: "目で見る" },
+			{ part: "上の光", meaning: "気づく" },
+		],
+	},
+	status: "approved",
+};
+
+/** One raw `list_ai_managed_cards` item; `patch` overrides or adds S-19 keys. */
+const listRow = (patch: Record<string, unknown> = {}) => ({
+	id: CARD_ID,
+	frontText: "山",
+	backText: "やま",
+	skill: "reading",
+	pattern: "R1",
+	createdAt: CREATED_AT,
+	updatedAt: CREATED_AT,
+	source: "app_ai",
+	batchId: SECOND_ID,
+	itemId: CARD_ID,
+	decks: [],
+	tags: [],
+	illustration: null,
+	...patch,
+});
+
 describe("S-13 management pure contracts", () => {
 	it("round-trips only a strict versioned cursor", () => {
 		const encoded = encodeAiCardCursor({ id: CARD_ID, createdAt: CREATED_AT });
@@ -135,6 +171,77 @@ describe("S-13 management pure contracts", () => {
 		});
 		expect(JSON.stringify(parsed)).not.toContain("leaked.example");
 		expect(JSON.stringify(parsed)).not.toContain("storage_path");
+	});
+
+	it("S-19: defaults the mnemonic fields when the RPC does not project them", () => {
+		// Deployment skew tolerance (ADR-013 implementation guidance): an app running
+		// ahead of 20260726000000 must still render the page.
+		const parsed = parseManagedAiCards({ hasMore: false, items: [listRow()] });
+
+		expect(parsed.items[0]).toMatchObject({
+			illustrationKey: null,
+			mnemonic: null,
+			mnemonicSharedCardCount: 0,
+		});
+	});
+
+	it("S-19: adopts a well-formed mnemonic projection as-is", () => {
+		const parsed = parseManagedAiCards({
+			hasMore: false,
+			items: [
+				listRow({
+					illustrationKey: "見",
+					mnemonic: {
+						slots: {
+							kanji: "見",
+							isSingleKanji: true,
+							shapeHint: { part: "下の「見」", picture: "目" },
+							meaningHint: "見る",
+							story: "目で見る",
+						},
+						explanation: {
+							summary: "目で見る。",
+							mappings: [
+								{ part: "下の「見」", meaning: "目で見る" },
+								{ part: "上の光", meaning: "気づく" },
+							],
+						},
+						status: "approved",
+					},
+					mnemonicSharedCardCount: 2,
+				}),
+			],
+		});
+
+		expect(parsed.items[0].illustrationKey).toBe("見");
+		expect(parsed.items[0].mnemonicSharedCardCount).toBe(2);
+		expect(parsed.items[0].mnemonic).toMatchObject({
+			status: "approved",
+			slots: { kanji: "見", isSingleKanji: true },
+			explanation: { summary: "目で見る。" },
+		});
+	});
+
+	it.each([
+		["a mnemonic with an unknown status", { mnemonic: { ...MNEMONIC_JSON, status: "published" } }],
+		[
+			"a mnemonic whose slots are incomplete",
+			{ mnemonic: { ...MNEMONIC_JSON, slots: { kanji: "見" } } },
+		],
+		[
+			"a mnemonic whose mappings are not part/meaning pairs",
+			{
+				mnemonic: {
+					...MNEMONIC_JSON,
+					explanation: { summary: "目で見る。", mappings: [{ part: "下の「見」" }] },
+				},
+			},
+		],
+		["a non-string illustration key", { illustrationKey: 3 }],
+		["a negative shared card count", { mnemonicSharedCardCount: -1 }],
+		["a fractional shared card count", { mnemonicSharedCardCount: 1.5 }],
+	])("S-19: rejects %s instead of silently defaulting", (_label, patch) => {
+		expect(() => parseManagedAiCards({ hasMore: false, items: [listRow(patch)] })).toThrow();
 	});
 
 	it("allowlists active detail and hides unexpected database failures", () => {

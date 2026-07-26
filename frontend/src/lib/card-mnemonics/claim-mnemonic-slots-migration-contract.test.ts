@@ -128,9 +128,9 @@ describe("S-16H claim_ai_import_concept migration contract", () => {
 
 		expect(files).toContain(S16H_MIGRATION_FILE);
 		expect(samePrefix).toEqual([S16H_MIGRATION_FILE]);
-		// 既存の最大 prefix より後に並ぶ
-		const others = files.filter((file) => file !== S16H_MIGRATION_FILE).sort();
-		expect(prefix > (others[others.length - 1]?.slice(0, 14) ?? "")).toBe(true);
+		// S-16H 作成時点の最大 prefix（card_mnemonics owner fix）より後に並ぶ。
+		// 「常に最新であること」は後続 migration の追加ごとに壊れるため主張しない。
+		expect(prefix > "20260724000000").toBe(true);
 	});
 });
 

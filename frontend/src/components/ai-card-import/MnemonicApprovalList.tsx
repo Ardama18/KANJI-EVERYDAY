@@ -27,7 +27,13 @@ interface MnemonicApprovalListProps {
 	readonly disabled: boolean;
 }
 
-const MNEMONIC_LIMITS = {
+/**
+ * Client-side limits shared with the post-commit edit form on `/ai/cards` (S-19).
+ * The authoritative copy for server-side writes lives in
+ * `@/lib/ai-card-generation/mnemonic-sanitize`; this module is `"use client"`, so
+ * Server Actions cannot call into it.
+ */
+export const MNEMONIC_LIMITS = {
 	kanjiMax: 16,
 	textMax: 100,
 	summaryMax: 120,
@@ -283,7 +289,9 @@ function TextField({
  * (non-empty, code-point length caps, mappings 2-4). The server remains the
  * authoritative validator (NFKC + re-cap); this only governs the approve UI.
  */
-export function isMnemonicEntryValid(entry: MnemonicApprovalEntry): boolean {
+export function isMnemonicEntryValid(
+	entry: Pick<MnemonicApprovalEntry, "slots" | "explanation">
+): boolean {
 	const { slots, explanation } = entry;
 	if (!isBounded(slots.kanji, MNEMONIC_LIMITS.kanjiMax)) return false;
 	if (typeof slots.isSingleKanji !== "boolean") return false;

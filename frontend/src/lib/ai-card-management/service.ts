@@ -1,4 +1,13 @@
+import type {
+	MnemonicExplanationDraft,
+	MnemonicSlotsDraft,
+} from "@/lib/ai-card-generation/contracts";
+import {
+	sanitizeMnemonicExplanation,
+	sanitizeMnemonicSlots,
+} from "@/lib/ai-card-generation/mnemonic-sanitize";
 import type { Json } from "@/types/database";
+import type { AiCardMnemonicRepository } from "./app-ai-repository";
 import { encodeAiCardCursor } from "./cursor";
 import { mapAiCardManagementError } from "./errors";
 import type { AiCardActionResult, AiCardListPage } from "./types";
@@ -127,6 +136,64 @@ export async function setAiCardIllustration(
 	} catch (error) {
 		return caughtError<Json>(error);
 	}
+}
+
+/**
+ * Post-commit mnemonic edit (ADR-013).  The order is fixed:
+ *   1. parse + server-side re-sanitize (shared with the commit path, decision 4)
+ *   2. verify that `cardId` is owned by the caller and carries `illustrationKey`
+ *      (decision 2) — on a miss it returns NOT_FOUND without touching the table
+ *   3. upsert with `status='approved'`; conflicts are last-write-wins (decision 3)
+ */
+export async function updateAiCardMnemonic(
+	repository: AiCardMnemonicRepository,
+	input: unknown
+): Promise<AiCardActionResult<Json>> {
+	try {
+		const parsed = parseMnemonicUpdateInput(input);
+		const owned = await repository.findOwnedCardByIllustrationKey({
+			cardId: parsed.cardId,
+			illustrationKey: parsed.illustrationKey,
+		});
+		if (owned.error !== null) return errorResult(owned.error);
+		if (owned.data === null) {
+			return {
+				ok: false,
+				error: { code: "NOT_FOUND", status: 404, message: "対象が見つかりません。" },
+			};
+		}
+		const result = await repository.upsertMnemonic({
+			illustrationKey: parsed.illustrationKey,
+			slots: parsed.slots,
+			explanation: parsed.explanation,
+		});
+		return result.error === null ? { ok: true, data: result.data } : errorResult(result.error);
+	} catch (error) {
+		return caughtError<Json>(error);
+	}
+}
+
+export function parseMnemonicUpdateInput(input: unknown): Readonly<{
+	cardId: string;
+	illustrationKey: string;
+	slots: MnemonicSlotsDraft;
+	explanation: MnemonicExplanationDraft;
+}> {
+	const value = requireRecord(input);
+	const cardId = requireCardId(value);
+	if (typeof value.illustrationKey !== "string") {
+		throw new AiCardValidationError("illustrationKey is invalid");
+	}
+	const illustrationKey = value.illustrationKey.trim();
+	if (illustrationKey.length < 1 || illustrationKey.length > 512) {
+		throw new AiCardValidationError("illustrationKey is invalid");
+	}
+	const slots = sanitizeMnemonicSlots(value.slots);
+	const explanation = sanitizeMnemonicExplanation(value.explanation);
+	if (slots === undefined || explanation === undefined) {
+		throw new AiCardValidationError("mnemonic is invalid");
+	}
+	return { cardId, illustrationKey, slots, explanation };
 }
 
 export async function deleteAiCards(

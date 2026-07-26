@@ -1,6 +1,9 @@
 "use server";
 
-import { createAppAiCardManagementRepository } from "@/lib/ai-card-management/app-ai-repository";
+import {
+	createAppAiCardManagementRepository,
+	createAppAiCardMnemonicRepository,
+} from "@/lib/ai-card-management/app-ai-repository";
 import { mapAiCardManagementError } from "@/lib/ai-card-management/errors";
 import {
 	AI_CARD_ILLUSTRATION_SIGNED_URL_EXPIRES_IN_SECONDS,
@@ -10,11 +13,11 @@ import {
 	deleteAiCards,
 	listAiCards,
 	setAiCardDecks,
-	setAiCardIllustration,
 	setAiCardTagNames,
 	setAiCardTags,
 	undoAiImportBatch,
 	updateAiCardContent,
+	updateAiCardMnemonic,
 } from "@/lib/ai-card-management/service";
 import type {
 	AiCardActionResult,
@@ -127,22 +130,11 @@ export async function getAiCardManagementOptionsAction(): Promise<
 			.eq("owner_user_id", boundary.userId)
 			.order("display_name", { ascending: true });
 		if (tagError) return { ok: false, error: mapAiCardManagementError(tagError) };
-		const { data: illustrations, error: illustrationError } = await boundary.supabase
-			.from("illustrations")
-			.select("id, status")
-			.eq("owner_user_id", boundary.userId)
-			.eq("status", "ready")
-			.not("storage_path", "is", null)
-			.order("created_at", { ascending: false });
-		if (illustrationError) {
-			return { ok: false, error: mapAiCardManagementError(illustrationError) };
-		}
 		return {
 			ok: true,
 			data: {
 				decks: (decks ?? []).map((deck) => ({ id: deck.id, name: deck.name })),
 				tags: (tags ?? []).map((tag) => ({ id: tag.id, name: tag.display_name })),
-				illustrations: illustrations ?? [],
 			},
 		};
 	} catch (error) {
@@ -180,10 +172,24 @@ export async function setAiCardTagNamesAction(input: unknown): Promise<AiCardAct
 	return await mutationResult(async (repository) => await setAiCardTagNames(repository, input));
 }
 
-export async function setAiCardIllustrationAction(
+/**
+ * Mnemonic edits are not routed through `mutationResult`: the repository is bound
+ * to the session user id (ADR-013 decision 1), which the shared factory does not
+ * carry.  Flag evaluation, authentication and `revalidatePath` stay identical.
+ */
+export async function updateAiCardMnemonicAction(
 	input: unknown
 ): Promise<AiCardActionResult<Json>> {
-	return await mutationResult(async (repository) => await setAiCardIllustration(repository, input));
+	const boundary = await createAuthenticatedBoundary<Json>();
+	if (!boundary.ok) return boundary.result;
+	const result = await updateAiCardMnemonic(
+		createAppAiCardMnemonicRepository(boundary.supabase, boundary.userId),
+		input
+	);
+	if (result.ok) {
+		revalidatePath("/ai/cards");
+	}
+	return result;
 }
 
 export async function deleteAiCardsAction(input: unknown): Promise<AiCardActionResult<Json>> {

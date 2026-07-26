@@ -4,6 +4,7 @@ import {
 	updateRemoteMcpAiCard,
 } from "@/lib/ai-card-management/remote-mcp-repository";
 import { deleteAiCards, listAiCards, undoAiImportBatch } from "@/lib/ai-card-management/service";
+import type { ManagedAiCard } from "@/lib/ai-card-management/types";
 import { createRemoteMcpImportRepository } from "@/lib/ai-import/remote-mcp-repository";
 import { commitCardImport, getImportStatus, previewCardImport } from "@/lib/ai-import/service";
 import type { JwtScopedSupabaseClient } from "@/lib/supabase/server";
@@ -63,7 +64,18 @@ export function createMcpToolServices(dependencies: McpToolServiceDependencies):
 				repository: imports,
 				correlationId: dependencies.createCorrelationId(),
 			}),
-		listAiCards: async (input) => await listAiCards(cards, input),
+		listAiCards: async (input) => {
+			const result = await listAiCards(cards, input);
+			return result.ok
+				? {
+						ok: true as const,
+						data: {
+							items: result.data.items.map(toMcpAiCard),
+							nextCursor: result.data.nextCursor,
+						},
+					}
+				: result;
+		},
 		updateAiCard: async ({ cardId, expectedUpdatedAt, patch }) => {
 			const result = await updateRemoteMcpAiCard(client, actor, {
 				cardId,
@@ -76,6 +88,30 @@ export function createMcpToolServices(dependencies: McpToolServiceDependencies):
 		},
 		deleteAiCards: async ({ cards: targetCards }) => await deleteAiCards(cards, targetCards),
 		undoImportBatch: async ({ batchId }) => await undoAiImportBatch(cards, batchId),
+	};
+}
+
+/**
+ * Allowlist projection for the MCP `list_ai_cards` response (S-19 AC-8).  The key
+ * order mirrors the `ManagedAiCard` declaration order, so the serialized shape is
+ * byte-identical to the pre-S-19 pass-through.  An allowlist — not a delete list —
+ * so future `ManagedAiCard` fields never leak into the tool contract by default.
+ */
+function toMcpAiCard(card: ManagedAiCard) {
+	return {
+		id: card.id,
+		frontText: card.frontText,
+		backText: card.backText,
+		skill: card.skill,
+		pattern: card.pattern,
+		createdAt: card.createdAt,
+		updatedAt: card.updatedAt,
+		source: card.source,
+		batchId: card.batchId,
+		itemId: card.itemId,
+		decks: card.decks,
+		tags: card.tags,
+		illustration: card.illustration,
 	};
 }
 

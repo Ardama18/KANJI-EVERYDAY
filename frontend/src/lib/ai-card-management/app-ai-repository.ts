@@ -1,7 +1,11 @@
+import type {
+	MnemonicExplanationDraft,
+	MnemonicSlotsDraft,
+} from "@/lib/ai-card-generation/contracts";
 import type { ServerSupabaseClient } from "@/lib/supabase/server";
 import type { Json } from "@/types/database";
 
-import type { AiCardManagementRepository } from "./service";
+import type { AiCardManagementRepository, AiCardManagementRepositoryResult } from "./service";
 
 /**
  * The existing cookie/RLS UI adapter.  Remote MCP obtains a different,
@@ -72,3 +76,60 @@ export function createAppAiCardManagementRepository(
 }
 
 export type AppAiCardManagementRepositoryResult = Readonly<{ data: Json; error: unknown | null }>;
+
+/**
+ * The post-commit mnemonic edit path (ADR-013).  It is deliberately NOT part of
+ * `AiCardManagementRepository`: keeping it separate means the Remote MCP
+ * repository cannot implement it, so "MCP never writes mnemonics" is expressed
+ * in the types instead of in a comment.
+ */
+export interface AiCardMnemonicRepository {
+	/** The caller's card whose `illustration_key` equals the given one, or null. */
+	findOwnedCardByIllustrationKey(
+		input: Readonly<{ cardId: string; illustrationKey: string }>
+	): Promise<AiCardManagementRepositoryResult<{ id: string } | null>>;
+	upsertMnemonic(
+		input: Readonly<{
+			illustrationKey: string;
+			slots: MnemonicSlotsDraft;
+			explanation: MnemonicExplanationDraft;
+		}>
+	): Promise<AiCardManagementRepositoryResult<Json>>;
+}
+
+/**
+ * `ownerUserId` is bound here from the authenticated session, never from a
+ * command argument, and the owner-scoped `card_mnemonics` RLS policies stay the
+ * last line of defence (ADR-013 decisions 1 and 6).
+ */
+export function createAppAiCardMnemonicRepository(
+	client: ServerSupabaseClient,
+	ownerUserId: string
+): AiCardMnemonicRepository {
+	return {
+		async findOwnedCardByIllustrationKey(input) {
+			const { data, error } = await client
+				.from("cards")
+				.select("id")
+				.eq("id", input.cardId)
+				.eq("owner_user_id", ownerUserId)
+				.eq("illustration_key", input.illustrationKey)
+				.maybeSingle();
+			return { data, error };
+		},
+		async upsertMnemonic(input) {
+			// `updated_at` is maintained by the set_card_mnemonics_updated_at trigger.
+			const { data, error } = await client.from("card_mnemonics").upsert(
+				{
+					owner_user_id: ownerUserId,
+					illustration_key: input.illustrationKey,
+					slots: input.slots as unknown as Json,
+					explanation: input.explanation as unknown as Json,
+					status: "approved",
+				},
+				{ onConflict: "owner_user_id,illustration_key" }
+			);
+			return { data, error };
+		},
+	};
+}

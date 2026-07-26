@@ -1,12 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { AiCardMnemonicRepository } from "./app-ai-repository";
 import type { AiCardManagementRepository } from "./service";
 import {
 	deleteAiCards,
 	listAiCards,
+	setAiCardIllustration,
 	setAiCardTagNames,
 	undoAiImportBatch,
 	updateAiCardContent,
+	updateAiCardMnemonic,
 } from "./service";
 
 const cardId = "123e4567-e89b-42d3-a456-426614174000";
@@ -111,6 +114,26 @@ describe("S-14 AI card management application service", () => {
 		expect(repo.undoImport).not.toHaveBeenCalled();
 	});
 
+	it("S-19 AC-15: keeps the illustration service path after the UI form was removed", async () => {
+		const repo = repository();
+		const result = await setAiCardIllustration(repo, { cardId, illustrationId: relatedId });
+		expect(result).toEqual({ ok: true, data: { changed: true } });
+		expect(repo.setIllustration).toHaveBeenCalledWith({ cardId, illustrationId: relatedId });
+
+		const invalid = await setAiCardIllustration(repo, { cardId, illustrationId: "not-a-uuid" });
+		expect(invalid).toMatchObject({ ok: false, error: { code: "VALIDATION_ERROR" } });
+		expect(repo.setIllustration).toHaveBeenCalledOnce();
+	});
+
+	it("S-19: keeps the list DTO usable when the RPC predates the mnemonic projection", async () => {
+		// Deployment skew: the fixture carries none of the S-19 keys.
+		const result = await listAiCards(repository(), {});
+		expect(result).toMatchObject({
+			ok: true,
+			data: { items: [{ illustrationKey: null, mnemonic: null, mnemonicSharedCardCount: 0 }] },
+		});
+	});
+
 	it("sanitizes unexpected repository errors without exposing their provider body", async () => {
 		const repo = repository({
 			updateContent: vi.fn(async () => ({
@@ -135,4 +158,146 @@ describe("S-14 AI card management application service", () => {
 			},
 		});
 	});
+});
+
+const VALID_MNEMONIC_INPUT = {
+	cardId,
+	illustrationKey: "見",
+	slots: {
+		kanji: "見",
+		isSingleKanji: true,
+		shapeHint: { part: "下の「見」", picture: "目" },
+		meaningHint: "見る・気づく",
+		story: "目で見たものが頭の中で光って記憶に残る",
+	},
+	explanation: {
+		summary: "目で見たものが、頭の中で光って記憶に残る。",
+		mappings: [
+			{ part: "下の「見」", meaning: "目で見る" },
+			{ part: "上の光", meaning: "頭の中で気づく" },
+		],
+	},
+} as const;
+
+function mnemonicRepository(
+	overrides: Partial<AiCardMnemonicRepository> = {}
+): AiCardMnemonicRepository {
+	return {
+		findOwnedCardByIllustrationKey: vi.fn(async () => ({ data: { id: cardId }, error: null })),
+		upsertMnemonic: vi.fn(async () => ({ data: null, error: null })),
+		...overrides,
+	};
+}
+
+describe("S-19 post-commit mnemonic edit service", () => {
+	it("AC-3: upserts the sanitized entry for the verified card", async () => {
+		const repo = mnemonicRepository();
+		const result = await updateAiCardMnemonic(repo, {
+			...VALID_MNEMONIC_INPUT,
+			slots: { ...VALID_MNEMONIC_INPUT.slots, meaningHint: "  見る・気づく  " },
+		});
+
+		expect(result).toEqual({ ok: true, data: null });
+		expect(repo.findOwnedCardByIllustrationKey).toHaveBeenCalledWith({
+			cardId,
+			illustrationKey: "見",
+		});
+		// The server re-normalizes: the padded value never reaches the table as-is,
+		// and no owner or status travels in the command.
+		expect(repo.upsertMnemonic).toHaveBeenCalledWith({
+			illustrationKey: "見",
+			slots: expect.objectContaining({ meaningHint: "見る・気づく" }),
+			explanation: VALID_MNEMONIC_INPUT.explanation,
+		});
+		expect(repo.upsertMnemonic).toHaveBeenCalledOnce();
+		const command = vi.mocked(repo.upsertMnemonic).mock.calls[0]?.[0];
+		expect(command).not.toHaveProperty("ownerUserId");
+		expect(command).not.toHaveProperty("status");
+	});
+
+	it("AC-6: returns NOT_FOUND without writing when the card/key pair is not the caller's", async () => {
+		const repo = mnemonicRepository({
+			findOwnedCardByIllustrationKey: vi.fn(async () => ({ data: null, error: null })),
+		});
+
+		const result = await updateAiCardMnemonic(repo, {
+			...VALID_MNEMONIC_INPUT,
+			illustrationKey: "他人のキー",
+		});
+
+		expect(result).toEqual({
+			ok: false,
+			error: { code: "NOT_FOUND", status: 404, message: "対象が見つかりません。" },
+		});
+		expect(repo.upsertMnemonic).not.toHaveBeenCalled();
+	});
+
+	it("AC-6: never writes when the ownership lookup itself fails", async () => {
+		const repo = mnemonicRepository({
+			findOwnedCardByIllustrationKey: vi.fn(async () => ({
+				data: null,
+				error: { code: "XX000", message: "raw SQL body" },
+			})),
+		});
+
+		const result = await updateAiCardMnemonic(repo, VALID_MNEMONIC_INPUT);
+
+		expect(result).toMatchObject({ ok: false, error: { code: "INTERNAL_ERROR" } });
+		expect(JSON.stringify(result)).not.toContain("raw SQL body");
+		expect(repo.upsertMnemonic).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		[
+			"kanji of 17 code points",
+			{ slots: { ...VALID_MNEMONIC_INPUT.slots, kanji: "見".repeat(17) } },
+		],
+		[
+			"text of 101 code points",
+			{ slots: { ...VALID_MNEMONIC_INPUT.slots, story: "あ".repeat(101) } },
+		],
+		[
+			"summary of 121 code points",
+			{
+				explanation: { ...VALID_MNEMONIC_INPUT.explanation, summary: "あ".repeat(121) },
+			},
+		],
+		[
+			"a single mapping",
+			{
+				explanation: {
+					...VALID_MNEMONIC_INPUT.explanation,
+					mappings: [{ part: "部品", meaning: "意味" }],
+				},
+			},
+		],
+		[
+			"five mappings",
+			{
+				explanation: {
+					...VALID_MNEMONIC_INPUT.explanation,
+					mappings: Array.from({ length: 5 }, (_, index) => ({
+						part: `部品${index}`,
+						meaning: `意味${index}`,
+					})),
+				},
+			},
+		],
+		["a blank illustration key", { illustrationKey: "   " }],
+		["a non-UUID card id", { cardId: "not-a-uuid" }],
+	])(
+		"AC-5/AC-6: rejects %s before any ownership lookup or write",
+		async (_label, patch: Record<string, unknown>) => {
+			const repo = mnemonicRepository();
+
+			const result = await updateAiCardMnemonic(repo, { ...VALID_MNEMONIC_INPUT, ...patch });
+
+			expect(result).toEqual({
+				ok: false,
+				error: { code: "VALIDATION_ERROR", status: 400, message: "入力内容を確認してください。" },
+			});
+			expect(repo.findOwnedCardByIllustrationKey).not.toHaveBeenCalled();
+			expect(repo.upsertMnemonic).not.toHaveBeenCalled();
+		}
+	);
 });
