@@ -15,6 +15,7 @@ import {
 	previewCardImport,
 	sanitizeMnemonics,
 } from "@/lib/ai-import/service";
+import { getDailyStudyStatusForActor } from "@/lib/deck/daily-study-status";
 import { isAiCardImportEnabled } from "@/lib/env";
 import type { JwtScopedSupabaseClient } from "@/lib/supabase/server";
 import type { Json } from "@/types/database";
@@ -58,6 +59,7 @@ export function createMcpToolServices(dependencies: McpToolServiceDependencies):
 	const cards = createRemoteMcpCardManagementRepository(client, actor);
 	return {
 		listDecks: async () => await listOwnerDecks(client),
+		getDailyStudyStatus: async () => await getDailyStudyStatusForActor(client, actor),
 		createDeck: async ({ name }) => await createOwnerDeck(client, actor, name),
 		previewCardImport: async ({ request }) => {
 			const secret = dependencies.previewSecret;

@@ -347,7 +347,7 @@ function MnemonicEditor({
 	readonly card: ManagedAiCard;
 	readonly disabled: boolean;
 	readonly onSave: (input: { slots: MnemonicSlotsDraft; explanation: MnemonicExplanationDraft }) => void;
-}) 
+})
 ```
 
 - `card.mnemonic === null || card.illustrationKey === null` のとき

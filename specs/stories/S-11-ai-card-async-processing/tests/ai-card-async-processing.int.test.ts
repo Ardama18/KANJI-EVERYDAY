@@ -934,7 +934,7 @@ describe("S-11 commit and queue integration", () => {
 		expect(migration).toContain("sha256=p_digest");
 	});
 
-	it.skipIf(!process.env.S11_FRESH_DATABASE_URL)(
+	it.skipIf(!process.env.S11_FRESH_DATABASE_URL || process.env.S11_LOCAL_CORE_ONLY === "1")(
 		"R13-F1 committed response loss keeps the normalized source through the actual route and DB",
 		async () => {
 			const databaseUrl = process.env.S11_FRESH_DATABASE_URL;
@@ -4521,7 +4521,8 @@ function workerEventLogs(logs: readonly string[], event: string): Record<string,
 // S10_TEST_DATABASE_URL（隔離 DB）がある場合のみ実行し、未設定環境では skip する。
 // ---------------------------------------------------------------------------
 
-const s16hDatabaseUrl = process.env.S10_TEST_DATABASE_URL?.trim();
+const s16hDatabaseUrl =
+	process.env.S11_LOCAL_CORE_ONLY === "1" ? undefined : process.env.S10_TEST_DATABASE_URL?.trim();
 const s16hOwnerA = S10_ACTORS.ownerA.userId ?? "";
 const s16hOwnerB = S10_ACTORS.ownerB.userId ?? "";
 

@@ -152,7 +152,9 @@ async function seedFixtures(db: S10DbClient): Promise<void> {
 	`);
 }
 
-const runIf = databaseUrl ? describe : describe.skip;
+const runIf = databaseUrl !== undefined && process.env.S11_LOCAL_CORE_ONLY !== "1"
+	? describe
+	: describe.skip;
 
 runIf("S-16D commit → card_mnemonics (AC-2 / AC-4 / AC-5)", () => {
 	let db: S10DbClient;

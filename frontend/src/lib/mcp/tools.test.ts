@@ -6,6 +6,12 @@ import { MCP_TOOL_NAMES, type McpToolServices, invokeMcpTool, mcpToolDescriptors
 function services(overrides: Partial<McpToolServices> = {}): McpToolServices {
 	return {
 		listDecks: vi.fn().mockResolvedValue({ decks: [] }),
+		getDailyStudyStatus: vi.fn().mockResolvedValue({
+			contractVersion: 1,
+			date: "2026-07-26",
+			state: "COMPLETED",
+			completed: true,
+		}),
 		createDeck: vi.fn().mockResolvedValue({ deck: { id: "deck-1", name: "初回デッキ" } }),
 		previewCardImport: vi.fn().mockResolvedValue({ ok: true }),
 		commitCardImport: vi.fn().mockResolvedValue({ ok: true }),
@@ -49,9 +55,10 @@ function commitInput(image: { mode: "none" | "ai" }) {
 }
 
 describe("S-14 static MCP tools", () => {
-	it("exposes exactly the approved nine-tool allowlist", () => {
+	it("exposes exactly the approved ten-tool allowlist", () => {
 		expect(MCP_TOOL_NAMES).toEqual([
 			"list_decks",
+			"get_daily_study_status",
 			"create_deck",
 			"preview_card_import",
 			"commit_card_import",
@@ -105,6 +112,54 @@ describe("S-14 static MCP tools", () => {
 			error: { code: "VALIDATION_ERROR" },
 		});
 		expect(instance.listDecks).not.toHaveBeenCalled();
+	});
+
+	it("dispatches get_daily_study_status with strict empty input only", async () => {
+		const getDailyStudyStatus = vi.fn().mockResolvedValue({
+			contractVersion: 1,
+			date: "2026-07-26",
+			state: "COMPLETED",
+			completed: true,
+		});
+		const instance = services({ getDailyStudyStatus });
+
+		const result = await invokeMcpTool("get_daily_study_status", {}, instance);
+		const rejected = await invokeMcpTool(
+			"get_daily_study_status",
+			{ ownerId: "forged", date: "2026-07-25", deckId: DECK_ID },
+			instance
+		);
+
+		expect(result.structuredContent).toEqual({
+			ok: true,
+			data: {
+				contractVersion: 1,
+				date: "2026-07-26",
+				state: "COMPLETED",
+				completed: true,
+			},
+		});
+		if (!result.structuredContent.ok) throw new Error("expected daily status to succeed");
+		expect(Object.keys(result.structuredContent.data as Record<string, unknown>)).toEqual([
+			"contractVersion",
+			"date",
+			"state",
+			"completed",
+		]);
+		expect(rejected.structuredContent).toMatchObject({
+			ok: false,
+			error: { code: "VALIDATION_ERROR" },
+		});
+		expect(getDailyStudyStatus).toHaveBeenCalledTimes(1);
+		expect(getDailyStudyStatus).toHaveBeenCalledWith();
+	});
+
+	it("marks get_daily_study_status as read-only, non-destructive, and idempotent", () => {
+		expect(mcpToolDescriptors.get_daily_study_status.annotations).toEqual({
+			readOnlyHint: true,
+			destructiveHint: false,
+			idempotentHint: true,
+		});
 	});
 
 	it("requires exactly one status selector", async () => {
@@ -206,6 +261,24 @@ describe("S-14 static MCP tools", () => {
 		const result = await invokeMcpTool("list_decks", {}, instance);
 		expect(result.isError).toBe(true);
 		expect(result.structuredContent).toMatchObject({ ok: false, error: { code: "NOT_FOUND" } });
+	});
+
+	it("maps get_daily_study_status exceptions to INTERNAL_ERROR without raw detail", async () => {
+		const instance = services({
+			getDailyStudyStatus: vi.fn(async () => {
+				throw new Error("SQL token secret raw database detail");
+			}),
+		});
+
+		const result = await invokeMcpTool("get_daily_study_status", {}, instance);
+
+		expect(result.isError).toBe(true);
+		expect(result.structuredContent).toMatchObject({
+			ok: false,
+			error: { code: "INTERNAL_ERROR" },
+		});
+		expect(JSON.stringify(result)).not.toContain("SQL");
+		expect(JSON.stringify(result)).not.toContain("secret");
 	});
 
 	it("unwraps application-service success unions exactly once", async () => {

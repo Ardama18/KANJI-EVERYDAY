@@ -210,6 +210,35 @@ describe.skipIf(verifiedIsolatedDatabaseUrl === undefined)(
 		);
 
 		it(
+			"keeps daily study status source rows scoped to the OAuth actor owner",
+			async () => {
+				const fixture = await createFixture();
+				const dailyFixture = await insertDailyStudyStatusFixture(fixture);
+				const ownerA = await remoteQuery<DailyStudyStatusSourceRows>(
+					fixture,
+					dailyStudyStatusSourceSql(fixture)
+				);
+				const ownerB = await remoteQuery<DailyStudyStatusSourceRows>(
+					fixture,
+					dailyStudyStatusSourceSql(fixture),
+					{ ownerUserId: S10_ACTORS.ownerB.userId }
+				);
+
+				expect(ownerA).toEqual({
+					deckIds: [fixture.ownerDeckId],
+					cardIds: [dailyFixture.ownerCardId],
+					reviewUsers: [S10_ACTORS.ownerA.userId],
+				});
+				expect(ownerB).toEqual({
+					deckIds: [fixture.otherDeckId],
+					cardIds: [dailyFixture.otherCardId],
+					reviewUsers: [S10_ACTORS.ownerB.userId],
+				});
+			},
+			S10_DB_TEST_TIMEOUT_MS
+		);
+
+		it(
 			"rejects mismatched client and session claims before preview work",
 			async () => {
 				const fixture = await createFixture();
@@ -595,6 +624,79 @@ async function createFixture(imageMode: "none" | "ai" = "none"): Promise<Fixture
 		idempotencyKey,
 		previewToken,
 	};
+}
+
+interface DailyStudyStatusFixture {
+	readonly ownerCardId: string;
+	readonly otherCardId: string;
+}
+
+interface DailyStudyStatusSourceRows {
+	readonly deckIds: readonly string[];
+	readonly cardIds: readonly string[];
+	readonly reviewUsers: readonly string[];
+}
+
+async function insertDailyStudyStatusFixture(fixture: Fixture): Promise<DailyStudyStatusFixture> {
+	if (database === undefined) throw new Error("S14_TEST_DATABASE_URL is required");
+	const ownerCardId = randomUUID();
+	const otherCardId = randomUUID();
+	await database.execute(`
+		INSERT INTO public.cards(
+			id,owner_user_id,visibility,skill,pattern,front_text,back_text,card_key
+		) VALUES
+			(
+				'${ownerCardId}'::uuid,'${S10_ACTORS.ownerA.userId}'::uuid,'private',
+				'reading','R1',${sqlLiteral(`${fixture.marker} owner daily`)},'おーなー',
+				'${hash(`${fixture.marker}-owner-daily`)}'
+			),
+			(
+				'${otherCardId}'::uuid,'${S10_ACTORS.ownerB.userId}'::uuid,'private',
+				'reading','R1',${sqlLiteral(`${fixture.marker} other daily`)},'ほか',
+				'${hash(`${fixture.marker}-other-daily`)}'
+			);
+		INSERT INTO public.deck_cards(deck_id,card_id)
+		VALUES
+			('${fixture.ownerDeckId}'::uuid,'${ownerCardId}'::uuid),
+			('${fixture.otherDeckId}'::uuid,'${otherCardId}'::uuid);
+		INSERT INTO public.review_states(
+			user_id,card_id,level,due_date,last_rating,retry_today_count,last_reviewed_at
+		) VALUES
+			(
+				'${S10_ACTORS.ownerA.userId}'::uuid,'${ownerCardId}'::uuid,2,'2026-07-27',
+				'good',0,'2026-07-25T15:00:00.000Z'::timestamptz
+			),
+			(
+				'${S10_ACTORS.ownerB.userId}'::uuid,'${otherCardId}'::uuid,0,'2026-07-26',
+				NULL,0,NULL
+			);
+	`);
+	return { ownerCardId, otherCardId };
+}
+
+function dailyStudyStatusSourceSql(fixture: Fixture): string {
+	return `WITH actor_decks AS (
+			SELECT id
+			FROM public.decks
+			WHERE owner_user_id = auth.uid()
+				AND id IN ('${fixture.ownerDeckId}'::uuid, '${fixture.otherDeckId}'::uuid)
+		),
+		actor_deck_cards AS (
+			SELECT deck_id, card_id
+			FROM public.deck_cards
+			WHERE deck_id IN (SELECT id FROM actor_decks)
+		),
+		actor_review_states AS (
+			SELECT user_id, card_id
+			FROM public.review_states
+			WHERE user_id = auth.uid()
+				AND card_id IN (SELECT card_id FROM actor_deck_cards)
+		)
+		SELECT json_build_object(
+			'deckIds', COALESCE((SELECT json_agg(id ORDER BY id) FROM actor_decks), '[]'::json),
+			'cardIds', COALESCE((SELECT json_agg(card_id ORDER BY card_id) FROM actor_deck_cards), '[]'::json),
+			'reviewUsers', COALESCE((SELECT json_agg(user_id ORDER BY user_id) FROM actor_review_states), '[]'::json)
+		) AS result`;
 }
 
 function previewSql(fixture: Fixture, deckId = fixture.ownerDeckId): string {

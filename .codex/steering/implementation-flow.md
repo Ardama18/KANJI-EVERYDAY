@@ -249,4 +249,3 @@ PR merge 後にストーリーを完了扱いにする場合は、既存スト�
 - code-reviewer の指摘が解消済みである。
 - `$ar-core:quality-fixer` が approved を返している。
 - `tasks/` や個別 task ファイルを新規生成・更新していない。
-
