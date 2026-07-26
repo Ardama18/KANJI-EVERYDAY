@@ -26,6 +26,9 @@ const buildCard = (
 	decks: [],
 	tags: [],
 	illustration,
+	illustrationKey: null,
+	mnemonic: null,
+	mnemonicSharedCardCount: 0,
 });
 
 const buildPage = (items: readonly ManagedAiCard[], nextCursor: string | null): AiCardListPage => ({

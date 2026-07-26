@@ -1,3 +1,8 @@
+import type {
+	MnemonicExplanationDraft,
+	MnemonicSlotsDraft,
+} from "@/lib/ai-card-generation/contracts";
+
 export type AiCardSource = "app_ai" | "remote_mcp";
 export type AiCardSkill = "reading" | "writing";
 export type AiCardPattern = "R1" | "W1";
@@ -18,6 +23,17 @@ export interface AiCardIllustration {
 	readonly url: string | null;
 }
 
+/**
+ * The approved mnemonic behind one `illustration_key`, as read by
+ * `list_ai_managed_cards`.  It is keyed by illustration, not by card, so several
+ * cards can carry the same row (see `mnemonicSharedCardCount`).
+ */
+export interface ManagedCardMnemonic {
+	readonly slots: MnemonicSlotsDraft;
+	readonly explanation: MnemonicExplanationDraft;
+	readonly status: "draft" | "approved";
+}
+
 export interface ManagedAiCard {
 	readonly id: string;
 	readonly frontText: string;
@@ -32,6 +48,10 @@ export interface ManagedAiCard {
 	readonly decks: readonly AiCardRelationOption[];
 	readonly tags: readonly AiCardRelationOption[];
 	readonly illustration: AiCardIllustration | null;
+	readonly illustrationKey: string | null;
+	readonly mnemonic: ManagedCardMnemonic | null;
+	/** Cards of the caller sharing this `illustration_key`, page-independent; 0 when the key is null. */
+	readonly mnemonicSharedCardCount: number;
 }
 
 export interface AiCardListFilters {
@@ -52,7 +72,6 @@ export interface AiCardListPage {
 export interface AiCardManagementOptions {
 	readonly decks: readonly AiCardRelationOption[];
 	readonly tags: readonly AiCardRelationOption[];
-	readonly illustrations: readonly { id: string; status: string }[];
 }
 
 export type AiCardManagementErrorCode =

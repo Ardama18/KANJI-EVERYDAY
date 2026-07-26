@@ -5,20 +5,39 @@ import {
 	getAiCardListAction,
 	getAiCardManagementOptionsAction,
 	setAiCardDecksAction,
-	setAiCardIllustrationAction,
 	setAiCardTagNamesAction,
-	undoAiImportBatchAction,
 	updateAiCardContentAction,
+	updateAiCardMnemonicAction,
 } from "@/actions/ai-card-management-actions";
+import {
+	MNEMONIC_LIMITS,
+	isMnemonicEntryValid,
+} from "@/components/ai-card-import/MnemonicApprovalList";
+import type {
+	MnemonicExplanationDraft,
+	MnemonicSlotsDraft,
+} from "@/lib/ai-card-generation/contracts";
 import { createExclusiveOperationRunner } from "@/lib/ai-card-management/exclusive-operation";
 import type {
 	AiCardListFilters,
 	AiCardListPage,
 	AiCardManagementOptions,
 	ManagedAiCard,
+	ManagedCardMnemonic,
 } from "@/lib/ai-card-management/types";
 import { useMemo, useRef, useState } from "react";
 import { AiCardIllustrationThumbnail } from "./AiCardIllustrationThumbnail";
+
+/** The mnemonic form's payload, split out so AC-10a can test it as a pure function. */
+export const mnemonicMutationInput = (
+	card: Pick<ManagedAiCard, "id" | "illustrationKey">,
+	entry: Readonly<{ slots: MnemonicSlotsDraft; explanation: MnemonicExplanationDraft }>
+) => ({
+	cardId: card.id,
+	illustrationKey: card.illustrationKey,
+	slots: entry.slots,
+	explanation: entry.explanation,
+});
 
 interface Props {
 	readonly initialPage: AiCardListPage;
@@ -51,6 +70,10 @@ export const managedCardSyncKey = (card: ManagedAiCard) =>
 		deckIds: card.decks.map((deck) => deck.id),
 		tagIds: card.tags.map((tag) => tag.id),
 		illustrationId: card.illustration?.id ?? null,
+		// A mnemonic save does not move cards.updated_at, so without this the row
+		// would not remount and the form would keep the pre-normalization values.
+		mnemonic: card.mnemonic === null ? null : JSON.stringify(card.mnemonic),
+		mnemonicSharedCardCount: card.mnemonicSharedCardCount,
 	});
 
 export function AiCardManagementClient({ initialPage, initialError, initialOptions }: Props) {
@@ -258,7 +281,7 @@ export function AiCardManagementClient({ initialPage, initialError, initialOptio
 					{listError !== null ? <p>カード一覧を取得できませんでした。{listError}</p> : null}
 					{optionsState.status === "error" ? (
 						<p>
-							デッキ・タグ・イラストの選択肢を取得できませんでした。関係の編集は一時的に利用できません。
+							デッキ・タグの選択肢を取得できませんでした。関係の編集は一時的に利用できません。
 							{optionsState.message}
 						</p>
 					) : null}
@@ -490,49 +513,17 @@ export function AiCardManagementClient({ initialPage, initialError, initialOptio
 										タグを保存
 									</button>
 								</form>
-								<form
-									className="mt-4 grid gap-2"
-									onSubmit={(event) => {
-										event.preventDefault();
-										const value = String(
-											new FormData(event.currentTarget).get("illustrationId") ?? ""
-										);
+								<MnemonicEditor
+									card={card}
+									disabled={mutationsDisabled}
+									onSave={(entry) =>
 										applyMutation(
-											() =>
-												setAiCardIllustrationAction({
-													cardId: card.id,
-													illustrationId: value || null,
-												}),
-											"イラストを保存しました。学習状態は維持されます。"
-										);
-									}}
-								>
-									<fieldset disabled={relationsDisabled}>
-										<label className="text-sm font-medium">
-											イラスト
-											<select
-												name="illustrationId"
-												defaultValue={card.illustration?.id ?? ""}
-												className="mt-1 min-h-12 w-full rounded-lg border border-slate-300 px-3"
-											>
-												<option value="">{options === null ? "取得できません" : "なし"}</option>
-												{options?.illustrations.map((item) => (
-													<option key={item.id} value={item.id}>
-														イラスト {item.id.slice(0, 8)}
-													</option>
-												))}
-											</select>
-										</label>
-									</fieldset>
-									<button
-										type="submit"
-										disabled={relationsDisabled}
-										className="min-h-12 rounded-lg border border-blue-600 px-4 font-semibold text-blue-700 disabled:opacity-60"
-									>
-										イラストを保存
-									</button>
-								</form>
-								<div className="mt-5 grid gap-3 border-t border-red-200 pt-4 sm:grid-cols-2">
+											() => updateAiCardMnemonicAction(mnemonicMutationInput(card, entry)),
+											"覚え方を保存しました。学習状態は維持されます。"
+										)
+									}
+								/>
+								<div className="mt-5 grid gap-3 border-t border-red-200 pt-4">
 									<button
 										type="button"
 										disabled={mutationsDisabled}
@@ -549,24 +540,6 @@ export function AiCardManagementClient({ initialPage, initialError, initialOptio
 										}}
 									>
 										このカードを削除
-									</button>
-									<button
-										type="button"
-										disabled={mutationsDisabled}
-										className="min-h-12 rounded-lg bg-red-700 px-4 font-semibold text-white disabled:opacity-60"
-										onClick={() => {
-											if (
-												window.confirm(
-													"同じ登録バッチの未編集カードを取り消します。個別削除済みカードはスキップされます。よろしいですか？"
-												)
-											)
-												applyMutation(
-													() => undoAiImportBatchAction(card.batchId),
-													"登録バッチを取り消しました。"
-												);
-										}}
-									>
-										登録バッチを取り消す
 									</button>
 								</div>
 							</details>
@@ -595,6 +568,232 @@ export function AiCardManagementClient({ initialPage, initialError, initialOptio
 				</button>
 			) : null}
 		</section>
+	);
+}
+
+type MnemonicEntryDraft = Readonly<{
+	slots: MnemonicSlotsDraft;
+	explanation: MnemonicExplanationDraft;
+}>;
+
+/**
+ * Post-commit mnemonic editor (S-19).  A card without an approved mnemonic — or
+ * without an illustration key to write against — only reports "未設定": there is
+ * nothing to upsert and the Server Action would reject the request anyway.
+ */
+function MnemonicEditor({
+	card,
+	disabled,
+	onSave,
+}: {
+	readonly card: ManagedAiCard;
+	readonly disabled: boolean;
+	readonly onSave: (entry: MnemonicEntryDraft) => void;
+}) {
+	if (card.mnemonic === null || card.illustrationKey === null) {
+		return (
+			<p className="mt-4 border-t border-slate-200 pt-3 text-sm text-slate-600">
+				覚え方（ニーモニック）: 未設定
+			</p>
+		);
+	}
+	return (
+		<MnemonicForm
+			mnemonic={card.mnemonic}
+			sharedCardCount={card.mnemonicSharedCardCount}
+			disabled={disabled}
+			onSave={onSave}
+		/>
+	);
+}
+
+function MnemonicForm({
+	mnemonic,
+	sharedCardCount,
+	disabled,
+	onSave,
+}: {
+	readonly mnemonic: ManagedCardMnemonic;
+	readonly sharedCardCount: number;
+	readonly disabled: boolean;
+	readonly onSave: (entry: MnemonicEntryDraft) => void;
+}) {
+	// Controlled state, because adding or removing a mapping changes the field
+	// count.  Following refreshed server state is the row remount's job
+	// (`managedCardSyncKey`), so there is no props-syncing effect here.
+	const [slots, setSlots] = useState<MnemonicSlotsDraft>(mnemonic.slots);
+	const [explanation, setExplanation] = useState<MnemonicExplanationDraft>(mnemonic.explanation);
+	const valid = isMnemonicEntryValid({ slots, explanation });
+	const canAddMapping = explanation.mappings.length < MNEMONIC_LIMITS.mappingsMax;
+	const canRemoveMapping = explanation.mappings.length > MNEMONIC_LIMITS.mappingsMin;
+	const updateMapping = (index: number, patch: { part?: string; meaning?: string }) =>
+		setExplanation((current) => ({
+			...current,
+			mappings: current.mappings.map((mapping, mappingIndex) =>
+				mappingIndex === index ? { ...mapping, ...patch } : mapping
+			),
+		}));
+	return (
+		<form
+			className="mt-4 grid gap-2 border-t border-slate-200 pt-3"
+			onSubmit={(event) => {
+				event.preventDefault();
+				onSave({ slots, explanation });
+			}}
+		>
+			<p className="text-sm font-semibold text-slate-900">覚え方（ニーモニック）</p>
+			<fieldset disabled={disabled}>
+				<MnemonicTextField
+					label="漢字"
+					value={slots.kanji}
+					onChange={(kanji) =>
+						setSlots((current) => ({
+							...current,
+							kanji,
+							isSingleKanji: Array.from(kanji).length === 1,
+						}))
+					}
+				/>
+				<div className="mt-2 flex items-center gap-2">
+					<input
+						type="checkbox"
+						checked={slots.isSingleKanji}
+						onChange={(event) =>
+							setSlots((current) => ({ ...current, isSingleKanji: event.target.checked }))
+						}
+						className="h-5 w-5"
+						aria-label="単一の漢字として扱う（オフで熟語）"
+					/>
+					<span className="text-sm font-medium text-slate-700">
+						単一の漢字として扱う（オフで熟語）
+					</span>
+				</div>
+				<p className="mt-1 text-xs text-slate-500">
+					漢字を編集すると自動判定されます。必要に応じて手動で切り替えてください。
+				</p>
+				<MnemonicTextField
+					label="形のヒント（部品）"
+					value={slots.shapeHint.part}
+					onChange={(part) =>
+						setSlots((current) => ({ ...current, shapeHint: { ...current.shapeHint, part } }))
+					}
+				/>
+				<MnemonicTextField
+					label="形のヒント（イメージ）"
+					value={slots.shapeHint.picture}
+					onChange={(picture) =>
+						setSlots((current) => ({ ...current, shapeHint: { ...current.shapeHint, picture } }))
+					}
+				/>
+				<MnemonicTextField
+					label="意味のヒント"
+					value={slots.meaningHint}
+					onChange={(meaningHint) => setSlots((current) => ({ ...current, meaningHint }))}
+				/>
+				<MnemonicTextField
+					label="覚え方のストーリー"
+					value={slots.story}
+					onChange={(story) => setSlots((current) => ({ ...current, story }))}
+				/>
+				<MnemonicTextField
+					label="説明のまとめ"
+					value={explanation.summary}
+					onChange={(summary) => setExplanation((current) => ({ ...current, summary }))}
+				/>
+				<div className="mt-4">
+					<p className="text-sm font-medium text-slate-700">部品と意味の対応（2〜4件）</p>
+					<div className="mt-2 space-y-2">
+						{explanation.mappings.map((mapping, index) => (
+							// biome-ignore lint/suspicious/noArrayIndexKey: mappings have no stable id; order is the identity here.
+							<div key={index} className="flex flex-wrap items-end gap-2">
+								<MnemonicTextField
+									label={`部品 ${index + 1}`}
+									value={mapping.part}
+									onChange={(part) => updateMapping(index, { part })}
+									className="min-w-0 flex-1"
+								/>
+								<MnemonicTextField
+									label={`意味 ${index + 1}`}
+									value={mapping.meaning}
+									onChange={(meaning) => updateMapping(index, { meaning })}
+									className="min-w-0 flex-1"
+								/>
+								<button
+									type="button"
+									disabled={disabled || !canRemoveMapping}
+									onClick={() =>
+										setExplanation((current) => ({
+											...current,
+											mappings: current.mappings.filter(
+												(_, mappingIndex) => mappingIndex !== index
+											),
+										}))
+									}
+									className="min-h-11 rounded-lg border border-slate-300 px-3 text-sm font-semibold text-red-700 disabled:text-slate-300"
+								>
+									対応を削除
+								</button>
+							</div>
+						))}
+					</div>
+					<button
+						type="button"
+						disabled={disabled || !canAddMapping}
+						onClick={() =>
+							setExplanation((current) => ({
+								...current,
+								mappings: [...current.mappings, { part: "", meaning: "" }],
+							}))
+						}
+						className="mt-2 min-h-11 rounded-lg border border-slate-300 px-3 text-sm font-semibold text-slate-700 disabled:text-slate-300"
+					>
+						対応を追加
+					</button>
+				</div>
+			</fieldset>
+			{sharedCardCount >= 2 ? (
+				<p className="text-sm text-slate-600">
+					このイラストの覚え方は{sharedCardCount}枚のカードで共有されています。
+				</p>
+			) : null}
+			{!valid ? (
+				<p className="text-sm text-amber-700">
+					すべての項目を入力し、対応を2〜4件にすると保存できます。
+				</p>
+			) : null}
+			<button
+				type="submit"
+				disabled={disabled || !valid}
+				className="min-h-12 rounded-lg border border-blue-600 px-4 font-semibold text-blue-700 disabled:opacity-60"
+			>
+				覚え方を保存
+			</button>
+		</form>
+	);
+}
+
+function MnemonicTextField({
+	label,
+	value,
+	onChange,
+	className,
+}: {
+	readonly label: string;
+	readonly value: string;
+	readonly onChange: (value: string) => void;
+	readonly className?: string;
+}) {
+	return (
+		<label
+			className={`mt-3 block text-sm font-medium text-slate-700${className ? ` ${className}` : ""}`}
+		>
+			{label}
+			<input
+				value={value}
+				onChange={(event) => onChange(event.target.value)}
+				className="mt-1 min-h-11 w-full min-w-0 rounded-lg border border-slate-300 px-3 disabled:bg-slate-100"
+			/>
+		</label>
 	);
 }
 

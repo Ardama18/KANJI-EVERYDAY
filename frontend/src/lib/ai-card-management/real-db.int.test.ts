@@ -278,3 +278,248 @@ describe("S-13 real database management and undo", () => {
 		S10_DB_TEST_TIMEOUT_MS
 	);
 });
+
+interface ListedMnemonic {
+	readonly slots: Readonly<Record<string, unknown>>;
+	readonly explanation: Readonly<{ summary: string; mappings: readonly unknown[] }>;
+	readonly status: string;
+}
+
+interface ListedMnemonicCard {
+	readonly id: string;
+	readonly illustrationKey: string | null;
+	readonly mnemonic: ListedMnemonic | null;
+	readonly mnemonicSharedCardCount: number;
+}
+
+type OwnerActor = typeof S10_ACTORS.ownerA | typeof S10_ACTORS.ownerB;
+
+const MNEMONIC_SLOTS_JSON = JSON.stringify({
+	kanji: "見",
+	isSingleKanji: true,
+	shapeHint: { part: "下の「見」", picture: "目" },
+	meaningHint: "見る・気づく",
+	story: "目で見たものが頭の中で光って記憶に残る",
+});
+
+const explanationJson = (summary: string): string =>
+	JSON.stringify({
+		summary,
+		mappings: [
+			{ part: "下の「見」", meaning: "目で見る" },
+			{ part: "上の光", meaning: "頭の中で気づく" },
+		],
+	});
+
+/**
+ * The statement the Server Action issues: no RPC, plain RLS-scoped DML, with the
+ * owner taken from the session and never from the payload (ADR-013 decision 1).
+ */
+const upsertMnemonicSql = (illustrationKey: string, summary: string): string => `
+	INSERT INTO public.card_mnemonics(owner_user_id,illustration_key,slots,explanation,status)
+	VALUES(
+		auth.uid(),${sqlLiteral(illustrationKey)},
+		${sqlLiteral(MNEMONIC_SLOTS_JSON)}::jsonb,${sqlLiteral(explanationJson(summary))}::jsonb,
+		'approved'
+	)
+	ON CONFLICT (owner_user_id,illustration_key) DO UPDATE
+	SET slots=EXCLUDED.slots,explanation=EXCLUDED.explanation,status=EXCLUDED.status
+	RETURNING id::text AS id
+`;
+
+const listPage = async (
+	actor: OwnerActor,
+	limit: number
+): Promise<{ items: ListedMnemonicCard[]; hasMore: boolean }> => {
+	const [row] = await database.query<{
+		result: { items: ListedMnemonicCard[]; hasMore: boolean };
+	}>(`SELECT public.list_ai_managed_cards(${limit},NULL,NULL,NULL,NULL,NULL,NULL,NULL) AS result`, {
+		actor,
+	});
+	if (row === undefined) throw new Error("expected the list RPC to return a row");
+	return row.result;
+};
+
+describe("S-19 real database mnemonic projection and edit boundary", () => {
+	beforeAll(async () => {
+		await ensureS10ActorFixtures(database);
+	});
+
+	const withSharedKeyFixture = async (
+		cardCount: number,
+		body: (fixture: BatchFixture, illustrationKey: string) => Promise<void>
+	): Promise<void> => {
+		const fixture = await createBatchFixture(
+			Array.from({ length: cardCount }, () => "succeeded" as const)
+		);
+		const illustrationKey = `s19:${fixture.marker}`;
+		try {
+			// No ai_illustration_objects row exists for this key, so the reference
+			// counting trigger on cards.illustration_key is a no-op here.
+			await database.execute(`
+				UPDATE public.cards SET illustration_key=${sqlLiteral(illustrationKey)}
+				WHERE id=ANY(ARRAY[${fixture.cardIds.map((id) => `'${id}'::uuid`).join(",")}]::uuid[]);
+			`);
+			await body(fixture, illustrationKey);
+		} finally {
+			await database.execute(`
+				DELETE FROM public.card_mnemonics WHERE illustration_key=${sqlLiteral(illustrationKey)};
+			`);
+			await cleanupFixture(fixture);
+		}
+	};
+
+	it(
+		"AC-9: keeps the RPC owned by s10_migration_owner with EXECUTE only for authenticated",
+		async () => {
+			const [row] = await database.query<{
+				owner: string;
+				authenticated: boolean;
+				anon: boolean;
+				serviceRole: boolean;
+				definer: boolean;
+				searchPath: string | null;
+			}>(`
+				SELECT pg_get_userbyid(p.proowner) AS owner,
+					has_function_privilege('authenticated', p.oid, 'EXECUTE') AS "authenticated",
+					has_function_privilege('anon', p.oid, 'EXECUTE') AS anon,
+					has_function_privilege('service_role', p.oid, 'EXECUTE') AS "serviceRole",
+					p.prosecdef AS definer,
+					array_to_string(p.proconfig, ',') AS "searchPath"
+				FROM pg_proc p
+				JOIN pg_namespace n ON n.oid = p.pronamespace
+				WHERE n.nspname = 'public' AND p.proname = 'list_ai_managed_cards'
+			`);
+
+			expect(row).toMatchObject({
+				owner: "s10_migration_owner",
+				authenticated: true,
+				anon: false,
+				serviceRole: false,
+				definer: true,
+			});
+			expect(row?.searchPath).toBe("search_path=pg_catalog, pg_temp");
+		},
+		S10_DB_TEST_TIMEOUT_MS
+	);
+
+	it(
+		"AC-3: persists an owner upsert as approved and reads it back through the list RPC",
+		async () => {
+			await withSharedKeyFixture(1, async (_fixture, illustrationKey) => {
+				await database.query(upsertMnemonicSql(illustrationKey, "初回のまとめ。"), {
+					actor: S10_ACTORS.ownerA,
+				});
+
+				const first = await listPage(S10_ACTORS.ownerA, 20);
+				const card = first.items.find((item) => item.illustrationKey === illustrationKey);
+				expect(card?.mnemonic?.status).toBe("approved");
+				expect(card?.mnemonic?.explanation.summary).toBe("初回のまとめ。");
+				expect(card?.mnemonic?.slots).toMatchObject({ kanji: "見", isSingleKanji: true });
+
+				// AC-4 reads this same row: last-write-wins updates it in place.
+				await database.query(upsertMnemonicSql(illustrationKey, "編集後のまとめ。"), {
+					actor: S10_ACTORS.ownerA,
+				});
+
+				const second = await listPage(S10_ACTORS.ownerA, 20);
+				const reread = second.items.find((item) => item.illustrationKey === illustrationKey);
+				expect(reread?.mnemonic?.explanation.summary).toBe("編集後のまとめ。");
+				expect(reread?.mnemonic?.status).toBe("approved");
+				expect(
+					await database.query<{ count: number }>(
+						`SELECT count(*)::int AS count FROM public.card_mnemonics
+						 WHERE illustration_key=${sqlLiteral(illustrationKey)}`
+					)
+				).toEqual([{ count: 1 }]);
+			});
+		},
+		S10_DB_TEST_TIMEOUT_MS
+	);
+
+	it(
+		"AC-6: rejects a foreign or mismatched card/key pair in the pre-check and again in RLS",
+		async () => {
+			await withSharedKeyFixture(1, async (fixture, illustrationKey) => {
+				await database.query(upsertMnemonicSql(illustrationKey, "所有者のまとめ。"), {
+					actor: S10_ACTORS.ownerA,
+				});
+				const ownershipCheck = async (actor: OwnerActor, key: string) =>
+					await database.query<{ id: string }>(
+						`SELECT id::text AS id FROM public.cards
+						 WHERE id='${fixture.cardIds[0]}'::uuid AND owner_user_id=auth.uid()
+						   AND illustration_key=${sqlLiteral(key)}`,
+						{ actor }
+					);
+
+				// The card is the caller's, but the key does not belong to it.
+				expect(await ownershipCheck(S10_ACTORS.ownerA, `${illustrationKey}-other`)).toEqual([]);
+				// The key matches, but the card is not the caller's.
+				expect(await ownershipCheck(S10_ACTORS.ownerB, illustrationKey)).toEqual([]);
+				expect(await ownershipCheck(S10_ACTORS.ownerA, illustrationKey)).toHaveLength(1);
+
+				// RLS is the second layer: another owner can neither forge a row for the
+				// owner nor update the existing one.
+				const forged = await database.captureError(
+					`INSERT INTO public.card_mnemonics(owner_user_id,illustration_key,slots,explanation,status)
+					 VALUES('${S10_ACTORS.ownerA.userId}'::uuid,${sqlLiteral(illustrationKey)},
+						${sqlLiteral(MNEMONIC_SLOTS_JSON)}::jsonb,
+						${sqlLiteral(explanationJson("乗っ取り"))}::jsonb,'approved')`,
+					{ actor: S10_ACTORS.ownerB }
+				);
+				expect(forged.sqlState).toBe("42501");
+
+				expect(
+					await database.query<{ id: string }>(
+						`UPDATE public.card_mnemonics
+						 SET explanation=${sqlLiteral(explanationJson("乗っ取り"))}::jsonb
+						 WHERE illustration_key=${sqlLiteral(illustrationKey)} RETURNING id::text AS id`,
+						{ actor: S10_ACTORS.ownerB }
+					)
+				).toEqual([]);
+
+				const untouched = await listPage(S10_ACTORS.ownerA, 20);
+				expect(
+					untouched.items.find((item) => item.illustrationKey === illustrationKey)?.mnemonic
+						?.explanation.summary
+				).toBe("所有者のまとめ。");
+			});
+		},
+		S10_DB_TEST_TIMEOUT_MS
+	);
+
+	it(
+		"AC-7: counts every card sharing the key, including cards outside the page",
+		async () => {
+			await withSharedKeyFixture(3, async (_fixture, illustrationKey) => {
+				const page = await listPage(S10_ACTORS.ownerA, 1);
+
+				expect(page.items).toHaveLength(1);
+				expect(page.hasMore).toBe(true);
+				expect(page.items[0]?.illustrationKey).toBe(illustrationKey);
+				// The page holds one row, yet all three siblings are counted.
+				expect(page.items[0]?.mnemonicSharedCardCount).toBe(3);
+				// Without a mnemonic row the projection still yields null, not an error.
+				expect(page.items[0]?.mnemonic).toBeNull();
+			});
+		},
+		S10_DB_TEST_TIMEOUT_MS
+	);
+
+	it(
+		"AC-7: reports a zero shared count for a card without an illustration key",
+		async () => {
+			const fixture = await createBatchFixture(["succeeded"]);
+			try {
+				const page = await listPage(S10_ACTORS.ownerA, 20);
+				const card = page.items.find((item) => item.id === fixture.cardIds[0]);
+				expect(card?.illustrationKey).toBeNull();
+				expect(card?.mnemonicSharedCardCount).toBe(0);
+				expect(card?.mnemonic).toBeNull();
+			} finally {
+				await cleanupFixture(fixture);
+			}
+		},
+		S10_DB_TEST_TIMEOUT_MS
+	);
+});

@@ -12,6 +12,7 @@ vi.mock("next/cache", () => ({
 	revalidatePath: revalidatePathMock,
 }));
 
+import * as aiCardManagementActions from "./ai-card-management-actions";
 import {
 	getAiCardListAction,
 	getAiCardManagementOptionsAction,
@@ -87,6 +88,49 @@ describe("S-13 management Server Action boundary", () => {
 				message: "処理に失敗しました。時間をおいて再試行してください。",
 			},
 		});
+	});
+
+	it("AC-16: returns deck and tag choices only and queries no illustration row", async () => {
+		process.env.AI_CARD_MANAGEMENT_ENABLED = "true";
+		const from = vi.fn((table: string) => ({
+			select: vi.fn(() => ({
+				eq: vi.fn(() => ({
+					order: vi.fn(async () => ({
+						data:
+							table === "decks"
+								? [{ id: "deck-1", name: "一年生" }]
+								: [{ id: "tag-1", display_name: "訓読み" }],
+						error: null,
+					})),
+				})),
+			})),
+		}));
+		createServerClientMock.mockReturnValue({
+			auth: {
+				getUser: vi.fn().mockResolvedValue({ data: { user: { id: "owner-1" } }, error: null }),
+			},
+			from,
+		});
+
+		const result = await getAiCardManagementOptionsAction();
+
+		expect(result).toEqual({
+			ok: true,
+			data: {
+				decks: [{ id: "deck-1", name: "一年生" }],
+				tags: [{ id: "tag-1", name: "訓読み" }],
+			},
+		});
+		if (!result.ok) throw new Error("expected the options to load");
+		expect(result.data).not.toHaveProperty("illustrations");
+		expect(from.mock.calls.map(([table]) => table)).toEqual(["decks", "tags"]);
+	});
+
+	it("AC-12: exposes no illustration mutation action and adds the mnemonic one", () => {
+		expect(aiCardManagementActions).not.toHaveProperty("setAiCardIllustrationAction");
+		expect(typeof aiCardManagementActions.updateAiCardMnemonicAction).toBe("function");
+		// AC-15: the Remote MCP undo path keeps its Server Action.
+		expect(typeof aiCardManagementActions.undoAiImportBatchAction).toBe("function");
 	});
 });
 

@@ -88,3 +88,124 @@ describe("frontend/src/lib/mcp/services.ts", () => {
 		expect(JSON.stringify(result)).not.toContain("secret");
 	});
 });
+
+const CARD_ID = "33333333-3333-4333-8333-333333333333";
+const BATCH_ID = "44444444-4444-4444-8444-444444444444";
+const ITEM_ID = "55555555-5555-4555-8555-555555555555";
+const ILLUSTRATION_ID = "66666666-6666-4666-8666-666666666666";
+const CREATED_AT = "2026-07-19T03:04:05.000Z";
+
+/** The `list_ai_managed_cards` payload after 20260726000000, i.e. with the S-19 keys. */
+const listRpcRow = (illustration: { id: string; status: string } | null) => ({
+	id: CARD_ID,
+	frontText: "山",
+	backText: "やま",
+	skill: "reading",
+	pattern: "R1",
+	createdAt: CREATED_AT,
+	updatedAt: CREATED_AT,
+	source: "app_ai",
+	batchId: BATCH_ID,
+	itemId: ITEM_ID,
+	decks: [{ id: BATCH_ID, name: "一年生" }],
+	tags: [{ id: ITEM_ID, name: "訓読み" }],
+	illustration,
+	illustrationKey: "山",
+	mnemonic: {
+		slots: {
+			kanji: "山",
+			isSingleKanji: true,
+			shapeHint: { part: "三つの峰", picture: "山なみ" },
+			meaningHint: "やま",
+			story: "峰が三つ並ぶ",
+		},
+		explanation: {
+			summary: "峰が三つ並んで山になる。",
+			mappings: [
+				{ part: "左の峰", meaning: "低い山" },
+				{ part: "中央の峰", meaning: "高い山" },
+			],
+		},
+		status: "approved",
+	},
+	mnemonicSharedCardCount: 2,
+});
+
+type McpListAiCardsResult = {
+	readonly ok: boolean;
+	readonly data?: {
+		readonly items: readonly Record<string, unknown>[];
+		readonly nextCursor: string | null;
+	};
+};
+
+const listAiCardsThroughMcp = async (
+	illustration: { id: string; status: string } | null
+): Promise<McpListAiCardsResult> => {
+	const rpc = vi.fn().mockResolvedValue({
+		data: { items: [listRpcRow(illustration)], hasMore: false },
+		error: null,
+	});
+	const services = createMcpToolServices(dependencies({ rpc }));
+	// The tool contract types the response as `unknown`; the shape is what AC-8 pins.
+	return (await services.listAiCards({})) as McpListAiCardsResult;
+};
+
+describe("S-19 MCP list_ai_cards response shape", () => {
+	it("AC-8: keeps the pre-S-19 response exactly, dropping the three new fields", async () => {
+		const result = await listAiCardsThroughMcp({ id: ILLUSTRATION_ID, status: "ready" });
+
+		// Deep-equal snapshot of the response as it was before the projection change.
+		expect(result).toEqual({
+			ok: true,
+			data: {
+				items: [
+					{
+						id: CARD_ID,
+						frontText: "山",
+						backText: "やま",
+						skill: "reading",
+						pattern: "R1",
+						createdAt: CREATED_AT,
+						updatedAt: CREATED_AT,
+						source: "app_ai",
+						batchId: BATCH_ID,
+						itemId: ITEM_ID,
+						decks: [{ id: BATCH_ID, name: "一年生" }],
+						tags: [{ id: ITEM_ID, name: "訓読み" }],
+						illustration: { id: ILLUSTRATION_ID, status: "ready", url: null },
+					},
+				],
+				nextCursor: null,
+			},
+		});
+		const serialized = JSON.stringify(result);
+		expect(serialized).not.toContain("illustrationKey");
+		expect(serialized).not.toContain("mnemonic");
+		expect(serialized).not.toContain("mnemonicSharedCardCount");
+	});
+
+	it("AC-8: preserves the key set and key order, including a null illustration", async () => {
+		const result = await listAiCardsThroughMcp(null);
+
+		expect(result).toMatchObject({ ok: true });
+		const item = result.data?.items[0];
+		if (item === undefined) throw new Error("expected the MCP list to succeed");
+		expect(Object.keys(item)).toEqual([
+			"id",
+			"frontText",
+			"backText",
+			"skill",
+			"pattern",
+			"createdAt",
+			"updatedAt",
+			"source",
+			"batchId",
+			"itemId",
+			"decks",
+			"tags",
+			"illustration",
+		]);
+		expect(item.illustration).toBeNull();
+	});
+});
