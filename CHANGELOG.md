@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.6.0.0] - 2026-07-26
+
+### Added
+
+- Added the Remote MCP `get_daily_study_status` tool so authorized TimeCoin clients can read only the signed-in user's JST daily study completion state.
+- Added transport-independent daily study status aggregation with owner-scoped deck, deck-card, and review-state reads capped at one query each.
+- Added S-22 story artifacts and focused unit, MCP contract, service, route, and real-database coverage for strict input, owner isolation, output shape, and safe error handling.
+
+### Changed
+
+- Updated MCP tool descriptors, server listings, and service mocks to include the tenth Remote MCP tool without changing existing tool contracts.
+- Adjusted local quality gates so current S-11 evidence and post-S-10 seed data can be checked against the present schema.
+
+### Verification
+
+- Passed focused `get_daily_study_status` Vitest coverage against local Supabase: 5 files passed, 1 skipped, 56 tests passed, 18 skipped.
+- Passed S-11 core-only real-database compatibility coverage: 1 file passed, 2 skipped, 256 tests passed, 22 skipped.
+- Passed quality database unit and harness checks, release contract tests, full quality gate, build, ordinary Vitest, and `git diff --check`.
+
 ## [0.5.0.0] - 2026-07-21
 
 ### Added
