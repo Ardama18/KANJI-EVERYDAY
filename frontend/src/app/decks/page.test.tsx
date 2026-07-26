@@ -20,7 +20,11 @@ import { DECK_STUDY_DONE_MESSAGE } from "@/lib/deck/study-status";
 const readBadgeValue = (html: string, label: string): string | null =>
 	new RegExp(`<span>${label}</span><span>(\\d+)</span>`).exec(html)?.[1] ?? null;
 
-import DecksPage, { DECKS_EMPTY_MESSAGE, DECKS_PAGE_TITLE } from "../../../app/(auth)/decks/page";
+import DecksPage, {
+	DECKS_EMPTY_MESSAGE,
+	DECKS_EMPTY_NEXT_ACTION_MESSAGE,
+	DECKS_PAGE_TITLE,
+} from "../../../app/(auth)/decks/page";
 
 // JST 2026-02-24 00:30。page が渡す `today` の妥当性を実行日に依存させない。
 const FIXED_NOW = new Date("2026-02-23T15:30:00.000Z");
@@ -44,6 +48,7 @@ describe("frontend/app/(auth)/decks/page.tsx", () => {
 		expect(html).toContain(DECKS_PAGE_TITLE);
 		expect(html).toContain('aria-label="新しいデッキ作成"');
 		expect(html).toContain(DECKS_EMPTY_MESSAGE);
+		expect(html).toContain(DECKS_EMPTY_NEXT_ACTION_MESSAGE);
 	});
 
 	it("一覧データがあるときデッキ行リンクとカウントを表示する", async () => {
@@ -89,6 +94,7 @@ describe("frontend/app/(auth)/decks/page.tsx", () => {
 		expect(html).toContain("3枚");
 		expect(html).toContain("カード 18枚");
 		expect(html).toContain("学習した 8枚");
+		expect(html).not.toContain(DECKS_EMPTY_NEXT_ACTION_MESSAGE);
 		// 完了デッキは page が渡した today を基準に「あした」と判定される（NFR-03）
 		expect(html).toContain("あしたデッキ");
 		expect(html).toContain(DECK_STUDY_DONE_MESSAGE);

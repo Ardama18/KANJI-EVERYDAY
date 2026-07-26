@@ -5,6 +5,8 @@ import { getTodayJST } from "@/lib/date";
 
 export const DECKS_PAGE_TITLE = "デッキ一覧";
 export const DECKS_EMPTY_MESSAGE = "デッキがまだありません";
+export const DECKS_EMPTY_NEXT_ACTION_MESSAGE =
+	"まずは新しいデッキ名を入力して、デッキを作成しましょう。";
 // Compatibility token kept for S-01 scaffold regression tests.
 export const DECKS_STUB_MESSAGE = "デッキ一覧実装予定";
 
@@ -18,9 +20,10 @@ export default async function DecksPage() {
 			<h1 className="text-2xl font-bold text-slate-900">{DECKS_PAGE_TITLE}</h1>
 			<CreateDeckForm />
 			{decks.length === 0 ? (
-				<p className="mt-4 rounded-xl border border-dashed border-slate-300 bg-white px-4 py-6 text-sm text-slate-600">
-					{DECKS_EMPTY_MESSAGE}
-				</p>
+				<div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-white px-4 py-6 text-sm text-slate-600">
+					<p className="font-medium text-slate-700">{DECKS_EMPTY_MESSAGE}</p>
+					<p className="mt-2">{DECKS_EMPTY_NEXT_ACTION_MESSAGE}</p>
+				</div>
 			) : (
 				<ul className="mt-4 flex flex-col gap-3">
 					{decks.map((deck) => (

@@ -4,8 +4,6 @@
 // 実装タイミング: 全実装完了後
 
 import { describe, expect, it } from "vitest"
-import { renderToStaticMarkup } from "react-dom/server"
-import React from "react"
 
 import { getEnvConfig } from "../../../../frontend/src/lib/env"
 import {
@@ -14,9 +12,10 @@ import {
   readTextFile,
   withBaselineEnv,
 } from "./project-scaffolding.test-helpers"
-import HomePage, {
-  ROOT_NAV_LINKS,
-  ROOT_PAGE_NOTICE,
+import {
+  ROOT_AUTHENTICATED_NAV_LINK,
+  ROOT_GUEST_NAV_LINKS,
+  ROOT_PAGE_DESCRIPTION,
   ROOT_PAGE_TITLE,
 } from "../../../../frontend/app/page"
 import { DECKS_STUB_MESSAGE } from "../../../../frontend/app/(auth)/decks/page"
@@ -28,14 +27,17 @@ describe("project-scaffolding E2Eテスト", () => {
   // @dependency: frontend/app/page.tsx, フロントエンド起動
   // @complexity: low
   it("E2E: 開発起動後に / が表示され、主要導線リンクが確認できる", () => {
-    const html = renderToStaticMarkup(<HomePage />)
+    const source = readTextFile(PROJECT_FILES.homePage)
 
-    expect(html).toContain(ROOT_PAGE_TITLE)
-    expect(html).toContain(ROOT_PAGE_NOTICE)
-    for (const link of ROOT_NAV_LINKS) {
-      expect(html).toContain(`href="${link.href}"`)
-      expect(html).toContain(link.label)
+    expect(ROOT_PAGE_TITLE).toBe("まいにち漢字")
+    expect(ROOT_PAGE_DESCRIPTION).toBe("毎日少しずつ、漢字の読み書きを復習しよう。")
+    for (const link of ROOT_GUEST_NAV_LINKS) {
+      expect(source).toContain(link.href)
+      expect(source).toContain(link.label)
     }
+    expect(source).toContain(ROOT_AUTHENTICATED_NAV_LINK.href)
+    expect(source).toContain(ROOT_AUTHENTICATED_NAV_LINK.label)
+    expect(source).not.toContain("将来実装予定")
   })
 
   // AC解釈: login/decks 各ルートが初期導線として表示される
