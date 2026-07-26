@@ -1,7 +1,12 @@
+import { generateApprovedMnemonics } from "@/lib/ai-card-generation/mnemonic-generation";
+import type { CommitMnemonicEntry } from "@/lib/ai-import/service";
 import {
 	type McpEnvConfig,
 	getAiPreviewHmacSecret,
+	getMcpAutoMnemonicConfig,
 	getMcpEnvConfig,
+	getOpenAiCardGenerationConfig,
+	isAiCardImportEnabled,
 	isMcpEnabled,
 } from "@/lib/env";
 import { type JwtScopedSupabaseClient, createJwtScopedClient } from "@/lib/supabase/server";
@@ -15,7 +20,7 @@ import {
 } from "./auth";
 import { getMcpMetadataConfig } from "./metadata";
 import { handleMcpServerRequest } from "./server";
-import { createMcpToolServices } from "./services";
+import { type McpImportRequest, createMcpToolServices } from "./services";
 import { MCP_TOOL_NAMES, type McpToolServices } from "./tools";
 
 const MAX_MCP_PAYLOAD_BYTES = 1_048_576;
@@ -47,8 +52,36 @@ export function createDefaultMcpRouteDependencies(): McpRouteDependencies {
 				nowSeconds: Math.floor(Date.now() / 1_000),
 				createReservationKey: () => crypto.randomUUID(),
 				createCorrelationId: () => crypto.randomUUID(),
+				generateMnemonics: createDefaultMnemonicGenerator(),
 			}),
 		handleTransport: handleMcpServerRequest,
+	};
+}
+
+/**
+ * Default server-side mnemonic generation for a Remote MCP commit (S-21 D7).
+ *
+ * The flag, the provider config and the limits are read per call, so
+ * `MCP_AUTO_MNEMONIC_MAX_CONCEPTS=0` works as an immediate kill switch. Whenever any
+ * of them is missing or disabled the function returns `undefined`, which keeps the
+ * pre-S-21 behaviour: the cards are committed without mnemonics.
+ */
+export function createDefaultMnemonicGenerator(): (
+	request: McpImportRequest
+) => Promise<readonly CommitMnemonicEntry[] | undefined> {
+	return async (request) => {
+		if (!isAiCardImportEnabled()) return undefined;
+		const config = getOpenAiCardGenerationConfig();
+		const limits = getMcpAutoMnemonicConfig();
+		if (config === undefined || limits === undefined || limits.maxConcepts === 0) return undefined;
+		const entries = await generateApprovedMnemonics({
+			config,
+			// Only `ai` concepts get an illustration row, so only they can own a
+			// card_mnemonics row (S-21 D4).
+			items: request.items.filter((item) => item.image.mode === "ai"),
+			limits,
+		});
+		return entries.length === 0 ? undefined : entries;
 	};
 }
 

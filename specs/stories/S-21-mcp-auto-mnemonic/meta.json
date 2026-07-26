@@ -1,0 +1,8 @@
+{
+  "story_id": "S-21",
+  "epic_id": "E-16",
+  "parent_story_id": "S-14",
+  "status": "implementation_review",
+  "github_issue_url": "https://github.com/Ardama18/KANJI-EVERYDAY/issues/70",
+  "github_branch": "issue/70-mcp-auto-mnemonic"
+}

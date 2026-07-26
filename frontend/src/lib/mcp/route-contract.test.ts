@@ -1,7 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { McpActorContext } from "./auth";
-import { type McpRouteDependencies, handleMcpRoute } from "./route-handler";
+import {
+	type McpRouteDependencies,
+	createDefaultMnemonicGenerator,
+	handleMcpRoute,
+} from "./route-handler";
+import type { McpImportRequest } from "./services";
 import type { McpToolServices } from "./tools";
 
 const token = "header.payload.signature";
@@ -211,4 +216,83 @@ describe("S-14 MCP route boundary", () => {
 		expect([get.status, remove.status]).toEqual([405, 405]);
 		expect(dependencies.authenticate).not.toHaveBeenCalled();
 	});
+});
+
+const aiImportRequest: McpImportRequest = {
+	deck: { id: "11111111-1111-4111-8111-111111111111" },
+	items: [
+		{
+			clientItemId: "item-1",
+			conceptId: "concept-001",
+			pattern: "R1",
+			front: "山",
+			back: "やま",
+			tags: [],
+			image: { mode: "ai" },
+		},
+	],
+};
+
+describe("S-21 default mnemonic generator", () => {
+	afterEach(() => {
+		vi.unstubAllEnvs();
+		vi.unstubAllGlobals();
+	});
+
+	/** Any provider call in these cases would be a bug, so fetch must stay untouched. */
+	function forbidNetwork(): void {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(() => {
+				throw new Error("the default generator must not reach the network here");
+			})
+		);
+	}
+
+	it.each([
+		[
+			"the import flag is off",
+			{ AI_CARD_IMPORT_ENABLED: "false", OPENAI_API_KEY: "secret" },
+			aiImportRequest,
+		],
+		[
+			"the provider is not configured",
+			{ AI_CARD_IMPORT_ENABLED: "true", OPENAI_API_KEY: "" },
+			aiImportRequest,
+		],
+		[
+			"the concept cap is zero",
+			{
+				AI_CARD_IMPORT_ENABLED: "true",
+				OPENAI_API_KEY: "secret",
+				MCP_AUTO_MNEMONIC_MAX_CONCEPTS: "0",
+			},
+			aiImportRequest,
+		],
+		[
+			"a limit is out of range",
+			{
+				AI_CARD_IMPORT_ENABLED: "true",
+				OPENAI_API_KEY: "secret",
+				MCP_AUTO_MNEMONIC_BUDGET_MS: "1",
+			},
+			aiImportRequest,
+		],
+		[
+			"no concept requests an AI illustration",
+			{ AI_CARD_IMPORT_ENABLED: "true", OPENAI_API_KEY: "secret" },
+			{
+				...aiImportRequest,
+				items: aiImportRequest.items.map((item) => ({ ...item, image: { mode: "none" as const } })),
+			},
+		],
+	] as const)(
+		"returns undefined without calling the provider when %s",
+		async (_case, env, body) => {
+			for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
+			forbidNetwork();
+
+			await expect(createDefaultMnemonicGenerator()(body)).resolves.toBeUndefined();
+		}
+	);
 });
