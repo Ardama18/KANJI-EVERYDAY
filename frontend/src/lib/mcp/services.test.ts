@@ -95,7 +95,7 @@ const ITEM_ID = "55555555-5555-4555-8555-555555555555";
 const ILLUSTRATION_ID = "66666666-6666-4666-8666-666666666666";
 const CREATED_AT = "2026-07-19T03:04:05.000Z";
 
-/** The `list_ai_managed_cards` payload after 20260726000000, i.e. with the S-19 keys. */
+/** The `list_ai_managed_cards` payload after 20260726000000, i.e. with the S-20 keys. */
 const listRpcRow = (illustration: { id: string; status: string } | null) => ({
 	id: CARD_ID,
 	frontText: "山",
@@ -151,8 +151,8 @@ const listAiCardsThroughMcp = async (
 	return (await services.listAiCards({})) as McpListAiCardsResult;
 };
 
-describe("S-19 MCP list_ai_cards response shape", () => {
-	it("AC-8: keeps the pre-S-19 response exactly, dropping the three new fields", async () => {
+describe("S-20 MCP list_ai_cards response shape", () => {
+	it("AC-8: keeps the pre-S-20 response exactly, dropping the three new fields", async () => {
 		const result = await listAiCardsThroughMcp({ id: ILLUSTRATION_ID, status: "ready" });
 
 		// Deep-equal snapshot of the response as it was before the projection change.

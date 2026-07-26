@@ -22,7 +22,7 @@ const VALID_ENTRY = {
 const mapping = (index: number) => ({ part: `部品${index}`, meaning: `意味${index}` });
 const mappings = (count: number) => Array.from({ length: count }, (_, index) => mapping(index));
 
-describe("S-19 mnemonic limits shared with the /ai/cards editor", () => {
+describe("S-20 mnemonic limits shared with the /ai/cards editor", () => {
 	it("exposes the canonical client-side limits", () => {
 		expect(MNEMONIC_LIMITS).toEqual({
 			kanjiMax: 16,

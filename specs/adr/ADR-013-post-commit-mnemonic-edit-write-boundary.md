@@ -6,9 +6,9 @@ version: 1.0.0
 created: 2026-07-26
 updated: 2026-07-26
 status: Accepted
-based_on: specs/stories/S-19-ai-cards-mnemonic-edit/requirements.md
+based_on: specs/stories/S-20-ai-cards-mnemonic-edit/requirements.md
 related_epic: E-16
-related_story: specs/stories/S-19-ai-cards-mnemonic-edit/story.md
+related_story: specs/stories/S-20-ai-cards-mnemonic-edit/story.md
 ---
 
 # ADR-013: 登録後のニーモニック編集は owner-scoped RLS 経由の直接 upsert で行い、新しい特権書き込み口を作らない
@@ -21,7 +21,7 @@ Accepted
 
 ADR-012 は「承認済みニーモニックの**初回書き込み**」を、app_ai commit RPC `commit_generated_import_async` の同一トランザクション内で行うと決めた。理由は `illustration_key` が commit RPC の内側で初めて materialize される（`batchId` がサーバ採番）ためであり、「commit 成功後に別 Server Action で key を再解決して書き込む」案（選択肢 3）は **illustration 行の作成と mnemonic 書き込みが別トランザクションになる非原子性**を理由に却下された。
 
-S-19（issue #64）が要求するのは、その後の局面である。`/ai/cards`（AIカード管理）に登録済みカードのニーモニックを表示し、後から直せるようにする。ここでの前提は ADR-012 の時点と決定的に違う（2026-07-26、`9134703` で実測）。
+S-20（issue #64）が要求するのは、その後の局面である。`/ai/cards`（AIカード管理）に登録済みカードのニーモニックを表示し、後から直せるようにする。ここでの前提は ADR-012 の時点と決定的に違う（2026-07-26、`9134703` で実測）。
 
 - `illustration_key` は既に materialize 済みで `public.cards.illustration_key` に永続化されている。一覧 RPC `list_ai_managed_cards` は既に `illustrations.illustration_key = cards.illustration_key` で join しており（`supabase/migrations/20260719000001_s13_ai_card_management_undo.sql:124-127`）、key はサーバ側で確定値として読める。client の事前計算も key の再解決も不要。
 - 書き込み対象は既存 1 行の更新（または同 key の初回作成）のみで、同時に作成・変更する他テーブルの行が存在しない。**原子性を要する複合書き込みが無い**ため、ADR-012 選択肢 3 の却下理由は本局面には当てはまらない。
@@ -76,7 +76,7 @@ where id = :cardId and owner_user_id = :sessionUserId
 書き込みは `AiCardManagementRepository`（UI と Remote MCP が共有する interface）へ追加せず、別の narrow interface と別の factory として持つ。Remote MCP の repository はこれを実装しない。
 
 - 共有 interface へ追加すると Remote MCP 側にも実装義務が生じ、境界の判断がコードから読み取れなくなる。別 interface なら「MCP は構造上呼べない」ことが型で表現される。
-- Remote MCP からのニーモニック書き込みは S-19 のスコープ外（issue #64 Out of Scope）。将来公開する場合は S-14 の `s14_remote_*` wrapper 群と同じ client / session 再検証を通す必要があり、そのとき改めて決める。
+- Remote MCP からのニーモニック書き込みは S-20 のスコープ外（issue #64 Out of Scope）。将来公開する場合は S-14 の `s14_remote_*` wrapper 群と同じ client / session 再検証を通す必要があり、そのとき改めて決める。
 
 ### 6. セキュリティ三層への適合
 
@@ -121,7 +121,7 @@ where id = :cardId and owner_user_id = :sessionUserId
 
 ### 中立
 
-- `ai_import_items.user_edited_at` は立たない。カード変更 RPC 群のみがこの印を付けるため、ニーモニック編集は「未編集カード」の判定に影響しない。S-19 では UI からバッチ取り消しを外すので UI 経由で編集分が消える動線は無くなるが、Remote MCP の `undo_import_batch` では依然として消える。この事実は S-19 の requirements に記録し、挙動自体は変えない。
+- `ai_import_items.user_edited_at` は立たない。カード変更 RPC 群のみがこの印を付けるため、ニーモニック編集は「未編集カード」の判定に影響しない。S-20 では UI からバッチ取り消しを外すので UI 経由で編集分が消える動線は無くなるが、Remote MCP の `undo_import_batch` では依然として消える。この事実は S-20 の requirements に記録し、挙動自体は変えない。
 
 ## 実装への指針
 
@@ -136,7 +136,7 @@ where id = :cardId and owner_user_id = :sessionUserId
 - `specs/adr/ADR-002-database-schema-rls-access-boundary.md`
 - `specs/adr/ADR-007-ai-card-import-foundation.md`
 - `specs/adr/ADR-011-supabase-oauth-remote-mcp-security-boundary.md`
-- `specs/stories/S-19-ai-cards-mnemonic-edit/`
+- `specs/stories/S-20-ai-cards-mnemonic-edit/`
 - 実測ソース: `supabase/migrations/20260719000001_s13_ai_card_management_undo.sql`、`supabase/migrations/20260721000001_s16_card_mnemonics.sql`、`supabase/migrations/20260724000000_s16_card_mnemonics_owner_fix.sql`、`frontend/src/lib/ai-card-management/*`、`frontend/src/lib/ai-import/service.ts`、`frontend/src/lib/mcp/services.ts`
 
 ## 変更履歴

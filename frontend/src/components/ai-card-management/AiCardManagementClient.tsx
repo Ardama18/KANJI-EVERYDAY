@@ -577,7 +577,7 @@ type MnemonicEntryDraft = Readonly<{
 }>;
 
 /**
- * Post-commit mnemonic editor (S-19).  A card without an approved mnemonic — or
+ * Post-commit mnemonic editor (S-20).  A card without an approved mnemonic — or
  * without an illustration key to write against — only reports "未設定": there is
  * nothing to upsert and the Server Action would reject the request anyway.
  */

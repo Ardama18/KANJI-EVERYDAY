@@ -1,4 +1,4 @@
--- S-19 (issue #64): expose the approved mnemonic on the AI card management list.
+-- S-20 (issue #64): expose the approved mnemonic on the AI card management list.
 -- Read-side projection only: `list_ai_managed_cards` gains `illustrationKey`,
 -- `mnemonic` and `mnemonicSharedCardCount`.  ADR-013 decision 1 keeps the write
 -- path on the owner-scoped RLS policies that `card_mnemonics` already has, so this

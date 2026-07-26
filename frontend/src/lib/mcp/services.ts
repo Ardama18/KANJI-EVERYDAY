@@ -92,9 +92,9 @@ export function createMcpToolServices(dependencies: McpToolServiceDependencies):
 }
 
 /**
- * Allowlist projection for the MCP `list_ai_cards` response (S-19 AC-8).  The key
+ * Allowlist projection for the MCP `list_ai_cards` response (S-20 AC-8).  The key
  * order mirrors the `ManagedAiCard` declaration order, so the serialized shape is
- * byte-identical to the pre-S-19 pass-through.  An allowlist — not a delete list —
+ * byte-identical to the pre-S-20 pass-through.  An allowlist — not a delete list —
  * so future `ManagedAiCard` fields never leak into the tool contract by default.
  */
 function toMcpAiCard(card: ManagedAiCard) {

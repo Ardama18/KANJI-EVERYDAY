@@ -340,7 +340,7 @@ const listPage = async (
 	return row.result;
 };
 
-describe("S-19 real database mnemonic projection and edit boundary", () => {
+describe("S-20 real database mnemonic projection and edit boundary", () => {
 	beforeAll(async () => {
 		await ensureS10ActorFixtures(database);
 	});
@@ -352,7 +352,7 @@ describe("S-19 real database mnemonic projection and edit boundary", () => {
 		const fixture = await createBatchFixture(
 			Array.from({ length: cardCount }, () => "succeeded" as const)
 		);
-		const illustrationKey = `s19:${fixture.marker}`;
+		const illustrationKey = `s20:${fixture.marker}`;
 		try {
 			// No ai_illustration_objects row exists for this key, so the reference
 			// counting trigger on cards.illustration_key is a no-op here.

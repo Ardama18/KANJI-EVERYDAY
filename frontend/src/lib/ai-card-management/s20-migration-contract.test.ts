@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const MIGRATIONS_DIR = resolve(process.cwd(), "../supabase/migrations");
-const MIGRATION_FILE = "20260726000000_s19_ai_card_mnemonic_edit.sql";
+const MIGRATION_FILE = "20260726000000_s20_ai_card_mnemonic_edit.sql";
 const MIGRATION_PATH = resolve(MIGRATIONS_DIR, MIGRATION_FILE);
 const SIGNATURE =
 	"public.list_ai_managed_cards(integer,timestamptz,uuid,uuid,uuid,text,timestamptz,timestamptz)";
@@ -13,7 +13,7 @@ const migration = readFileSync(MIGRATION_PATH, "utf8");
 const normalizeSql = (sql: string): string => sql.replace(/\s+/gu, " ").toLowerCase();
 const normalized = normalizeSql(migration);
 
-describe("S-19 list_ai_managed_cards projection migration contract", () => {
+describe("S-20 list_ai_managed_cards projection migration contract", () => {
 	// 同一 prefix の migration は `supabase db push` に黙って読み飛ばされる
 	it("owns its timestamp prefix and sorts after the S-16H migration it follows", () => {
 		const files = readdirSync(MIGRATIONS_DIR).filter((file) => file.endsWith(".sql"));
