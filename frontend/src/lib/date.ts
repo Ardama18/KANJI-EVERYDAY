@@ -53,6 +53,12 @@ export function getTomorrowJST(baseDate?: string): string {
 	return addDaysJST(baseDate ?? getTodayJST(), 1);
 }
 
+// 表示専用。先頭0を付けない `M月D日` を返す（S-19 の次回予定日表示）。
+export function formatJstMonthDay(date: string): string {
+	const parsedDate = parseJstDate(date);
+	return `${parsedDate.getUTCMonth() + 1}月${parsedDate.getUTCDate()}日`;
+}
+
 export function isBeforeOrEqualJST(date: string, target: string): boolean {
 	return formatIsoDate(parseJstDate(date)) <= formatIsoDate(parseJstDate(target));
 }

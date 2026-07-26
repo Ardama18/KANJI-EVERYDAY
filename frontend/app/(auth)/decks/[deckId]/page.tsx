@@ -1,14 +1,24 @@
 import { getDeckOverview } from "@/actions/deck-actions";
 import { DeckStudyLimitForm } from "@/components/deck/DeckStudyLimitForm";
+import { getTodayJST } from "@/lib/date";
+import {
+	DECK_LABEL_NEW,
+	DECK_LABEL_REVIEW,
+	DECK_LABEL_STUDIED_TODAY,
+	resolveDeckStudyStatus,
+} from "@/lib/deck/study-status";
 import { isAiCardImportEnabled } from "@/lib/env";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-export const DECK_OVERVIEW_EMPTY_MESSAGE = "今日の学習は完了しています";
-export const DECK_OVERVIEW_LIMIT_REACHED_MESSAGE = "今日の学習上限に達しています。";
-export const DECK_OVERVIEW_SCHEDULED_MESSAGE = "今日の学習はありません。次の予定カードがあります。";
-export const DECK_OVERVIEW_NO_CARDS_MESSAGE = "カードがまだありません";
+// 完了・上限到達・カード未登録の文言は一覧と共有する（FR-11）。@/lib/deck/study-status を正本とする。
 export const DECK_OVERVIEW_START_LABEL = "はじめる";
+
+/**
+ * 開始できない理由の文言 id。バナー（done / limit-reached）とボタン下（no-cards）は
+ * 排他的に描画されるため、どちらか一方だけがこの id を持ち、disabled ボタンから常に参照できる。
+ */
+const STUDY_STATUS_MESSAGE_ID = "deck-study-status-message";
 
 type DeckOverviewPageProps = {
 	params: {
@@ -29,15 +39,18 @@ export default async function DeckOverviewPage({ params }: DeckOverviewPageProps
 		notFound();
 	}
 
-	const canStartStudy = overview.counts.total > 0 && overview.remainingToday > 0;
-	const completeMessage =
-		overview.totalCards === 0
-			? DECK_OVERVIEW_NO_CARDS_MESSAGE
-			: overview.counts.total > 0 && overview.remainingToday === 0
-				? DECK_OVERVIEW_LIMIT_REACHED_MESSAGE
-				: overview.scheduledCards > 0
-					? DECK_OVERVIEW_SCHEDULED_MESSAGE
-					: DECK_OVERVIEW_EMPTY_MESSAGE;
+	const status = resolveDeckStudyStatus({
+		totalCards: overview.totalCards,
+		todayCount: overview.counts.total,
+		studiedToday: overview.studiedToday,
+		dailyStudyLimit: overview.dailyStudyLimit,
+		nextDueDate: overview.nextDueDate,
+		today: getTodayJST(),
+	});
+	const canStartStudy = status.kind === "todo";
+	// 完了・上限到達では 0 の羅列ではなく完了メッセージを主表示にする（FR-03 / AC-2）。
+	const showCompletionBanner = status.kind === "done" || status.kind === "limit-reached";
+	const reviewCount = overview.counts.learn + overview.counts.due;
 	const studyHref = `/decks/${overview.id}/study`;
 
 	return (
@@ -51,36 +64,46 @@ export default async function DeckOverviewPage({ params }: DeckOverviewPageProps
 				<h2 id="today-study-heading" className="text-sm font-bold text-slate-800">
 					今日の学習
 				</h2>
+				{showCompletionBanner ? (
+					<div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-center">
+						<p id={STUDY_STATUS_MESSAGE_ID} className="text-base font-bold text-amber-900">
+							{status.message}
+						</p>
+						{status.nextDueMessage === null ? null : (
+							<p className="mt-1 text-sm text-amber-800">{status.nextDueMessage}</p>
+						)}
+					</div>
+				) : null}
 				<div className="mt-3 grid grid-cols-3 gap-3">
 					<StatCard
-						label="New"
+						label={DECK_LABEL_NEW}
 						value={overview.counts.new}
 						tone={overview.counts.new === 0 ? "text-slate-500" : "text-blue-600"}
 					/>
 					<StatCard
-						label="Learn"
-						value={overview.counts.learn}
-						tone={overview.counts.learn === 0 ? "text-slate-500" : "text-red-600"}
+						label={DECK_LABEL_REVIEW}
+						value={reviewCount}
+						tone={reviewCount === 0 ? "text-slate-500" : "text-green-600"}
 					/>
 					<StatCard
-						label="Due"
-						value={overview.counts.due}
-						tone={overview.counts.due === 0 ? "text-slate-500" : "text-green-600"}
+						label={DECK_LABEL_STUDIED_TODAY}
+						value={overview.studiedToday}
+						tone={overview.studiedToday === 0 ? "text-slate-500" : "text-amber-700"}
 					/>
 				</div>
 				<p className="mt-4 text-center text-sm font-medium text-slate-700">
-					今日のカード: {overview.counts.total}枚 / 残り枠: {overview.remainingToday}枚
+					今日やること {overview.counts.total}枚 / 今日やれる残り {status.remainingToday}枚
 				</p>
 			</section>
 
 			<section className="mt-6" aria-labelledby="whole-study-heading">
 				<h2 id="whole-study-heading" className="text-sm font-bold text-slate-800">
-					全体状態
+					これまでの記録
 				</h2>
 				<div className="mt-3 grid grid-cols-3 gap-3">
 					<StatCard label="カード総数" value={overview.totalCards} tone="text-slate-900" />
-					<StatCard label="学習済み" value={overview.learnedCards} tone="text-indigo-700" />
-					<StatCard label="将来予定" value={overview.scheduledCards} tone="text-amber-700" />
+					<StatCard label="学習した数" value={overview.learnedCards} tone="text-indigo-700" />
+					<StatCard label="つぎの予定" value={overview.scheduledCards} tone="text-amber-700" />
 				</div>
 			</section>
 
@@ -97,11 +120,17 @@ export default async function DeckOverviewPage({ params }: DeckOverviewPageProps
 						<button
 							type="button"
 							disabled
+							aria-describedby={STUDY_STATUS_MESSAGE_ID}
 							className="h-14 w-full rounded-xl bg-slate-300 text-base font-semibold text-slate-600"
 						>
 							{DECK_OVERVIEW_START_LABEL}
 						</button>
-						<p className="mt-3 text-center text-sm text-slate-600">{completeMessage}</p>
+						{/* done / limit-reached は「今日の学習」先頭のバナーが主表示のため、ここでは重複表示しない。 */}
+						{status.kind === "no-cards" ? (
+							<p id={STUDY_STATUS_MESSAGE_ID} className="mt-3 text-center text-sm text-slate-600">
+								{status.message}
+							</p>
+						) : null}
 					</>
 				)}
 			</div>
@@ -109,7 +138,7 @@ export default async function DeckOverviewPage({ params }: DeckOverviewPageProps
 			<section className="mt-6 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
 				<h2 className="text-sm font-bold text-slate-800">学習設定</h2>
 				<p className="mt-1 text-sm text-slate-600">
-					一日最大 {overview.dailyStudyLimit}枚 / 今日の学習済み {overview.studiedToday}枚
+					{`一日最大 ${overview.dailyStudyLimit}枚 / ${DECK_LABEL_STUDIED_TODAY} ${overview.studiedToday}枚`}
 				</p>
 				<DeckStudyLimitForm
 					key={`${overview.id}:${overview.dailyStudyLimit}`}
