@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { classifyCard, countByCategory, summarizeDeckStudyState } from "./classify";
+import {
+	classifyCard,
+	countByCategory,
+	findNextDueDate,
+	summarizeDeckStudyState,
+} from "./classify";
 import type { CardWithState, ReviewState } from "./types";
 
 const TODAY = "2026-02-24";
@@ -80,5 +85,43 @@ describe("summarizeDeckStudyState", () => {
 			learnedCards: 2,
 			scheduledCards: 2,
 		});
+	});
+});
+
+describe("findNextDueDate", () => {
+	it("UT-S19-NEXT-DUE-MIN: 未来 due の最小日付を返す", () => {
+		const cards: CardWithState[] = [
+			{ cardId: "future-late", reviewState: createState({ level: 4, dueDate: "2026-03-10" }) },
+			{ cardId: "future-early", reviewState: createState({ level: 3, dueDate: "2026-02-25" }) },
+			{ cardId: "due-today", reviewState: createState({ level: 2, dueDate: TODAY }) },
+			{ cardId: "new-card", reviewState: null },
+		];
+
+		expect(findNextDueDate(cards, TODAY)).toBe("2026-02-25");
+	});
+
+	it("UT-S19-NEXT-DUE-PAST-ONLY: 今日以前の due だけなら null を返す", () => {
+		const cards: CardWithState[] = [
+			{ cardId: "overdue", reviewState: createState({ level: 2, dueDate: "2026-02-20" }) },
+			{ cardId: "due-today", reviewState: createState({ level: 2, dueDate: TODAY }) },
+		];
+
+		expect(findNextDueDate(cards, TODAY)).toBeNull();
+	});
+
+	it("UT-S19-NEXT-DUE-NO-STATE: 未学習カードだけなら null を返す", () => {
+		const cards: CardWithState[] = [
+			{ cardId: "new-1", reviewState: null },
+			{ cardId: "new-2", reviewState: null },
+		];
+
+		expect(findNextDueDate(cards, TODAY)).toBeNull();
+	});
+
+	it("UT-S19-NEXT-DUE-EMPTY: 空配列なら null を返し入力を破壊しない", () => {
+		const cards: CardWithState[] = [];
+
+		expect(findNextDueDate(cards, TODAY)).toBeNull();
+		expect(cards).toEqual([]);
 	});
 });

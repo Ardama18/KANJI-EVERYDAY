@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getDecksWithCountsMock = vi.hoisted(() => vi.fn());
 
@@ -11,11 +11,22 @@ vi.mock("@/components/deck/CreateDeckForm", () => ({
 	CreateDeckForm: () => <form aria-label="新しいデッキ作成" data-testid="create-deck-form" />,
 }));
 
+import { DECK_STUDY_DONE_MESSAGE } from "@/lib/deck/study-status";
+
 import DecksPage, { DECKS_EMPTY_MESSAGE, DECKS_PAGE_TITLE } from "../../../app/(auth)/decks/page";
+
+// JST 2026-02-24 00:30。page が渡す `today` の妥当性を実行日に依存させない。
+const FIXED_NOW = new Date("2026-02-23T15:30:00.000Z");
 
 describe("frontend/app/(auth)/decks/page.tsx", () => {
 	beforeEach(() => {
 		getDecksWithCountsMock.mockReset();
+		vi.useFakeTimers();
+		vi.setSystemTime(FIXED_NOW);
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
 	});
 
 	it("一覧データが0件のとき空状態メッセージを表示する", async () => {
@@ -38,6 +49,22 @@ describe("frontend/app/(auth)/decks/page.tsx", () => {
 				learnedCards: 8,
 				scheduledCards: 2,
 				dailyStudyLimit: 20,
+				studiedToday: 3,
+				nextDueDate: "2999-01-01",
+			},
+			{
+				// 今日やること 0 枚 + 次回予定が「固定した今日の翌日」。
+				// page が getTodayJST() を評価して DeckCard へ渡す `today` が正しいときだけ
+				// 「つぎは あした」になる（NFR-03）。
+				id: "deck-2",
+				name: "あしたデッキ",
+				counts: { new: 0, learn: 0, due: 0 },
+				totalCards: 6,
+				learnedCards: 6,
+				scheduledCards: 6,
+				dailyStudyLimit: 20,
+				studiedToday: 4,
+				nextDueDate: "2026-02-25",
 			},
 		]);
 
@@ -46,13 +73,21 @@ describe("frontend/app/(auth)/decks/page.tsx", () => {
 		expect(html).toContain("小学3年生の漢字");
 		expect(html).toContain('aria-label="新しいデッキ作成"');
 		expect(html).toContain('href="/decks/deck-1"');
-		expect(html).toContain("New");
-		expect(html).toContain("Learn");
-		expect(html).toContain("Due");
+		expect(html).toContain("あたらしい");
+		expect(html).toContain("ふくしゅう");
+		expect(html).toContain("きょうやった");
 		expect(html).toContain(">10<");
-		expect(html).toContain(">3<");
-		expect(html).toContain(">5<");
+		// ふくしゅう は learn + due の合算値
+		expect(html).toContain(">8<");
+		expect(html).toContain("3枚");
 		expect(html).toContain("カード 18枚");
-		expect(html).toContain("学習済み 8枚");
+		expect(html).toContain("学習した 8枚");
+		// 完了デッキは page が渡した today を基準に「あした」と判定される（NFR-03）
+		expect(html).toContain("あしたデッキ");
+		expect(html).toContain(DECK_STUDY_DONE_MESSAGE);
+		expect(html).toContain("つぎは あした");
+		expect(html).not.toContain("New");
+		expect(html).not.toContain("Learn");
+		expect(html).not.toContain("Due");
 	});
 });

@@ -370,6 +370,8 @@ describe("frontend/src/actions/deck-actions.ts", () => {
 				learnedCards: 2,
 				scheduledCards: 0,
 				dailyStudyLimit: 20,
+				studiedToday: 0,
+				nextDueDate: null,
 			},
 			{
 				id: "deck-2",
@@ -383,6 +385,8 @@ describe("frontend/src/actions/deck-actions.ts", () => {
 				learnedCards: 1,
 				scheduledCards: 1,
 				dailyStudyLimit: 20,
+				studiedToday: 0,
+				nextDueDate: "2999-01-01",
 			},
 		]);
 	});
@@ -417,8 +421,142 @@ describe("frontend/src/actions/deck-actions.ts", () => {
 				learnedCards: 12,
 				scheduledCards: 12,
 				dailyStudyLimit: 20,
+				studiedToday: 0,
+				nextDueDate: "2999-01-01",
 			},
 		]);
+	});
+
+	it("UT-S19-DECKS-JST-STUDIED-TODAY: JST日境界で一覧の本日学習済みと次回予定日を返す", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-02-23T15:30:00.000Z"));
+		const { deckCardsSelectMock, reviewStatesInMock } = setupClient({
+			userId: "user-1",
+			decksList: [
+				{ id: "deck-1", name: "小学3年生", new_limit_per_day: 20, daily_study_limit: 20 },
+			],
+			deckCards: [
+				{ deck_id: "deck-1", card_id: "card-before-jst-midnight" },
+				{ deck_id: "deck-1", card_id: "card-after-jst-midnight" },
+				{ deck_id: "deck-1", card_id: "card-future" },
+			],
+			reviewStates: [
+				{
+					user_id: "user-1",
+					card_id: "card-before-jst-midnight",
+					level: 2,
+					due_date: "2026-02-24",
+					last_rating: "good",
+					retry_today_count: 0,
+					last_reviewed_at: "2026-02-23T14:59:59.999Z",
+				},
+				{
+					user_id: "user-1",
+					card_id: "card-after-jst-midnight",
+					level: 2,
+					due_date: "2026-02-24",
+					last_rating: "good",
+					retry_today_count: 0,
+					last_reviewed_at: "2026-02-23T15:00:00.000Z",
+				},
+				{
+					user_id: "user-1",
+					card_id: "card-future",
+					level: 4,
+					due_date: "2026-03-05",
+					last_rating: "good",
+					retry_today_count: 0,
+					last_reviewed_at: "2026-02-23T15:00:00.000Z",
+				},
+			],
+		});
+
+		const result = await getDecksWithCounts();
+
+		expect(result[0]).toMatchObject({
+			studiedToday: 2,
+			nextDueDate: "2026-03-05",
+		});
+		// NFR-01: 既存取得データの再集計のみで、追加の Supabase ラウンドトリップを作らない。
+		expect(deckCardsSelectMock).toHaveBeenCalledTimes(1);
+		expect(reviewStatesInMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("UT-S19-DECKS-STUDIED-TODAY-UNIQUE: 同一カードが重複しても本日学習済みは1枚と数える", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-02-23T15:30:00.000Z"));
+		setupClient({
+			userId: "user-1",
+			decksList: [
+				{ id: "deck-1", name: "小学3年生", new_limit_per_day: 20, daily_study_limit: 20 },
+			],
+			deckCards: [
+				{ deck_id: "deck-1", card_id: "card-reviewed" },
+				{ deck_id: "deck-1", card_id: "card-reviewed" },
+			],
+			reviewStates: [
+				{
+					user_id: "user-1",
+					card_id: "card-reviewed",
+					level: 2,
+					due_date: "2026-02-24",
+					last_rating: "good",
+					retry_today_count: 0,
+					last_reviewed_at: "2026-02-24T01:00:00.000Z",
+				},
+			],
+		});
+
+		const result = await getDecksWithCounts();
+
+		expect(result[0]?.studiedToday).toBe(1);
+	});
+
+	it("UT-S19-DECKS-OVERVIEW-STUDIED-TODAY-MATCH: 一覧と詳細で本日学習済みが一致する", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-02-23T15:30:00.000Z"));
+		const deckRow = {
+			id: "deck-1",
+			name: "小学3年生",
+			new_limit_per_day: 20,
+			daily_study_limit: 20,
+		};
+		setupClient({
+			userId: "user-1",
+			decksList: [deckRow],
+			deckOverview: deckRow,
+			deckCards: [
+				{ deck_id: "deck-1", card_id: "card-studied" },
+				{ deck_id: "deck-1", card_id: "card-not-studied" },
+			],
+			reviewStates: [
+				{
+					user_id: "user-1",
+					card_id: "card-studied",
+					level: 2,
+					due_date: "2026-02-24",
+					last_rating: "good",
+					retry_today_count: 0,
+					last_reviewed_at: "2026-02-23T15:00:00.000Z",
+				},
+				{
+					user_id: "user-1",
+					card_id: "card-not-studied",
+					level: 3,
+					due_date: "2026-02-28",
+					last_rating: "good",
+					retry_today_count: 0,
+					last_reviewed_at: "2026-02-20T02:00:00.000Z",
+				},
+			],
+		});
+
+		const [deckFromList] = await getDecksWithCounts();
+		const overview = await getDeckOverview("deck-1");
+
+		expect(deckFromList?.studiedToday).toBe(overview?.studiedToday);
+		expect(deckFromList?.nextDueDate).toBe(overview?.nextDueDate);
+		expect(deckFromList?.nextDueDate).toBe("2026-02-28");
 	});
 
 	it("UT-AC09-OVERVIEW-NOT-FOUND: getDeckOverview は対象デッキが無ければ null を返す", async () => {
@@ -473,6 +611,7 @@ describe("frontend/src/actions/deck-actions.ts", () => {
 			totalCards: 2,
 			learnedCards: 1,
 			scheduledCards: 0,
+			nextDueDate: null,
 		});
 	});
 
@@ -529,6 +668,7 @@ describe("frontend/src/actions/deck-actions.ts", () => {
 			studiedToday: 1,
 			remainingToday: 2,
 			scheduledCards: 1,
+			nextDueDate: "2026-02-25",
 		});
 	});
 
