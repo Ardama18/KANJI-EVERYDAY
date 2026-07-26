@@ -168,7 +168,7 @@ export function parseBulkDeleteInput(value: unknown): Json {
 }
 
 /**
- * S-19 fields are parsed "default when absent, strict when present" so an app
+ * S-20 fields are parsed "default when absent, strict when present" so an app
  * deployed ahead of `20260726000000` still renders the list instead of failing
  * every row (ADR-013 implementation guidance).
  */

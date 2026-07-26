@@ -114,7 +114,7 @@ describe("S-14 AI card management application service", () => {
 		expect(repo.undoImport).not.toHaveBeenCalled();
 	});
 
-	it("S-19 AC-15: keeps the illustration service path after the UI form was removed", async () => {
+	it("S-20 AC-15: keeps the illustration service path after the UI form was removed", async () => {
 		const repo = repository();
 		const result = await setAiCardIllustration(repo, { cardId, illustrationId: relatedId });
 		expect(result).toEqual({ ok: true, data: { changed: true } });
@@ -125,8 +125,8 @@ describe("S-14 AI card management application service", () => {
 		expect(repo.setIllustration).toHaveBeenCalledOnce();
 	});
 
-	it("S-19: keeps the list DTO usable when the RPC predates the mnemonic projection", async () => {
-		// Deployment skew: the fixture carries none of the S-19 keys.
+	it("S-20: keeps the list DTO usable when the RPC predates the mnemonic projection", async () => {
+		// Deployment skew: the fixture carries none of the S-20 keys.
 		const result = await listAiCards(repository(), {});
 		expect(result).toMatchObject({
 			ok: true,
@@ -189,7 +189,7 @@ function mnemonicRepository(
 	};
 }
 
-describe("S-19 post-commit mnemonic edit service", () => {
+describe("S-20 post-commit mnemonic edit service", () => {
 	it("AC-3: upserts the sanitized entry for the verified card", async () => {
 		const repo = mnemonicRepository();
 		const result = await updateAiCardMnemonic(repo, {

@@ -1,4 +1,4 @@
-# S-19 design: /ai/cards のニーモニック表示・編集と不要 UI の削除
+# S-20 design: /ai/cards のニーモニック表示・編集と不要 UI の削除
 
 前提と受入条件は `requirements.md`、書き込み境界の決定は `specs/adr/ADR-013-post-commit-mnemonic-edit-write-boundary.md` を正本とする。
 本ファイルは実装の形（SQL・型・関数シグネチャ・UI 構成・テスト）を確定する。
@@ -25,7 +25,7 @@ updateAiCardMnemonicAction（新規・UI 専用）
 読み取りは 1 経路（既存 RPC の射影追加）、書き込みは新経路（RLS 直書き）で、
 書き込みは Remote MCP から構造的に到達できない（別 interface・別 factory）。
 
-## 2. DB: `supabase/migrations/20260726000000_s19_ai_card_mnemonic_edit.sql`
+## 2. DB: `supabase/migrations/20260726000000_s20_ai_card_mnemonic_edit.sql`
 
 prefix `20260726000000` は既存最大 `20260725000000` より後で、重複しない。
 
@@ -411,7 +411,7 @@ export const mnemonicMutationInput = (
 | Unit | `frontend/src/lib/ai-card-management/service.test.ts` | サーバ側サニタイズ拒否時に repository 未呼出、所有権不一致で `NOT_FOUND` かつ upsert 未呼出 | 4 | AC-5,6 |
 | Unit | `frontend/src/actions/ai-card-management-actions.test.ts` | options の戻り値に `illustrations` が無い、`setAiCardIllustrationAction` が存在しない | 2 | AC-12,16 |
 | Unit | `frontend/src/lib/ai-card-management/remote-mcp-repository.test.ts` | `setIllustration` / `undoImport` が UI 削除後も呼べる | 2 | AC-15 |
-| Contract | `frontend/src/lib/ai-card-management/s19-migration-contract.test.ts`（新規） | 新 migration の定義（同一シグネチャ・`DROP FUNCTION` 不在・LATERAL 2 つ・3 キー射影）と owner / REVOKE / GRANT | 3 | AC-9 |
+| Contract | `frontend/src/lib/ai-card-management/s20-migration-contract.test.ts`（新規） | 新 migration の定義（同一シグネチャ・`DROP FUNCTION` 不在・LATERAL 2 つ・3 キー射影）と owner / REVOKE / GRANT | 3 | AC-9 |
 | Integration | `frontend/src/lib/ai-card-management/real-db.int.test.ts` | 所有権不一致の保存拒否と RLS、upsert 後の再読込で `status='approved'`、`mnemonicSharedCardCount` がページ跨ぎで正しい | 3 | AC-3,6,7 |
 
 補足。

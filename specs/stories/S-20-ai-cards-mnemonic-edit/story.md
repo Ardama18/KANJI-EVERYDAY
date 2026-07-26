@@ -1,4 +1,4 @@
-# S-19 /ai/cards のニーモニック表示・編集と不要 UI の削除
+# S-20 /ai/cards のニーモニック表示・編集と不要 UI の削除
 
 親 Epic: E-16（#40）／issue #64。親 Story: S-13（AIカード管理・#14）。
 依存: S-16A（`card_mnemonics` テーブルと owner-scoped RLS・#47）、S-16D（承認 UI と `isMnemonicEntryValid`・#50）、

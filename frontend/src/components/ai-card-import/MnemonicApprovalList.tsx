@@ -28,7 +28,7 @@ interface MnemonicApprovalListProps {
 }
 
 /**
- * Client-side limits shared with the post-commit edit form on `/ai/cards` (S-19).
+ * Client-side limits shared with the post-commit edit form on `/ai/cards` (S-20).
  * The authoritative copy for server-side writes lives in
  * `@/lib/ai-card-generation/mnemonic-sanitize`; this module is `"use client"`, so
  * Server Actions cannot call into it.

@@ -33,7 +33,7 @@ const MNEMONIC_JSON = {
 	status: "approved",
 };
 
-/** One raw `list_ai_managed_cards` item; `patch` overrides or adds S-19 keys. */
+/** One raw `list_ai_managed_cards` item; `patch` overrides or adds S-20 keys. */
 const listRow = (patch: Record<string, unknown> = {}) => ({
 	id: CARD_ID,
 	frontText: "山",
@@ -173,7 +173,7 @@ describe("S-13 management pure contracts", () => {
 		expect(JSON.stringify(parsed)).not.toContain("storage_path");
 	});
 
-	it("S-19: defaults the mnemonic fields when the RPC does not project them", () => {
+	it("S-20: defaults the mnemonic fields when the RPC does not project them", () => {
 		// Deployment skew tolerance (ADR-013 implementation guidance): an app running
 		// ahead of 20260726000000 must still render the page.
 		const parsed = parseManagedAiCards({ hasMore: false, items: [listRow()] });
@@ -185,7 +185,7 @@ describe("S-13 management pure contracts", () => {
 		});
 	});
 
-	it("S-19: adopts a well-formed mnemonic projection as-is", () => {
+	it("S-20: adopts a well-formed mnemonic projection as-is", () => {
 		const parsed = parseManagedAiCards({
 			hasMore: false,
 			items: [
@@ -240,7 +240,7 @@ describe("S-13 management pure contracts", () => {
 		["a non-string illustration key", { illustrationKey: 3 }],
 		["a negative shared card count", { mnemonicSharedCardCount: -1 }],
 		["a fractional shared card count", { mnemonicSharedCardCount: 1.5 }],
-	])("S-19: rejects %s instead of silently defaulting", (_label, patch) => {
+	])("S-20: rejects %s instead of silently defaulting", (_label, patch) => {
 		expect(() => parseManagedAiCards({ hasMore: false, items: [listRow(patch)] })).toThrow();
 	});
 

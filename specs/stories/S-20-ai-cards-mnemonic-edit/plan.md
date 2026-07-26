@@ -1,4 +1,4 @@
-# S-19 plan: /ai/cards のニーモニック表示・編集と不要 UI の削除
+# S-20 plan: /ai/cards のニーモニック表示・編集と不要 UI の削除
 
 本ファイルを実装作業の単一情報源とする。設計の根拠は `design.md`、受入条件は `requirements.md`、
 書き込み境界の決定は `specs/adr/ADR-013-post-commit-mnemonic-edit-write-boundary.md`。
@@ -18,9 +18,9 @@
 
 ## Phase 1: migration（AC-9 の土台、他層の返却契約）
 
-### 1-1. `supabase/migrations/20260726000000_s19_ai_card_mnemonic_edit.sql` を新規作成
+### 1-1. `supabase/migrations/20260726000000_s20_ai_card_mnemonic_edit.sql` を新規作成
 
-- 先頭に目的コメント（issue #64 / S-19、`list_ai_managed_cards` の射影追加のみで書き込み口の新設は無いこと）を書く。
+- 先頭に目的コメント（issue #64 / S-20、`list_ai_managed_cards` の射影追加のみで書き込み口の新設は無いこと）を書く。
 - `BEGIN;` … `COMMIT;` で囲む。
 - `20260719000001_s13_ai_card_management_undo.sql:77-170` の `list_ai_managed_cards` 定義を写し、
   `design.md` §2.2 の (a)(b)(c) の 3 点だけを足す。
@@ -41,7 +41,7 @@
 完了条件: SQL を静的に読み、旧定義との差分が (a)(b)(c) ＋ 末尾 3 文だけであること。
 `grep` で `DROP FUNCTION` が無いこと。書き込み用 RPC を作っていないこと。
 
-### 1-2. `frontend/src/lib/ai-card-management/s19-migration-contract.test.ts` を新規作成
+### 1-2. `frontend/src/lib/ai-card-management/s20-migration-contract.test.ts` を新規作成
 
 `frontend/src/lib/card-mnemonics/migration-contract.test.ts` の書式（`readFileSync` ＋ `normalizeSql`）に倣う。
 
@@ -168,7 +168,7 @@ Phase 3 と Phase 5 は同一コミットに含める。
 | `frontend/src/actions/ai-card-management-actions.test.ts` | options に `illustrations` が無い / `setAiCardIllustrationAction` が export されていない | 2 |
 | `frontend/src/lib/ai-card-management/remote-mcp-repository.test.ts` | `setIllustration` と `undoImport` が UI 削除後も RPC を呼べる | 2 |
 | `frontend/src/lib/mcp/services.test.ts` | Phase 4-2 | 2 |
-| `frontend/src/lib/ai-card-management/s19-migration-contract.test.ts` | Phase 1-2 | 3 |
+| `frontend/src/lib/ai-card-management/s20-migration-contract.test.ts` | Phase 1-2 | 3 |
 | `frontend/src/lib/ai-card-management/real-db.int.test.ts` | 所有権不一致の保存拒否と RLS / upsert 後の再読込で `status='approved'` と `explanation` 更新（AC-3, AC-4）/ `mnemonicSharedCardCount` がページ跨ぎで正しい | 3 |
 
 統合テストは既存 `packedQuery` ヘルパ（packed JWT claims で `authenticated` として実行）を使う。
@@ -208,12 +208,12 @@ Phase 3 と Phase 5 は同一コミットに含める。
 
 新規。
 
-- `supabase/migrations/20260726000000_s19_ai_card_mnemonic_edit.sql`
+- `supabase/migrations/20260726000000_s20_ai_card_mnemonic_edit.sql`
 - `frontend/src/lib/ai-card-generation/mnemonic-sanitize.ts`
-- `frontend/src/lib/ai-card-management/s19-migration-contract.test.ts`
+- `frontend/src/lib/ai-card-management/s20-migration-contract.test.ts`
 - `frontend/src/components/ai-card-import/MnemonicApprovalList.test.tsx`
 - （設計フェーズで作成済み）`specs/adr/ADR-013-post-commit-mnemonic-edit-write-boundary.md`、
-  `specs/stories/S-19-ai-cards-mnemonic-edit/{meta.json,story.md,requirements.md,design.md,plan.md}`
+  `specs/stories/S-20-ai-cards-mnemonic-edit/{meta.json,story.md,requirements.md,design.md,plan.md}`
 
 変更。
 

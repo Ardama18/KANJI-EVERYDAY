@@ -52,7 +52,7 @@ describe("remote MCP management repository", () => {
 		});
 	});
 
-	it("S-19 AC-15: still reaches set_card_illustration and undo_import after the UI removal", async () => {
+	it("S-20 AC-15: still reaches set_card_illustration and undo_import after the UI removal", async () => {
 		const rpc = vi.fn().mockResolvedValue({ data: {}, error: null });
 		const repository = createRemoteMcpCardManagementRepository({ rpc } as never, actor);
 
@@ -71,7 +71,7 @@ describe("remote MCP management repository", () => {
 		});
 	});
 
-	it("S-19 AC-15: the mnemonic write path is structurally absent from the MCP repository", () => {
+	it("S-20 AC-15: the mnemonic write path is structurally absent from the MCP repository", () => {
 		const repository = createRemoteMcpCardManagementRepository({ rpc: vi.fn() } as never, actor);
 
 		// ADR-013 decision 5: the shared interface never gains a mnemonic writer, so

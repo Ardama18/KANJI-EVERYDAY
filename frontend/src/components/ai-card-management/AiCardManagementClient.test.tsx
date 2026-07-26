@@ -88,7 +88,7 @@ describe("S-13 AI card management UI", () => {
 		).not.toBe(initialKey);
 	});
 
-	it("S-19: remounts the row when only the mnemonic or its shared count changes", () => {
+	it("S-20: remounts the row when only the mnemonic or its shared count changes", () => {
 		// A mnemonic save does not move cards.updated_at, so the fingerprint is the
 		// only thing that can force the controlled form back in sync.
 		const withMnemonic = { ...baseCard, illustrationKey: "見", mnemonic: MNEMONIC };
@@ -127,7 +127,7 @@ describe("S-13 AI card management UI", () => {
 		expect(managedCardSyncKey(card)).not.toContain(SIGNED_URL);
 	});
 
-	it("S-18/S-19: shows a thumbnail only for the ready card and keeps every remaining control", () => {
+	it("S-18/S-20: shows a thumbnail only for the ready card and keeps every remaining control", () => {
 		const html = renderToStaticMarkup(
 			<AiCardManagementClient
 				initialPage={{
@@ -231,7 +231,7 @@ const renderCards = (items: readonly ManagedAiCard[], initialError: string | nul
 		/>
 	);
 
-describe("S-19 mnemonic display and editing on /ai/cards", () => {
+describe("S-20 mnemonic display and editing on /ai/cards", () => {
 	const cardWithMnemonic: ManagedAiCard = {
 		...baseCard,
 		illustrationKey: "見",

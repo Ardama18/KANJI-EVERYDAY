@@ -1,4 +1,4 @@
-# S-19 requirements: /ai/cards のニーモニック表示・編集と不要 UI の削除
+# S-20 requirements: /ai/cards のニーモニック表示・編集と不要 UI の削除
 
 入力は issue #64（本文をそのまま要件として採用）。本ファイルは issue の受入条件を正本化し、
 実測で確認した前提と、issue 記載と実装が食い違っていた点を記録する。
@@ -150,7 +150,7 @@ issue #64 の 17 項目をそのまま採用する。検証方法を各項目へ
 ## 6. Rollback
 
 1. アプリ層（サーバ層 + UI + MCP 境界）は PR revert で戻す。
-2. DB は forward migration `supabase/migrations/20260726000001_s19_revert_ai_card_mnemonic_edit.sql` を新規追加し、
+2. DB は forward migration `supabase/migrations/20260726000001_s20_revert_ai_card_mnemonic_edit.sql` を新規追加し、
    `list_ai_managed_cards` を `9134703` 時点の定義で `CREATE OR REPLACE` して戻す。適用は `supabase db push`。
    この revert migration は本 PR には含めない（含めると即座に打ち消す）。
 
