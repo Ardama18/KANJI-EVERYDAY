@@ -31,6 +31,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import {
+	DECK_LABEL_NEW,
 	DECK_STUDY_DONE_MESSAGE,
 	DECK_STUDY_LIMIT_REACHED_MESSAGE,
 	DECK_STUDY_NO_CARDS_MESSAGE,
@@ -318,6 +319,9 @@ describe("frontend/app/(auth)/decks/[deckId]/page.tsx", () => {
 		// 0 の羅列ではなく完了メッセージを主表示にする（FR-03 / AC-2）
 		expect(html.indexOf(DECK_STUDY_DONE_MESSAGE)).toBeGreaterThan(-1);
 		expect(html.indexOf(DECK_STUDY_DONE_MESSAGE)).toBeLessThan(html.indexOf(WHOLE_STUDY_HEADING));
+		// 「これまでの記録」より前だけでは 0 の StatCard グリッドの下へ移動しても緑になるため、
+		// グリッド先頭ラベルより前であることまで固定する（FR-03）。
+		expect(html.indexOf(DECK_STUDY_DONE_MESSAGE)).toBeLessThan(html.indexOf(DECK_LABEL_NEW));
 		expect(html.indexOf("つぎは あした")).toBeLessThan(html.indexOf(WHOLE_STUDY_HEADING));
 		// 同じ文言をボタン下と二重に出さない
 		expect(html.split(DECK_STUDY_DONE_MESSAGE)).toHaveLength(2);
@@ -345,6 +349,10 @@ describe("frontend/app/(auth)/decks/[deckId]/page.tsx", () => {
 		expect(html.indexOf(DECK_STUDY_LIMIT_REACHED_MESSAGE)).toBeGreaterThan(-1);
 		expect(html.indexOf(DECK_STUDY_LIMIT_REACHED_MESSAGE)).toBeLessThan(
 			html.indexOf(WHOLE_STUDY_HEADING)
+		);
+		// StatCard グリッドより上にあることまで固定する（FR-03）。
+		expect(html.indexOf(DECK_STUDY_LIMIT_REACHED_MESSAGE)).toBeLessThan(
+			html.indexOf(DECK_LABEL_NEW)
 		);
 		// 上限到達は明日やることが残っている状態なので「予定なし」を併記しない（SF-1）。
 		expect(html).not.toContain(DECK_STUDY_NO_NEXT_DUE_MESSAGE);

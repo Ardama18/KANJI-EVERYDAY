@@ -13,6 +13,13 @@ vi.mock("@/components/deck/CreateDeckForm", () => ({
 
 import { DECK_STUDY_DONE_MESSAGE } from "@/lib/deck/study-status";
 
+/**
+ * CountBadge の値がラベルへ正しく結線されているかを検証する（FR-07）。
+ * 両方の数値の存在だけを見ると あたらしい / ふくしゅう の入れ替えを検出できない。
+ */
+const readBadgeValue = (html: string, label: string): string | null =>
+	new RegExp(`<span>${label}</span><span>(\\d+)</span>`).exec(html)?.[1] ?? null;
+
 import DecksPage, { DECKS_EMPTY_MESSAGE, DECKS_PAGE_TITLE } from "../../../app/(auth)/decks/page";
 
 // JST 2026-02-24 00:30。page が渡す `today` の妥当性を実行日に依存させない。
@@ -76,9 +83,9 @@ describe("frontend/app/(auth)/decks/page.tsx", () => {
 		expect(html).toContain("あたらしい");
 		expect(html).toContain("ふくしゅう");
 		expect(html).toContain("きょうやった");
-		expect(html).toContain(">10<");
+		expect(readBadgeValue(html, "あたらしい")).toBe("10");
 		// ふくしゅう は learn + due の合算値
-		expect(html).toContain(">8<");
+		expect(readBadgeValue(html, "ふくしゅう")).toBe("8");
 		expect(html).toContain("3枚");
 		expect(html).toContain("カード 18枚");
 		expect(html).toContain("学習した 8枚");

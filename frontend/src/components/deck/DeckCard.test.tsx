@@ -12,6 +12,15 @@ import { DeckCard } from "./DeckCard";
 
 const TODAY = "2026-02-24";
 
+/**
+ * CountBadge の値がラベルへ正しく結線されているかを検証する（FR-07）。
+ * CountBadge は `<span>{label}</span><span>{value}</span>` の順で描画するため、ラベル直後の数値を読む。
+ * 単に両方の数値が HTML に含まれることだけを見ると、あたらしい と ふくしゅう を
+ * 入れ替えても検出できない。
+ */
+const readBadgeValue = (html: string, label: string): string | null =>
+	new RegExp(`<span>${label}</span><span>(\\d+)</span>`).exec(html)?.[1] ?? null;
+
 const createDeck = (overrides: Partial<DeckWithCounts> = {}): DeckWithCounts => ({
 	id: "deck-1",
 	name: "小学3年生の漢字",
@@ -33,9 +42,9 @@ describe("frontend/src/components/deck/DeckCard.tsx", () => {
 		expect(html).toContain("小学3年生の漢字");
 		expect(html).toContain("あたらしい");
 		expect(html).toContain("ふくしゅう");
-		expect(html).toContain(">10<");
+		expect(readBadgeValue(html, "あたらしい")).toBe("10");
 		// ふくしゅう は learn + due の合算値
-		expect(html).toContain(">8<");
+		expect(readBadgeValue(html, "ふくしゅう")).toBe("8");
 		expect(html).toContain("きょうやった");
 		expect(html).toContain("3枚");
 		expect(html).toContain("カード 18枚");
