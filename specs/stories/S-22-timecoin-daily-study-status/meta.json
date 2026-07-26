@@ -1,0 +1,12 @@
+{
+  "story_id": "S-22",
+  "issue_story_label": "S-20",
+  "feature": "timecoin-daily-study-status",
+  "status": "design_review",
+  "github_issue_url": "https://github.com/Ardama18/KANJI-EVERYDAY/issues/71",
+  "github_branch": "issue/71-s-20-timecoin-mcp-tool",
+  "related_consumer_issue_url": "https://github.com/Ardama18/timecoin-cloud/issues/147",
+  "source_of_truth": "GitHub issue #71 body and comments",
+  "created": "2026-07-26",
+  "updated": "2026-07-26"
+}

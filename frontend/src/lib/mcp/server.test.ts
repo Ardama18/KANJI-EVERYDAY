@@ -6,6 +6,7 @@ import type { McpToolServices } from "./tools";
 function services(): McpToolServices {
 	return {
 		listDecks: vi.fn().mockResolvedValue({ decks: [] }),
+		getDailyStudyStatus: vi.fn(),
 		createDeck: vi.fn(),
 		previewCardImport: vi.fn(),
 		commitCardImport: vi.fn(),
@@ -66,6 +67,7 @@ describe("S-14 MCP SDK v1 stateless server", () => {
 		};
 		expect(listBody.result?.tools?.map((tool) => tool.name)).toEqual([
 			"list_decks",
+			"get_daily_study_status",
 			"create_deck",
 			"preview_card_import",
 			"commit_card_import",

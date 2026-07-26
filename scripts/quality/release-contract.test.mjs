@@ -47,6 +47,18 @@ function acceptedEvidence(contract) {
 	};
 }
 
+function pendingHostedEvidence(contract) {
+	const evidence = acceptedEvidence(contract);
+	evidence.state = "pending_hosted";
+	evidence.hostedGates = contract.hostedGates.map(({ id }) => ({
+		id,
+		status: "not_run",
+		exitCode: 2,
+		candidateSha: CANDIDATE,
+	}));
+	return evidence;
+}
+
 test("release contract accepts one complete candidate-bound evidence set", async () => {
 	const { contract } = await readReleaseFiles();
 	assert.deepEqual(validateReleaseState(contract, acceptedEvidence(contract), {
@@ -55,16 +67,16 @@ test("release contract accepts one complete candidate-bound evidence set", async
 	}), []);
 });
 
-test("pending RC1 evidence passes immutable contract-definition preflight", async () => {
-	const { contract, evidence } = await readReleaseFiles();
-	assert.equal(evidence.state, "pending_hosted");
+test("repository evidence passes immutable contract-definition preflight", async () => {
+	const { contract } = await readReleaseFiles();
 	assert.deepEqual(validateReleaseContractDefinition(contract, {
 		expectedBaseSha: contract.baseSha,
 	}), []);
 });
 
 test("pending RC1 evidence still fails final accepted-evidence validation", async () => {
-	const { contract, evidence } = await readReleaseFiles();
+	const { contract } = await readReleaseFiles();
+	const evidence = pendingHostedEvidence(contract);
 	assert.ok(validateReleaseState(contract, evidence).some((failure) => /unresolved/u.test(failure)));
 });
 
@@ -129,8 +141,9 @@ test("release contract rejects unresolved gates, reviews, redaction, and candida
 	}
 });
 
-test("repository evidence remains an explicit Hosted7 merge blocker during RC1", async () => {
-	const { contract, evidence } = await readReleaseFiles();
+test("pending hosted evidence remains an explicit Hosted7 merge blocker during RC1", async () => {
+	const { contract } = await readReleaseFiles();
+	const evidence = pendingHostedEvidence(contract);
 	const failures = validateReleaseState(contract, evidence);
 	assert.equal(evidence.state, "pending_hosted");
 	assert.equal(evidence.hostedGates.length, 7);

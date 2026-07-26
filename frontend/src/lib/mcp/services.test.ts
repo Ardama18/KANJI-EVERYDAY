@@ -16,6 +16,7 @@ const actor: McpActorContext = {
 	audience: "https://cards.example.test/api/mcp",
 	scopes: ["openid", "email", "profile"],
 };
+const DAILY_DECK_ID = "77777777-7777-4777-8777-777777777777";
 
 function dependencies(
 	client: unknown,
@@ -33,6 +34,35 @@ function dependencies(
 }
 
 describe("frontend/src/lib/mcp/services.ts", () => {
+	it("UT-S22-MCP-DAILY-STATUS-OWNER: get_daily_study_status reads actor-owned decks only", async () => {
+		const tableCalls: string[] = [];
+		const deckEq = vi.fn(async () => ({
+			data: [{ id: DAILY_DECK_ID, daily_study_limit: 5 }],
+			error: null,
+		}));
+		const deckCardsIn = vi.fn(async () => ({ data: [], error: null }));
+		const client = {
+			from: vi.fn((table: string) => {
+				tableCalls.push(table);
+				if (table === "decks") return { select: vi.fn(() => ({ eq: deckEq })) };
+				if (table === "deck_cards") return { select: vi.fn(() => ({ in: deckCardsIn })) };
+				throw new Error(`unexpected table: ${table}`);
+			}),
+		};
+		const services = createMcpToolServices(dependencies(client));
+
+		const result = await services.getDailyStudyStatus();
+
+		expect(result).toMatchObject({
+			contractVersion: 1,
+			state: "NO_ELIGIBLE_DECKS",
+			completed: false,
+		});
+		expect(deckEq).toHaveBeenCalledWith("owner_user_id", actor.userId);
+		expect(deckCardsIn).toHaveBeenCalledWith("deck_id", [DAILY_DECK_ID]);
+		expect(tableCalls).toEqual(["decks", "deck_cards"]);
+	});
+
 	it("UT-S16-MCP-CREATE-DECK-OWNER: create_deck inserts with actor user ID only", async () => {
 		const single = vi.fn().mockResolvedValue({
 			data: { id: "deck-1", name: "初回デッキ" },

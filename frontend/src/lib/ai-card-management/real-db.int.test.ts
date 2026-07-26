@@ -13,6 +13,7 @@ import {
 } from "../../../../specs/stories/S-10-ai-card-import-foundation/tests/helpers/s10-db-testkit";
 
 const database = createS10DbClient();
+const realDbRunIf = process.env.S11_LOCAL_CORE_ONLY === "1" ? describe.skip : describe;
 
 type ConceptState = "queued" | "processing" | "succeeded" | "failed";
 
@@ -163,7 +164,7 @@ async function cleanupFixture(fixture: BatchFixture): Promise<void> {
 	`);
 }
 
-describe("S-13 real database management and undo", () => {
+realDbRunIf("S-13 real database management and undo", () => {
 	beforeAll(async () => {
 		await ensureS10ActorFixtures(database);
 	});
@@ -340,7 +341,7 @@ const listPage = async (
 	return row.result;
 };
 
-describe("S-20 real database mnemonic projection and edit boundary", () => {
+realDbRunIf("S-20 real database mnemonic projection and edit boundary", () => {
 	beforeAll(async () => {
 		await ensureS10ActorFixtures(database);
 	});

@@ -39,6 +39,7 @@ const S10_DATABASE_FILES = [
 ];
 const S10_FOUNDATION_MIGRATION =
 	"supabase/migrations/20260714000000_s10_ai_card_import_foundation.sql";
+const CURRENT_SEED = "supabase/seed.sql";
 const S10_ROLE_CREATION_MUTATION = `DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 's10_migration_owner') THEN
@@ -215,6 +216,17 @@ export function removeClusterRoleMutations(migrationSql) {
 		throw new Error("The S-10 migration role safety contract changed");
 	}
 	return safeMigration;
+}
+
+export function removePostS10SeedMutations(seedSql) {
+	const s10Seed = seedSql.replace(
+		/\nINSERT INTO public\.card_mnemonics \([\s\S]*?\nCOMMIT;\s*$/u,
+		"\nCOMMIT;\n"
+	);
+	if (s10Seed === seedSql && /\bpublic\.card_mnemonics\b/u.test(seedSql)) {
+		throw new Error("The post-S-10 seed mutation contract changed");
+	}
+	return s10Seed;
 }
 
 export async function withDisposableS10Database(input) {
@@ -457,6 +469,14 @@ export function createPostgresAdapter() {
 						[targetUrl, "-v", "ON_ERROR_STOP=1", "-X", "-q", "-f", "-"],
 						"S-10 repository database preparation",
 						removeClusterRoleMutations(migrationSql)
+					);
+				} else if (relativeFile === CURRENT_SEED) {
+					const seedSql = await readFile(path.join(REPOSITORY_ROOT, relativeFile), "utf8");
+					await runCaptured(
+						"psql",
+						[targetUrl, "-v", "ON_ERROR_STOP=1", "-X", "-q", "-f", "-"],
+						"S-10 repository database preparation",
+						removePostS10SeedMutations(seedSql)
 					);
 				} else {
 					await runCaptured(

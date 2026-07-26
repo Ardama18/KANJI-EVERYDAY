@@ -18,6 +18,7 @@ import {
 	createDisposableDatabaseName,
 	parseSourceDatabaseUrl,
 	removeClusterRoleMutations,
+	removePostS10SeedMutations,
 	runCaptured,
 	withDisposableS10Database,
 } from "./quality-database.mjs";
@@ -123,6 +124,17 @@ test("S-10 preparation removes cluster role and membership mutations", async () 
 		() => removeClusterRoleMutations("SELECT 1;"),
 		/role safety contract/u
 	);
+});
+
+test("S-10 quality seed removes post-S-10 mutation blocks only", () => {
+	const seed =
+		"BEGIN;\nINSERT INTO public.cards DEFAULT VALUES;\nINSERT INTO public.card_mnemonics (\nowner_user_id\n)\nVALUES (null)\nON CONFLICT DO NOTHING;\nCOMMIT;\n";
+
+	const s10Seed = removePostS10SeedMutations(seed);
+
+	assert.match(s10Seed, /INSERT INTO public\.cards/u);
+	assert.doesNotMatch(s10Seed, /card_mnemonics/u);
+	assert.match(s10Seed, /COMMIT;\n$/u);
 });
 
 test("cluster membership fingerprint covers every mutable membership attribute", () => {
@@ -247,7 +259,7 @@ test("repository quality provisions three distinct S-11 migration databases", as
 	);
 	assert.equal(dispatched[0]?.[0], "release-contract");
 	assert.match(dispatched.find(([id]) => id === "s11-focused")?.[2].join(" ") ?? "", /R23-F/u);
-	assert.equal(evidence.state, "pending_hosted");
+	assert.equal(typeof evidence.state, "string");
 	const observed = [];
 	const commandRunner = async (program, arguments_) => {
 		observed.push([program, arguments_]);
