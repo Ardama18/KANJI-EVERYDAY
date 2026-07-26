@@ -1,6 +1,6 @@
 "use server";
 
-import { countByCategory, summarizeDeckStudyState } from "@/lib/srs";
+import { countByCategory, findNextDueDate, summarizeDeckStudyState } from "@/lib/srs";
 import type { CardWithState, ReviewState } from "@/lib/srs/types";
 import { createServerClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/database";
@@ -52,6 +52,8 @@ export interface DeckWithCounts {
 	learnedCards: number;
 	scheduledCards: number;
 	dailyStudyLimit: number;
+	studiedToday: number;
+	nextDueDate: string | null;
 }
 
 export interface DeckOverview {
@@ -67,6 +69,7 @@ export interface DeckOverview {
 	totalCards: number;
 	learnedCards: number;
 	scheduledCards: number;
+	nextDueDate: string | null;
 }
 
 const asReviewStateArray = (value: DeckCardQueryRow["review_states"]): ReviewStateRow[] => {
@@ -274,13 +277,20 @@ export async function getDecksWithCounts(): Promise<DeckWithCounts[]> {
 	const cardsByDeck = buildCardsByDeck(deckCardRows, deckIds, userId);
 	const today = getTodayJST();
 
-	return decks.map((deck) => ({
-		id: deck.id,
-		name: deck.name,
-		counts: countByCategory(cardsByDeck.get(deck.id) ?? [], today),
-		...summarizeDeckStudyState(cardsByDeck.get(deck.id) ?? [], today),
-		dailyStudyLimit: deck.daily_study_limit,
-	}));
+	// 追加クエリを作らず、取得済みカードから studiedToday / nextDueDate を再集計する（NFR-01）。
+	return decks.map((deck) => {
+		const cards = cardsByDeck.get(deck.id) ?? [];
+
+		return {
+			id: deck.id,
+			name: deck.name,
+			counts: countByCategory(cards, today),
+			...summarizeDeckStudyState(cards, today),
+			dailyStudyLimit: deck.daily_study_limit,
+			studiedToday: countCardsReviewedOnJstDate(cards, today),
+			nextDueDate: findNextDueDate(cards, today),
+		};
+	});
 }
 
 export async function getDeckOverview(deckId: string): Promise<DeckOverview | null> {
@@ -322,6 +332,7 @@ export async function getDeckOverview(deckId: string): Promise<DeckOverview | nu
 			total: counts.new + counts.learn + counts.due,
 		},
 		...summary,
+		nextDueDate: findNextDueDate(cards, today),
 	};
 }
 

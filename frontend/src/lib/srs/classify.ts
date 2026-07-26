@@ -40,6 +40,22 @@ export function countByCategory(cards: readonly CardWithState[], today: string):
 	);
 }
 
+// 表示専用の read-only 集計。`due_date` は DB の date 型で常に `YYYY-MM-DD` のため文字列比較で足りる。
+export function findNextDueDate(cards: readonly CardWithState[], today: string): string | null {
+	return cards.reduce<string | null>((earliestDueDate, card) => {
+		const reviewState = card.reviewState;
+		if (reviewState === null || reviewState.dueDate <= today) {
+			return earliestDueDate;
+		}
+
+		if (earliestDueDate === null || reviewState.dueDate < earliestDueDate) {
+			return reviewState.dueDate;
+		}
+
+		return earliestDueDate;
+	}, null);
+}
+
 export function summarizeDeckStudyState(
 	cards: readonly CardWithState[],
 	today: string

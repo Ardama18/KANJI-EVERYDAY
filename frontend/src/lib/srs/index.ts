@@ -7,7 +7,12 @@ export {
 } from "./constants";
 
 export { calculateRating, getIntervalPreview } from "./calculate";
-export { classifyCard, countByCategory, summarizeDeckStudyState } from "./classify";
+export {
+	classifyCard,
+	countByCategory,
+	findNextDueDate,
+	summarizeDeckStudyState,
+} from "./classify";
 export {
 	addToRetryQueue,
 	buildSessionQueue,
