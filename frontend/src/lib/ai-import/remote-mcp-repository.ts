@@ -40,6 +40,31 @@ export function createRemoteMcpImportRepository(
 				p_preview_token: input.previewToken,
 				p_request: normalizedCommitRequest(input.request),
 				p_card_reservation_key: input.cardReservationKey,
+				// The RPC derives the owner from the verified JWT claims, so the payload
+				// carries only the concept and its text (ADR-012 decisions 2 and 4).
+				p_mnemonics:
+					input.mnemonics === undefined
+						? null
+						: input.mnemonics.map((entry) => ({
+								conceptId: entry.conceptId,
+								slots: {
+									kanji: entry.slots.kanji,
+									isSingleKanji: entry.slots.isSingleKanji,
+									shapeHint: {
+										part: entry.slots.shapeHint.part,
+										picture: entry.slots.shapeHint.picture,
+									},
+									meaningHint: entry.slots.meaningHint,
+									story: entry.slots.story,
+								},
+								explanation: {
+									summary: entry.explanation.summary,
+									mappings: entry.explanation.mappings.map((mapping) => ({
+										part: mapping.part,
+										meaning: mapping.meaning,
+									})),
+								},
+							})),
 			});
 			return { data, error };
 		},

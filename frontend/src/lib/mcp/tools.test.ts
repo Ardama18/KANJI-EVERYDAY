@@ -18,6 +18,36 @@ function services(overrides: Partial<McpToolServices> = {}): McpToolServices {
 	};
 }
 
+const DECK_ID = "11111111-1111-4111-8111-111111111111";
+
+function importRequest(image: { mode: "none" | "ai" }) {
+	return {
+		deck: { id: DECK_ID },
+		items: [
+			{
+				clientItemId: "item-1",
+				conceptId: "concept-1",
+				pattern: "R1" as const,
+				front: "漢",
+				back: "かん",
+				tags: [],
+				image,
+			},
+		],
+	};
+}
+
+function commitInput(image: { mode: "none" | "ai" }) {
+	return {
+		request: importRequest(image),
+		previewToken: "opaque.token",
+		cardReservationKey: "reservation-key",
+		importRequestHash: "a".repeat(64),
+		idempotencyKey: "idem-1",
+		confirmedWarnings: true as const,
+	};
+}
+
 describe("S-14 static MCP tools", () => {
 	it("exposes exactly the approved nine-tool allowlist", () => {
 		expect(MCP_TOOL_NAMES).toEqual([
@@ -110,6 +140,59 @@ describe("S-14 static MCP tools", () => {
 			instance
 		);
 		expect(result.isError).toBe(true);
+		expect(instance.commitCardImport).not.toHaveBeenCalled();
+	});
+
+	it('S-21 D0: accepts image.mode="ai" so the flag decision belongs to the service layer', async () => {
+		const instance = services();
+		const preview = await invokeMcpTool(
+			"preview_card_import",
+			{ request: importRequest({ mode: "ai" }) },
+			instance
+		);
+		const commit = await invokeMcpTool("commit_card_import", commitInput({ mode: "ai" }), instance);
+
+		expect(preview.isError).toBeFalsy();
+		expect(commit.isError).toBeFalsy();
+		expect(instance.previewCardImport).toHaveBeenCalledWith({
+			request: importRequest({ mode: "ai" }),
+		});
+		expect(instance.commitCardImport).toHaveBeenCalledWith(commitInput({ mode: "ai" }));
+	});
+
+	it("S-21 AC-5: rejects a client-supplied mnemonics field on commit", async () => {
+		const instance = services();
+		const result = await invokeMcpTool(
+			"commit_card_import",
+			{
+				...commitInput({ mode: "ai" }),
+				mnemonics: [
+					{
+						conceptId: "concept-1",
+						slots: {
+							kanji: "漢",
+							isSingleKanji: true,
+							shapeHint: { part: "さんずい", picture: "みず" },
+							meaningHint: "もじ",
+							story: "はなし",
+						},
+						explanation: {
+							summary: "まとめ",
+							mappings: [
+								{ part: "さんずい", meaning: "みず" },
+								{ part: "つくり", meaning: "もじ" },
+							],
+						},
+					},
+				],
+			},
+			instance
+		);
+
+		expect(result.structuredContent).toMatchObject({
+			ok: false,
+			error: { code: "VALIDATION_ERROR" },
+		});
 		expect(instance.commitCardImport).not.toHaveBeenCalled();
 	});
 

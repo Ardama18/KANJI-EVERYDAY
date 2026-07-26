@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+	getMcpAutoMnemonicConfig,
 	getMcpEnvConfig,
 	getOpenAiCardGenerationConfig,
 	getPublicEnvConfig,
@@ -23,6 +24,8 @@ const keys = [
 	"MCP_PUBLIC_ORIGIN",
 	"MCP_OAUTH_ISSUER",
 	"MCP_ALLOWED_ORIGIN",
+	"MCP_AUTO_MNEMONIC_MAX_CONCEPTS",
+	"MCP_AUTO_MNEMONIC_BUDGET_MS",
 ] as const;
 
 afterEach(() => {
@@ -115,6 +118,31 @@ describe("S-12 typed server config", () => {
 			generationTimeoutMs: 60_000,
 			moderationTimeoutMs: 10_000,
 		});
+	});
+
+	it("S-21: bounds the MCP auto-mnemonic limits with documented defaults", () => {
+		expect(getMcpAutoMnemonicConfig()).toEqual({ maxConcepts: 20, budgetMs: 45_000 });
+		process.env.MCP_AUTO_MNEMONIC_MAX_CONCEPTS = "5";
+		process.env.MCP_AUTO_MNEMONIC_BUDGET_MS = "10000";
+		expect(getMcpAutoMnemonicConfig()).toEqual({ maxConcepts: 5, budgetMs: 10_000 });
+		// 0 is the kill switch, so it must stay a valid value.
+		process.env.MCP_AUTO_MNEMONIC_MAX_CONCEPTS = "0";
+		expect(getMcpAutoMnemonicConfig()).toEqual({ maxConcepts: 0, budgetMs: 10_000 });
+	});
+
+	it("S-21: fails closed for out-of-range or non-numeric auto-mnemonic limits", () => {
+		for (const [key, value] of [
+			["MCP_AUTO_MNEMONIC_MAX_CONCEPTS", "51"],
+			["MCP_AUTO_MNEMONIC_MAX_CONCEPTS", "-1"],
+			["MCP_AUTO_MNEMONIC_MAX_CONCEPTS", "twenty"],
+			["MCP_AUTO_MNEMONIC_BUDGET_MS", "4999"],
+			["MCP_AUTO_MNEMONIC_BUDGET_MS", "120001"],
+			["MCP_AUTO_MNEMONIC_BUDGET_MS", "45s"],
+		] as const) {
+			process.env[key] = value;
+			expect(getMcpAutoMnemonicConfig(), `${key}=${value}`).toBeUndefined();
+			Reflect.deleteProperty(process.env, key);
+		}
 	});
 
 	it("fails closed for invalid model, detail, moderation, or timeout", () => {

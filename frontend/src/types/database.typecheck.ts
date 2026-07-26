@@ -47,6 +47,19 @@ type AllWrappersPresent = Assert<
 	Exclude<RequiredPublicWrapper, keyof Functions> extends never ? true : false
 >;
 
+/**
+ * S-21: the Remote MCP commit wrapper carries the server-generated approved
+ * mnemonics (migration 20260727000000). `p_mnemonics` must stay optional so the
+ * pre-S-21 eight-argument call site keeps compiling against the same wrapper.
+ */
+type RemoteCommitArgs = Functions["s14_remote_commit_import"]["Args"];
+type RemoteCommitAcceptsMnemonics = Assert<
+	RemoteCommitArgs extends { p_mnemonics?: Json | null } ? true : false
+>;
+type RemoteCommitMnemonicsOptional = Assert<
+	Omit<RemoteCommitArgs, "p_mnemonics"> extends RemoteCommitArgs ? true : false
+>;
+
 export type CardsRow = Tables["cards"]["Row"];
 export type CardsInsert = Tables["cards"]["Insert"];
 export type CardsUpdate = Tables["cards"]["Update"];
@@ -78,4 +91,9 @@ export function assertCommitImportArgs(
 	return commitArgs.p_request;
 }
 
-export type DatabaseTypeAssertions = [AllTablesPresent, AllWrappersPresent];
+export type DatabaseTypeAssertions = [
+	AllTablesPresent,
+	AllWrappersPresent,
+	RemoteCommitAcceptsMnemonics,
+	RemoteCommitMnemonicsOptional,
+];

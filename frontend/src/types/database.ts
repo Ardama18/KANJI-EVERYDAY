@@ -1021,6 +1021,7 @@ export type Database = {
 					p_preview_token: string;
 					p_request: Json;
 					p_card_reservation_key: string;
+					p_mnemonics?: Json | null;
 				};
 				Returns: Json;
 			};

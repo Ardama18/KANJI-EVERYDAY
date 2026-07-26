@@ -1,3 +1,5 @@
+import type { z } from "zod";
+
 import { normalizeDeckNameInput } from "@/actions/deck-action-types";
 import {
 	createRemoteMcpCardManagementRepository,
@@ -6,12 +8,24 @@ import {
 import { deleteAiCards, listAiCards, undoAiImportBatch } from "@/lib/ai-card-management/service";
 import type { ManagedAiCard } from "@/lib/ai-card-management/types";
 import { createRemoteMcpImportRepository } from "@/lib/ai-import/remote-mcp-repository";
-import { commitCardImport, getImportStatus, previewCardImport } from "@/lib/ai-import/service";
+import {
+	type CommitMnemonicEntry,
+	commitCardImport,
+	getImportStatus,
+	previewCardImport,
+	sanitizeMnemonics,
+} from "@/lib/ai-import/service";
+import { isAiCardImportEnabled } from "@/lib/env";
 import type { JwtScopedSupabaseClient } from "@/lib/supabase/server";
 import type { Json } from "@/types/database";
 
 import type { McpActorContext } from "./auth";
-import type { McpToolServices } from "./tools";
+import type { McpToolServices, mcpToolInputSchemas } from "./tools";
+
+/** The import request exactly as the static tool schema validates it. */
+export type McpImportRequest = z.infer<
+	(typeof mcpToolInputSchemas)["preview_card_import"]
+>["request"];
 
 export interface McpToolServiceDependencies {
 	readonly client: JwtScopedSupabaseClient;
@@ -20,6 +34,17 @@ export interface McpToolServiceDependencies {
 	readonly nowSeconds: number;
 	readonly createReservationKey: () => string;
 	readonly createCorrelationId: () => string;
+	/**
+	 * Server-side mnemonic generation for the `image.mode="ai"` concepts of one
+	 * commit (S-21 D6).  Injected rather than imported so the tool layer stays
+	 * testable and so a disabled flag or missing provider config simply leaves it
+	 * out.  `undefined` (returned or omitted) means "commit without mnemonics".
+	 * The MCP client can never reach this: the tool schema is `.strict()`, so only
+	 * the server itself supplies mnemonics.
+	 */
+	readonly generateMnemonics?: (
+		request: McpImportRequest
+	) => Promise<readonly CommitMnemonicEntry[] | undefined>;
 }
 
 /**
@@ -37,6 +62,7 @@ export function createMcpToolServices(dependencies: McpToolServiceDependencies):
 		previewCardImport: async ({ request }) => {
 			const secret = dependencies.previewSecret;
 			if (secret === undefined) return unavailable();
+			if (rejectsAiImage(request)) return aiImageDisabled();
 			return await previewCardImport({
 				actor: { userId: actor.userId, clientId: actor.clientId, kind: "remote_mcp" },
 				request,
@@ -49,9 +75,13 @@ export function createMcpToolServices(dependencies: McpToolServiceDependencies):
 		commitCardImport: async (input) => {
 			const secret = dependencies.previewSecret;
 			if (secret === undefined) return unavailable();
+			if (rejectsAiImage(input.request)) return aiImageDisabled();
+			// Generated on the server inside this same request and handed straight to
+			// the shared service, so it never travels through the MCP client (AC-5).
+			const mnemonics = await generateSanitizedMnemonics(dependencies, input.request);
 			return await commitCardImport({
 				actor: { userId: actor.userId, clientId: actor.clientId, kind: "remote_mcp" },
-				input,
+				input: mnemonics === undefined ? input : { ...input, mnemonics },
 				repository: imports,
 				secret,
 				nowSeconds: dependencies.nowSeconds,
@@ -115,6 +145,52 @@ function toMcpAiCard(card: ManagedAiCard) {
 	};
 }
 
+/**
+ * S-21 D0 / AC-6.  The static tool schema accepts `image.mode="ai"`, so the flag
+ * decision lives here: with `AI_CARD_IMPORT_ENABLED` off, the pre-S-21 behaviour is
+ * preserved and such a request is a VALIDATION_ERROR.
+ */
+function rejectsAiImage(request: McpImportRequest): boolean {
+	return !isAiCardImportEnabled() && request.items.some((item) => item.image.mode === "ai");
+}
+
+/**
+ * Generates mnemonics for the `image.mode="ai"` concepts only: `none` concepts get
+ * no illustration row, so `card_mnemonics` has nothing to hang them on.
+ *
+ * Every failure degrades to "no mnemonic for that concept" (AC-4).  The shared
+ * service's `sanitizeMnemonics` rejects the whole array when one entry is malformed,
+ * which would turn the commit itself into a VALIDATION_ERROR, so each entry is
+ * verified on its own here and the failures are dropped.
+ */
+async function generateSanitizedMnemonics(
+	dependencies: McpToolServiceDependencies,
+	request: McpImportRequest
+): Promise<readonly CommitMnemonicEntry[] | undefined> {
+	const generate = dependencies.generateMnemonics;
+	if (generate === undefined) return undefined;
+	const aiConceptIds = new Set(
+		request.items.filter((item) => item.image.mode === "ai").map((item) => item.conceptId)
+	);
+	if (aiConceptIds.size === 0) return undefined;
+	let generated: readonly CommitMnemonicEntry[] | undefined;
+	try {
+		generated = await generate(request);
+	} catch {
+		return undefined;
+	}
+	if (generated === undefined) return undefined;
+	const accepted: CommitMnemonicEntry[] = [];
+	const seen = new Set<string>();
+	for (const entry of generated) {
+		const sanitized = sanitizeMnemonics([entry], aiConceptIds)?.[0];
+		if (sanitized === undefined || seen.has(sanitized.conceptId)) continue;
+		seen.add(sanitized.conceptId);
+		accepted.push(sanitized);
+	}
+	return accepted.length === 0 ? undefined : accepted;
+}
+
 async function createOwnerDeck(
 	client: JwtScopedSupabaseClient,
 	actor: McpActorContext,
@@ -163,6 +239,11 @@ function isDeckResultRow(value: unknown): value is Readonly<{ id: string; name: 
 
 function unavailable() {
 	return { ok: false as const, error: { code: "SERVICE_UNAVAILABLE" } };
+}
+
+/** Same shape the shared import service uses for its own validation failures. */
+function aiImageDisabled() {
+	return { ok: false as const, error: { code: "VALIDATION_ERROR", httpStatus: 400 } };
 }
 
 function mapCardRepositoryFailure(error: unknown) {

@@ -59,6 +59,27 @@ interface Fixture {
 	readonly previewToken: string;
 }
 
+/** S-21: one server-generated approved mnemonic, exactly as the RPC receives it. */
+const mnemonicPayload = (conceptId: string, story: string) => [
+	{
+		conceptId,
+		slots: {
+			kanji: "山",
+			isSingleKanji: true,
+			shapeHint: { part: "三つの峰", picture: "山なみ" },
+			meaningHint: "たかい土地",
+			story,
+		},
+		explanation: {
+			summary: "峰が三つならんで山になる。",
+			mappings: [
+				{ part: "左の峰", meaning: "ひくい山" },
+				{ part: "右の峰", meaning: "たかい山" },
+			],
+		},
+	},
+];
+
 const hash = (value: string): string => createHash("sha256").update(value).digest("hex");
 
 describe.skipIf(verifiedIsolatedDatabaseUrl === undefined)(
@@ -89,17 +110,17 @@ describe.skipIf(verifiedIsolatedDatabaseUrl === undefined)(
 					)),
 					'authenticatedCommit', has_function_privilege(
 						'authenticated',
-						'public.s14_remote_commit_import(text,text,text,text,text,text,jsonb,text)',
+						'public.s14_remote_commit_import(text,text,text,text,text,text,jsonb,text,jsonb)',
 						'EXECUTE'
 					),
 					'anonCommit', has_function_privilege(
 						'anon',
-						'public.s14_remote_commit_import(text,text,text,text,text,text,jsonb,text)',
+						'public.s14_remote_commit_import(text,text,text,text,text,text,jsonb,text,jsonb)',
 						'EXECUTE'
 					),
 					'serviceCommit', has_function_privilege(
 						'service_role',
-						'public.s14_remote_commit_import(text,text,text,text,text,text,jsonb,text)',
+						'public.s14_remote_commit_import(text,text,text,text,text,text,jsonb,text,jsonb)',
 						'EXECUTE'
 					),
 					'authenticatedInternal', has_function_privilege(
@@ -418,10 +439,103 @@ describe.skipIf(verifiedIsolatedDatabaseUrl === undefined)(
 			},
 			S10_DB_TEST_TIMEOUT_MS
 		);
+
+		// S-21 4-1 / AC-1: p_mnemonics is persisted as an approved, owner-scoped row whose
+		// illustration_key matches the one ai_s14_enqueue_import_internal materialised.
+		it(
+			"stores an approved owner-scoped card_mnemonics row for an image.mode=ai concept",
+			async () => {
+				const fixture = await createFixture("ai");
+				const conceptId = fixture.request.items[0]?.conceptId ?? "";
+				const commit = await remoteQuery<{ batchId: string }>(
+					fixture,
+					commitSql(fixture, { mnemonics: mnemonicPayload(conceptId, "峰が三つならぶ") })
+				);
+
+				const stored = await mnemonicRows(fixture);
+				expect(stored.count).toBe(1);
+				expect(stored.rows[0]).toEqual({
+					ownerUserId: S10_ACTORS.ownerA.userId,
+					illustrationKey: `s11:${commit.batchId}:${hash(conceptId)}`,
+					status: "approved",
+					story: "峰が三つならぶ",
+				});
+			},
+			S10_DB_TEST_TIMEOUT_MS
+		);
+
+		// S-21 4-2 / AC-5: RLS keeps the row invisible to another owner.
+		it(
+			"hides the stored mnemonic from another owner",
+			async () => {
+				const fixture = await createFixture("ai");
+				const conceptId = fixture.request.items[0]?.conceptId ?? "";
+				await remoteQuery(
+					fixture,
+					commitSql(fixture, { mnemonics: mnemonicPayload(conceptId, "峰が三つならぶ") })
+				);
+
+				const otherOwner = await mnemonicRows(fixture, {
+					ownerUserId: S10_ACTORS.ownerB.userId,
+				});
+				expect(otherOwner).toEqual({ count: 0, rows: [] });
+			},
+			S10_DB_TEST_TIMEOUT_MS
+		);
+
+		// S-21 4-3 / D1: re-committing the same idempotency key is idempotent for the
+		// mnemonic too - the row is updated in place and stays approved.
+		it(
+			"keeps the mnemonic upsert idempotent across a replayed commit",
+			async () => {
+				const fixture = await createFixture("ai");
+				const conceptId = fixture.request.items[0]?.conceptId ?? "";
+				const first = await remoteQuery<{ batchId: string }>(
+					fixture,
+					commitSql(fixture, { mnemonics: mnemonicPayload(conceptId, "はじめのはなし") })
+				);
+				const replay = await remoteQuery<{ batchId: string }>(
+					fixture,
+					commitSql(fixture, { mnemonics: mnemonicPayload(conceptId, "あとのはなし") })
+				);
+
+				const stored = await mnemonicRows(fixture);
+				expect(replay.batchId).toBe(first.batchId);
+				expect(stored.count).toBe(1);
+				expect(stored.rows[0]).toMatchObject({ status: "approved", story: "あとのはなし" });
+				expect(await markerState(fixture)).toMatchObject({ batches: 1, items: 1, jobs: 1 });
+			},
+			S10_DB_TEST_TIMEOUT_MS
+		);
+
+		// S-21 4-4 / AC-4: the pre-S-21 call shape still works and writes no mnemonic.
+		it(
+			"commits without any mnemonic when p_mnemonics is omitted or resolves to no illustration",
+			async () => {
+				const aiFixture = await createFixture("ai");
+				const noneFixture = await createFixture("none");
+				const noneConceptId = noneFixture.request.items[0]?.conceptId ?? "";
+
+				const omitted = await remoteQuery<{ status: string }>(aiFixture, commitSql(aiFixture));
+				// image.mode='none' has no illustration row, so the RPC skips the entry.
+				const skipped = await remoteQuery<{ status: string }>(
+					noneFixture,
+					commitSql(noneFixture, {
+						mnemonics: mnemonicPayload(noneConceptId, "峰が三つならぶ"),
+					})
+				);
+
+				expect(omitted.status).toBe("queued");
+				expect(skipped.status).toBe("queued");
+				expect(await mnemonicRows(aiFixture)).toEqual({ count: 0, rows: [] });
+				expect(await mnemonicRows(noneFixture)).toEqual({ count: 0, rows: [] });
+			},
+			S10_DB_TEST_TIMEOUT_MS
+		);
 	}
 );
 
-async function createFixture(): Promise<Fixture> {
+async function createFixture(imageMode: "none" | "ai" = "none"): Promise<Fixture> {
 	if (database === undefined) throw new Error("S14_TEST_DATABASE_URL is required");
 	const marker = `s14-${randomUUID()}`;
 	const ownerDeckId = randomUUID();
@@ -446,7 +560,7 @@ async function createFixture(): Promise<Fixture> {
 				front: `${marker} 漢`,
 				back: "かん",
 				tags: ["s14tag"],
-				image: { mode: "none" },
+				image: { mode: imageMode },
 			},
 		],
 	});
@@ -509,12 +623,18 @@ function commitSql(
 		importRequestHash: string;
 		generationRequestHash: string;
 		previewToken: string;
+		/** S-21: omitted keeps the pre-S-21 eight-argument call (p_mnemonics defaults to NULL). */
+		mnemonics: readonly unknown[];
 	}> = {}
 ): string {
 	const clientId = overrides.clientId ?? fixture.clientId;
 	const importRequestHash = overrides.importRequestHash ?? fixture.importRequestHash;
 	const generationRequestHash = overrides.generationRequestHash ?? fixture.generationRequestHash;
 	const previewToken = overrides.previewToken ?? fixture.previewToken;
+	const mnemonics =
+		overrides.mnemonics === undefined
+			? ""
+			: `,\n\t\t${sqlLiteral(JSON.stringify(overrides.mnemonics))}::jsonb`;
 	return `SELECT public.s14_remote_commit_import(
 		${sqlLiteral(clientId)},
 		${sqlLiteral(fixture.sessionId)},
@@ -523,8 +643,40 @@ function commitSql(
 		'${generationRequestHash}',
 		${sqlLiteral(previewToken)},
 		${sqlLiteral(JSON.stringify(fixture.requestJson))}::jsonb,
-		${sqlLiteral(fixture.reservationKey)}
+		${sqlLiteral(fixture.reservationKey)}${mnemonics}
 	) AS result`;
+}
+
+/** S-21: the owner-visible card_mnemonics rows this fixture's concept can own. */
+async function mnemonicRows(
+	fixture: Fixture,
+	options: RemoteOptions = {}
+): Promise<{
+	readonly count: number;
+	readonly rows: readonly {
+		readonly ownerUserId: string;
+		readonly illustrationKey: string;
+		readonly status: string;
+		readonly story: string;
+	}[];
+}> {
+	return await remoteQuery(
+		fixture,
+		`SELECT json_build_object(
+			'count', count(*)::int,
+			'rows', COALESCE(json_agg(json_build_object(
+				'ownerUserId', mnemonics.owner_user_id,
+				'illustrationKey', mnemonics.illustration_key,
+				'status', mnemonics.status,
+				'story', mnemonics.slots ->> 'story'
+			) ORDER BY mnemonics.illustration_key), '[]'::json)
+		) AS result
+		FROM public.card_mnemonics AS mnemonics
+		WHERE mnemonics.illustration_key LIKE 's11:%:' || ${sqlLiteral(
+			hash(fixture.request.items[0]?.conceptId ?? "")
+		)}`,
+		options
+	);
 }
 
 function statusSql(

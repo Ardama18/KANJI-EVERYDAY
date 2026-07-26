@@ -1,7 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { hashImportRequest } from "@/lib/ai-import/canonical-request";
+import { signRemotePreviewToken } from "@/lib/ai-import/preview-token";
+import { validateImportRequest } from "@/lib/ai-import/schema";
+import type { CommitMnemonicEntry } from "@/lib/ai-import/service";
 
 import type { McpActorContext } from "./auth";
-import { createMcpToolServices } from "./services";
+import { type McpToolServiceDependencies, createMcpToolServices } from "./services";
 
 const actor: McpActorContext = {
 	userId: "11111111-1111-4111-8111-111111111111",
@@ -12,7 +17,10 @@ const actor: McpActorContext = {
 	scopes: ["openid", "email", "profile"],
 };
 
-function dependencies(client: unknown) {
+function dependencies(
+	client: unknown,
+	overrides: Partial<McpToolServiceDependencies> = {}
+): McpToolServiceDependencies {
 	return {
 		client: client as never,
 		actor,
@@ -20,6 +28,7 @@ function dependencies(client: unknown) {
 		nowSeconds: 1,
 		createReservationKey: () => "reservation-key",
 		createCorrelationId: () => "correlation-id",
+		...overrides,
 	};
 }
 
@@ -207,5 +216,257 @@ describe("S-20 MCP list_ai_cards response shape", () => {
 			"illustration",
 		]);
 		expect(item.illustration).toBeNull();
+	});
+});
+
+const DECK_ID = "88888888-8888-4888-8888-888888888888";
+const COMMIT_BATCH_ID = "99999999-9999-4999-8999-999999999999";
+
+const mnemonicEntry = (conceptId: string): CommitMnemonicEntry => ({
+	conceptId,
+	slots: {
+		kanji: "山",
+		isSingleKanji: true,
+		shapeHint: { part: "三つの峰", picture: "山なみ" },
+		meaningHint: "たかい土地",
+		story: "峰が三つならぶ",
+	},
+	explanation: {
+		summary: "峰が三つならんで山になる。",
+		mappings: [
+			{ part: "左の峰", meaning: "ひくい山" },
+			{ part: "右の峰", meaning: "たかい山" },
+		],
+	},
+});
+
+const importRequest = (...modes: readonly ("none" | "ai")[]) => ({
+	deck: { id: DECK_ID },
+	items: modes.map((mode, index) => ({
+		clientItemId: `item-${index + 1}`,
+		conceptId: `concept-00${index + 1}`,
+		pattern: "R1" as const,
+		front: index === 0 ? "山" : "川",
+		back: index === 0 ? "やま" : "かわ",
+		tags: [],
+		image: { mode },
+	})),
+});
+
+/** A commit input the shared service accepts: real hash and real remote preview token. */
+async function commitInput(...modes: readonly ("none" | "ai")[]) {
+	const request = importRequest(...modes);
+	const validated = await validateImportRequest(request);
+	if (!validated.success) throw new Error(`fixture request failed: ${validated.code}`);
+	const importRequestHash = await hashImportRequest(validated.data);
+	const previewToken = await signRemotePreviewToken(
+		{
+			userId: actor.userId,
+			clientId: actor.clientId,
+			reservationKey: "reservation-key",
+			importRequestHash,
+		},
+		"preview-secret",
+		1
+	);
+	return {
+		request,
+		previewToken,
+		cardReservationKey: "reservation-key",
+		importRequestHash,
+		idempotencyKey: "idem-1",
+		confirmedWarnings: true as const,
+	};
+}
+
+const commitRpcClient = () => ({
+	rpc: vi.fn().mockResolvedValue({
+		data: {
+			batchId: COMMIT_BATCH_ID,
+			status: "queued",
+			statusUrl: `/api/ai/imports/status?batchId=${COMMIT_BATCH_ID}`,
+		},
+		error: null,
+	}),
+});
+
+const commitArgs = (client: { rpc: ReturnType<typeof vi.fn> }) => {
+	const call = client.rpc.mock.calls.find(([name]) => name === "s14_remote_commit_import");
+	if (call === undefined) throw new Error("expected the commit RPC to be called");
+	return call[1] as Record<string, unknown>;
+};
+
+afterEach(() => {
+	vi.unstubAllEnvs();
+});
+
+describe("S-21 MCP auto mnemonic wiring", () => {
+	it('AC-1: generates for image.mode="ai" concepts and hands them to the shared service', async () => {
+		vi.stubEnv("AI_CARD_IMPORT_ENABLED", "true");
+		const client = commitRpcClient();
+		const generateMnemonics = vi.fn(async () => [mnemonicEntry("concept-001")]);
+		const services = createMcpToolServices(dependencies(client, { generateMnemonics }));
+		const input = await commitInput("ai");
+
+		const result = await services.commitCardImport(input);
+
+		expect(result).toMatchObject({ ok: true });
+		expect(generateMnemonics).toHaveBeenCalledWith(input.request);
+		expect(commitArgs(client).p_mnemonics).toEqual([mnemonicEntry("concept-001")]);
+	});
+
+	it("AC-1: does not call the provider when no concept asks for an image", async () => {
+		vi.stubEnv("AI_CARD_IMPORT_ENABLED", "true");
+		const client = commitRpcClient();
+		const generateMnemonics = vi.fn(async () => [mnemonicEntry("concept-001")]);
+		const services = createMcpToolServices(dependencies(client, { generateMnemonics }));
+
+		const result = await services.commitCardImport(await commitInput("none"));
+
+		expect(result).toMatchObject({ ok: true });
+		expect(generateMnemonics).not.toHaveBeenCalled();
+		expect(commitArgs(client).p_mnemonics).toBeNull();
+	});
+
+	it('AC-6: rejects image.mode="ai" and skips generation while the flag is off', async () => {
+		vi.stubEnv("AI_CARD_IMPORT_ENABLED", "false");
+		const client = commitRpcClient();
+		const generateMnemonics = vi.fn(async () => [mnemonicEntry("concept-001")]);
+		const services = createMcpToolServices(dependencies(client, { generateMnemonics }));
+
+		const commit = await services.commitCardImport(await commitInput("ai"));
+		const preview = await services.previewCardImport({ request: importRequest("ai") });
+
+		expect(commit).toEqual({
+			ok: false,
+			error: { code: "VALIDATION_ERROR", httpStatus: 400 },
+		});
+		expect(preview).toEqual({
+			ok: false,
+			error: { code: "VALIDATION_ERROR", httpStatus: 400 },
+		});
+		expect(generateMnemonics).not.toHaveBeenCalled();
+		expect(client.rpc).not.toHaveBeenCalled();
+	});
+
+	it('AC-6: keeps image.mode="none" working while the flag is off', async () => {
+		vi.stubEnv("AI_CARD_IMPORT_ENABLED", "false");
+		const client = commitRpcClient();
+		const services = createMcpToolServices(dependencies(client));
+
+		const result = await services.commitCardImport(await commitInput("none"));
+
+		expect(result).toMatchObject({ ok: true });
+		expect(commitArgs(client).p_mnemonics).toBeNull();
+	});
+
+	it("AC-4: commits without mnemonics when generation yields nothing", async () => {
+		vi.stubEnv("AI_CARD_IMPORT_ENABLED", "true");
+		const client = commitRpcClient();
+		const services = createMcpToolServices(
+			dependencies(client, { generateMnemonics: async () => [] })
+		);
+
+		const result = await services.commitCardImport(await commitInput("ai"));
+
+		expect(result).toMatchObject({ ok: true });
+		expect(commitArgs(client).p_mnemonics).toBeNull();
+	});
+
+	it("AC-4: commits without mnemonics when generation throws", async () => {
+		vi.stubEnv("AI_CARD_IMPORT_ENABLED", "true");
+		const client = commitRpcClient();
+		const services = createMcpToolServices(
+			dependencies(client, {
+				generateMnemonics: async () => {
+					throw new Error("provider exploded");
+				},
+			})
+		);
+
+		const result = await services.commitCardImport(await commitInput("ai"));
+
+		expect(result).toMatchObject({ ok: true });
+		expect(commitArgs(client).p_mnemonics).toBeNull();
+	});
+
+	it("AC-4: drops only the malformed entries instead of failing the whole commit", async () => {
+		vi.stubEnv("AI_CARD_IMPORT_ENABLED", "true");
+		const client = commitRpcClient();
+		const malformed = {
+			...mnemonicEntry("concept-002"),
+			explanation: { summary: "みだし", mappings: [{ part: "峰", meaning: "山" }] },
+		} as CommitMnemonicEntry;
+		const unknownConcept = mnemonicEntry("concept-404");
+		const services = createMcpToolServices(
+			dependencies(client, {
+				generateMnemonics: async () => [
+					malformed,
+					mnemonicEntry("concept-001"),
+					unknownConcept,
+					mnemonicEntry("concept-001"),
+				],
+			})
+		);
+
+		const result = await services.commitCardImport(await commitInput("ai", "ai"));
+
+		expect(result).toMatchObject({ ok: true });
+		expect(commitArgs(client).p_mnemonics).toEqual([mnemonicEntry("concept-001")]);
+	});
+
+	it("AC-5: the commit response carries only batchId/status/statusUrl", async () => {
+		vi.stubEnv("AI_CARD_IMPORT_ENABLED", "true");
+		const client = commitRpcClient();
+		const services = createMcpToolServices(
+			dependencies(client, { generateMnemonics: async () => [mnemonicEntry("concept-001")] })
+		);
+
+		const result = (await services.commitCardImport(await commitInput("ai"))) as {
+			readonly ok: true;
+			readonly data: Record<string, unknown>;
+		};
+
+		expect(Object.keys(result.data)).toEqual(["batchId", "status", "statusUrl"]);
+		expect(result.data).toEqual({
+			batchId: COMMIT_BATCH_ID,
+			status: "queued",
+			statusUrl: `/api/ai/imports/status?batchId=${COMMIT_BATCH_ID}`,
+		});
+		const serialized = JSON.stringify(result);
+		for (const leak of [
+			"slots",
+			"explanation",
+			"illustration_key",
+			"illustrationKey",
+			"kanji",
+			"shapeHint",
+			"storage",
+			"s11:",
+		]) {
+			expect(serialized, `${leak} must not leak into the MCP response`).not.toContain(leak);
+		}
+	});
+
+	it("AC-5: never lets the generator select an owner in the RPC payload", async () => {
+		vi.stubEnv("AI_CARD_IMPORT_ENABLED", "true");
+		const client = commitRpcClient();
+		const services = createMcpToolServices(
+			dependencies(client, {
+				generateMnemonics: async () =>
+					[
+						{
+							...mnemonicEntry("concept-001"),
+							ownerUserId: "00000000-0000-4000-8000-000000000000",
+						},
+					] as unknown as readonly CommitMnemonicEntry[],
+			})
+		);
+
+		await services.commitCardImport(await commitInput("ai"));
+
+		const payload = JSON.stringify(commitArgs(client).p_mnemonics);
+		expect(payload).not.toContain("owner");
+		expect(payload).not.toContain("00000000-0000-4000-8000-000000000000");
 	});
 });

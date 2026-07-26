@@ -23,13 +23,15 @@ const inputRequest = z
 						front: z.string().min(1).max(200),
 						back: z.string().min(1).max(200),
 						tags: z.array(z.string().min(1).max(30)).max(10),
-						image: z
-							.union([
-								z.object({ mode: z.literal("none") }).strict(),
-								z.object({ mode: z.literal("ai") }).strict(),
-								z.object({ mode: z.literal("upload"), uploadId: uuid }).strict(),
-							])
-							.refine((image) => image.mode !== "ai", "画像生成は MCP では利用できません。"),
+						// S-21 D0: `ai` is accepted by the static schema and gated by the
+						// AI_CARD_IMPORT_ENABLED flag in `createMcpToolServices`. Rebuilding
+						// this schema from a runtime flag would make the tool descriptor and
+						// its contract tests depend on environment state.
+						image: z.union([
+							z.object({ mode: z.literal("none") }).strict(),
+							z.object({ mode: z.literal("ai") }).strict(),
+							z.object({ mode: z.literal("upload"), uploadId: uuid }).strict(),
+						]),
 					})
 					.strict()
 			)

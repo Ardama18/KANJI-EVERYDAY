@@ -36,6 +36,11 @@ export interface McpEnvConfig {
 	readonly allowedOrigin: string;
 }
 
+export interface McpAutoMnemonicConfig {
+	readonly maxConcepts: number;
+	readonly budgetMs: number;
+}
+
 const REQUIRED_ENV_KEYS: RequiredEnvKey[] = [
 	"NEXT_PUBLIC_SUPABASE_URL",
 	"NEXT_PUBLIC_SUPABASE_ANON_KEY",
@@ -81,6 +86,19 @@ export function isMcpEnabled(): boolean {
 
 export function isAiCardImportEnabled(): boolean {
 	return process.env.AI_CARD_IMPORT_ENABLED?.trim() === "true";
+}
+
+/**
+ * Latency and cost guard for the mnemonics generated during one Remote MCP commit
+ * (S-21 D7). `maxConcepts = 0` disables generation entirely (kill switch), and an
+ * out-of-range value returns `undefined` so the caller fails closed and commits
+ * cards without mnemonics rather than running unbounded provider calls.
+ */
+export function getMcpAutoMnemonicConfig(): McpAutoMnemonicConfig | undefined {
+	const maxConcepts = parseIntegerEnv(process.env.MCP_AUTO_MNEMONIC_MAX_CONCEPTS, 20, 0, 50);
+	const budgetMs = parseIntegerEnv(process.env.MCP_AUTO_MNEMONIC_BUDGET_MS, 45_000, 5_000, 120_000);
+	if (maxConcepts === undefined || budgetMs === undefined) return undefined;
+	return { maxConcepts, budgetMs };
 }
 
 export function isAiCardManagementEnabled(): boolean {
