@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.6.0.1] - 2026-07-27
+
+### Changed
+
+- Replaced AI card creation form internals (`R1`, `W1`, `both`) with parent-facing Japanese labels for reading, writing, and combined practice.
+- Reworded AI source image, total card count, draft review order, and shared pair image copy so parents can understand the flow without implementation terms.
+
+### Verification
+
+- Passed `npm --prefix frontend run test:s12:unit`, `npm --prefix frontend run test:s12:e2e`, `npm --prefix frontend run test -- src/components/ai-card-import/DraftCardList.regression-1.test.ts`, `npm --prefix frontend run lint`, and `npm --prefix frontend run typecheck`.
+- Confirmed full repository quality currently blocks on the existing S-11 release contract base SHA drift against current `origin/main`; no DB/API/RPC/MCP contract files are changed by this release.
+
 ## [0.6.0.0] - 2026-07-26
 
 ### Added

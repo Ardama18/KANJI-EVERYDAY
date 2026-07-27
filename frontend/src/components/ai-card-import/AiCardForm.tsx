@@ -21,6 +21,28 @@ interface AiCardFormProps {
 	readonly onCancel: () => Promise<void>;
 }
 
+const PATTERN_OPTIONS: readonly {
+	readonly value: GenerationPattern;
+	readonly label: string;
+	readonly description: string;
+}[] = [
+	{
+		value: "R1",
+		label: "読みを練習",
+		description: "表に漢字、裏によみを入れます。",
+	},
+	{
+		value: "W1",
+		label: "書きを練習",
+		description: "表によみ、裏に漢字を入れます。",
+	},
+	{
+		value: "both",
+		label: "読みと書きの両方",
+		description: "1つの漢字から読みカードと書きカードを1枚ずつ作ります。",
+	},
+];
+
 export default function AiCardForm({ deckId, disabled, onSubmit, onCancel }: AiCardFormProps) {
 	const id = useId();
 	const [instruction, setInstruction] = useState("");
@@ -64,7 +86,7 @@ export default function AiCardForm({ deckId, disabled, onSubmit, onCancel }: AiC
 			showError(
 				"count",
 				pattern === "both"
-					? "bothの枚数は2〜50の偶数で入力してください。"
+					? "読みと書きの両方では、作るカードの合計枚数を2〜50の偶数で入力してください。"
 					: "枚数は1〜50で入力してください。"
 			);
 			return;
@@ -115,26 +137,30 @@ export default function AiCardForm({ deckId, disabled, onSubmit, onCancel }: AiC
 			<fieldset disabled={disabled}>
 				<legend className="text-sm font-semibold text-slate-800">カード形式</legend>
 				<div className="mt-2 flex flex-wrap gap-2">
-					{(["R1", "W1", "both"] as const).map((value) => (
+					{PATTERN_OPTIONS.map((option) => (
 						<label
-							key={value}
-							className="flex min-h-11 items-center gap-2 rounded-lg border border-slate-300 px-3"
+							key={option.value}
+							className="flex min-h-11 max-w-full items-start gap-2 rounded-lg border border-slate-300 px-3 py-2"
 						>
 							<input
+								className="mt-1"
 								type="radio"
 								name={`${id}-pattern`}
-								value={value}
-								checked={pattern === value}
-								onChange={() => setPattern(value)}
+								value={option.value}
+								checked={pattern === option.value}
+								onChange={() => setPattern(option.value)}
 							/>
-							{value}
+							<span>
+								<span className="block text-sm font-semibold text-slate-800">{option.label}</span>
+								<span className="block text-xs text-slate-600">{option.description}</span>
+							</span>
 						</label>
 					))}
 				</div>
 			</fieldset>
 			<div>
 				<label htmlFor={`${id}-count`} className="block text-sm font-semibold text-slate-800">
-					作成する枚数（展開後）
+					作るカードの合計枚数
 				</label>
 				<input
 					ref={countRef}
@@ -147,9 +173,14 @@ export default function AiCardForm({ deckId, disabled, onSubmit, onCancel }: AiC
 					onChange={(event) => setCount(Number(event.target.value))}
 					disabled={disabled}
 					aria-invalid={error?.field === "count"}
-					aria-describedby={error?.field === "count" ? `${id}-count-error` : undefined}
+					aria-describedby={`${id}-count-help${error?.field === "count" ? ` ${id}-count-error` : ""}`}
 					className="mt-2 min-h-11 w-full rounded-lg border border-slate-300 px-3"
 				/>
+				<p id={`${id}-count-help`} className="mt-1 text-xs text-slate-600">
+					{pattern === "both"
+						? "読みと書きの両方では、1つの漢字から2枚作るため偶数で指定してください。"
+						: "この枚数分のカード案を作ります。"}
+				</p>
 			</div>
 			<div>
 				<label htmlFor={`${id}-tag`} className="block text-sm font-semibold text-slate-800">

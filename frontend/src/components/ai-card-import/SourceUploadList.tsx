@@ -34,10 +34,10 @@ export default function SourceUploadList({
 	return (
 		<section aria-labelledby={`${id}-heading`}>
 			<h3 id={`${id}-heading`} className="text-sm font-semibold text-slate-800">
-				教材source画像（任意・最大5枚）
+				教材の写真（任意・最大5枚）
 			</h3>
 			<p className="mt-1 text-xs text-slate-600">
-				カード用画像とは別です。PNG（8-bit・透過なし）/JPEG/WebP（透過なし）、各10MiB以下。
+				教科書やプリントの写真をもとにカード案を作れます。PNG（8-bit・透過なし）/JPEG/WebP（透過なし）、各10MiB以下。
 			</p>
 			<label
 				htmlFor={`${id}-source`}

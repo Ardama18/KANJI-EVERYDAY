@@ -10,6 +10,11 @@ interface DraftCardListProps {
 	readonly disabled: boolean;
 }
 
+const CARD_PURPOSE_LABELS: Record<ClientImportItemInput["pattern"], string> = {
+	R1: "読み練習カード",
+	W1: "書き練習カード",
+};
+
 export default function DraftCardList({
 	items,
 	onChange,
@@ -41,6 +46,7 @@ export default function DraftCardList({
 			<h2 id="draft-heading" tabIndex={-1} className="text-xl font-bold text-slate-900">
 				カード案（{items.length}枚）
 			</h2>
+			<p className="mt-1 text-sm text-slate-600">上から順番に、表・裏・画像を確認してください。</p>
 			<div className="mt-4 space-y-4">
 				{items.map((item, index) => (
 					<article
@@ -49,7 +55,7 @@ export default function DraftCardList({
 					>
 						<div className="flex flex-wrap items-center justify-between gap-2">
 							<h3 className="font-semibold text-slate-900">
-								{item.pattern} / {item.conceptId}
+								確認 {index + 1}枚目: {CARD_PURPOSE_LABELS[item.pattern]}
 							</h3>
 							<button
 								type="button"
@@ -60,6 +66,9 @@ export default function DraftCardList({
 								除外
 							</button>
 						</div>
+						<p className="mt-1 break-words text-sm text-slate-600">
+							表: {item.front} / 裏: {item.back}
+						</p>
 						<label className="mt-3 block text-sm font-medium text-slate-700">
 							表
 							<input
@@ -102,7 +111,10 @@ export default function DraftCardList({
 						{requiredIllustrations.has(item.conceptId) &&
 						firstConceptIndexes.get(item.conceptId) === index ? (
 							<label className="mt-3 block text-sm font-medium text-slate-700">
-								concept共有画像（必須）
+								読み書きペアで使う画像（必須）
+								<span className="mt-1 block text-xs font-normal text-slate-600">
+									同じ漢字の読みカードと書きカードに共通で使う画像です。
+								</span>
 								<input
 									type="file"
 									accept="image/png,image/jpeg,image/webp"
