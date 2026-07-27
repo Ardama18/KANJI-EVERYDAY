@@ -4,9 +4,6 @@
 // 実装タイミング: 機能実装と同時
 
 import { describe, it, expect } from "vitest"
-import { renderToStaticMarkup } from "react-dom/server"
-import React from "react"
-
 import {
   PROJECT_FILES,
   REQUIRED_ENV_KEYS,
@@ -17,9 +14,10 @@ import {
 import { createBrowserClient } from "../../../../frontend/src/lib/supabase/client"
 import { createServerClient } from "../../../../frontend/src/lib/supabase/server"
 import { getEnvConfig } from "../../../../frontend/src/lib/env"
-import HomePage, {
-  ROOT_NAV_LINKS,
-  ROOT_PAGE_NOTICE,
+import {
+  ROOT_AUTHENTICATED_NAV_LINK,
+  ROOT_GUEST_NAV_LINKS,
+  ROOT_PAGE_DESCRIPTION,
   ROOT_PAGE_TITLE,
 } from "../../../../frontend/app/page"
 import { DECKS_STUB_MESSAGE } from "../../../../frontend/app/(auth)/decks/page"
@@ -75,19 +73,24 @@ describe("project-scaffolding 統合テスト", () => {
   })
 
   // AC解釈: ルートはナビゲーション付きトップを返す
-  // 検証: app/page.tsx が login/decks への導線を含むことを確認する
+  // 検証: app/page.tsx が guest/authenticated の初期導線を含むことを確認する
   // @category: integration
   // @dependency: frontend/app/page.tsx
   // @complexity: low
   it("AC3: / で nav を含むトップページが返る", () => {
-    const html = renderToStaticMarkup(<HomePage />)
+    const source = readTextFile(PROJECT_FILES.homePage)
 
-    expect(html).toContain(ROOT_PAGE_TITLE)
-    expect(html).toContain(ROOT_PAGE_NOTICE)
-    for (const link of ROOT_NAV_LINKS) {
-      expect(html).toContain(`href="${link.href}"`)
-      expect(html).toContain(link.label)
+    expect(ROOT_PAGE_TITLE).toBe("まいにち漢字")
+    expect(ROOT_PAGE_DESCRIPTION).toBe("毎日少しずつ、漢字の読み書きを復習しよう。")
+    for (const link of ROOT_GUEST_NAV_LINKS) {
+      expect(source).toContain(link.href)
+      expect(source).toContain(link.label)
     }
+    expect(source).toContain(ROOT_AUTHENTICATED_NAV_LINK.href)
+    expect(source).toContain(ROOT_AUTHENTICATED_NAV_LINK.label)
+    expect(source).toContain("createReadOnlyServerClient")
+    expect(source).toContain("getUser")
+    expect(source).not.toContain("将来実装予定")
   })
 
   // AC解釈: サーバー/ブラウザ用クライアントが分離され、env バリデーション済み値のみ参照する
