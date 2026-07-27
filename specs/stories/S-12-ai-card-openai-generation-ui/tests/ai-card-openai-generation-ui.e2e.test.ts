@@ -191,13 +191,23 @@ describe("S-12 user-flow E2E contracts", () => {
 		);
 		for (const label of [
 			"作りたいカードの指示",
-			"教材source画像",
+			"教材の写真",
 			"カード形式",
-			"作成する枚数",
+			"読みを練習",
+			"書きを練習",
+			"読みと書きの両方",
+			"1つの漢字から読みカードと書きカードを1枚ずつ作ります",
+			"作るカードの合計枚数",
+			"1つの漢字から2枚作るため偶数で指定してください",
 			"タグ",
 			"カード画像",
 		])
 			expect(form).toContain(label);
+		expect(form).not.toContain("教材source画像");
+		expect(form).not.toContain("作成する枚数（展開後）");
+		expect(form).not.toMatch(/>R1</u);
+		expect(form).not.toMatch(/>W1</u);
+		expect(form).not.toMatch(/>both</u);
 		expect(form).toContain("min-h-11");
 		expect(form).toContain("aria-describedby");
 		expect(warning).toContain("全カードと上記注意事項を確認しました");

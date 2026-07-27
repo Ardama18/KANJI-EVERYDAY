@@ -1,8 +1,10 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import type { ClientImportItemInput } from "@/lib/ai-import/schema";
 
-import { updateConceptPairText } from "./DraftCardList";
+import DraftCardList, { updateConceptPairText } from "./DraftCardList";
 
 // Regression: ISSUE-001 — editing one side of a both pair made re-preview fail validation
 // Found by /qa on 2026-07-18
@@ -48,5 +50,28 @@ describe("DraftCardList concept pair editing", () => {
 	it("edits a remaining unpaired card after its sibling is excluded", () => {
 		const result = updateConceptPairText([pair[0] as ClientImportItemInput], 0, "back", "ひ");
 		expect(result[0]).toMatchObject({ front: "日", back: "ひ" });
+	});
+
+	it("shows parent-facing confirmation order without concept identifiers as headings", () => {
+		const html = renderToStaticMarkup(
+			createElement(DraftCardList, {
+				items: pair,
+				onChange: () => undefined,
+				onIllustration: async () => undefined,
+				requiredIllustrationConceptIds: ["concept-001"],
+				disabled: false,
+			})
+		);
+
+		expect(html).toContain("上から順番に、表・裏・画像を確認してください。");
+		expect(html).toContain("確認 1枚目: 読み練習カード");
+		expect(html).toContain("確認 2枚目: 書き練習カード");
+		expect(html).toContain("表: 日 / 裏: にち");
+		expect(html).toContain("読み書きペアで使う画像（必須）");
+		expect(html).toContain("同じ漢字の読みカードと書きカードに共通で使う画像です。");
+		expect(html).not.toContain("concept共有画像");
+		expect(html).not.toContain("R1 / concept-001");
+		expect(html).not.toContain("W1 / concept-001");
+		expect(html).not.toMatch(/<h3[^>]*>[^<]*concept-001/u);
 	});
 });
