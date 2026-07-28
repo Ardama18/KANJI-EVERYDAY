@@ -89,6 +89,29 @@ describe("frontend/src/components/study/CardBack.tsx", () => {
 		expect(html).toContain("できた");
 	});
 
+	it("評価ボタンをviewport下部で押せるsticky領域として描画する", () => {
+		const html = renderCardBack({
+			illustrationStatus: "ready",
+			illustrationUrl: "https://signed.example/image.png",
+			explanation: {
+				summary: "目で見たものが、頭の中で光って記憶に残る。",
+				mappings: [
+					{ part: "下の「見」", meaning: "目で見る" },
+					{ part: "上の光", meaning: "頭の中で気づき、記憶する" },
+				],
+			},
+		});
+
+		expect(html).toContain("h-[calc(100dvh-5rem)]");
+		expect(html).toContain("overflow-y-auto");
+		expect(html).toContain("min-h-full");
+		expect(html).toContain('data-testid="study-rating-actions"');
+		expect(html).toContain("sticky bottom-0");
+		expect(html).toContain("むり");
+		expect(html).toContain("あやしい");
+		expect(html).toContain("できた");
+	});
+
 	it("UT-S16F-AC01: ready + explanation で summary と mappings 行を表示する", () => {
 		const html = renderCardBack({
 			illustrationStatus: "ready",

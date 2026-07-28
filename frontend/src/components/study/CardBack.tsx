@@ -26,8 +26,8 @@ export function CardBack({
 	onRate,
 }: CardBackProps) {
 	return (
-		<div className="flex min-h-[calc(100dvh-2rem)] flex-col">
-			<header className="flex items-center justify-between py-2">
+		<div className="flex h-[calc(100dvh-5rem)] flex-col">
+			<header className="flex shrink-0 items-center justify-between py-2">
 				<Link
 					href={`/decks/${deckId}`}
 					className="text-sm font-medium text-slate-600 hover:text-slate-900"
@@ -39,21 +39,26 @@ export function CardBack({
 				</p>
 			</header>
 
-			<div className="flex flex-1 flex-col">
-				<div className="flex flex-1 flex-col items-center justify-center text-center">
-					<p className="text-3xl font-semibold text-slate-900">{backData.frontText}</p>
-					<p className="mt-2 text-4xl font-bold text-blue-700">{backData.backText}</p>
-					<IllustrationDisplay
-						illustrationStatus={backData.illustrationStatus}
-						illustrationUrl={backData.illustrationUrl}
-					/>
-					<MnemonicExplanation
-						illustrationStatus={backData.illustrationStatus}
-						explanation={backData.explanation}
-					/>
+			<div className="flex min-h-0 flex-1 flex-col">
+				<div className="min-h-0 flex-1 overflow-y-auto px-1 pb-4 pt-4">
+					<div className="flex min-h-full flex-col items-center justify-center text-center">
+						<p className="text-3xl font-semibold text-slate-900">{backData.frontText}</p>
+						<p className="mt-2 text-4xl font-bold text-blue-700">{backData.backText}</p>
+						<IllustrationDisplay
+							illustrationStatus={backData.illustrationStatus}
+							illustrationUrl={backData.illustrationUrl}
+						/>
+						<MnemonicExplanation
+							illustrationStatus={backData.illustrationStatus}
+							explanation={backData.explanation}
+						/>
+					</div>
 				</div>
 
-				<div className="pb-2">
+				<div
+					data-testid="study-rating-actions"
+					className="sticky bottom-0 z-10 -mx-1 shrink-0 bg-gradient-to-t from-white via-white to-white/80 px-1 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-3"
+				>
 					<RatingButtons
 						intervalPreview={backData.intervalPreview}
 						disabled={disabled}

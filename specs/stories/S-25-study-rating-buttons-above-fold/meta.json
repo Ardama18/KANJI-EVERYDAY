@@ -1,0 +1,12 @@
+{
+  "story_id": "S-25",
+  "issue_story_label": "S-25",
+  "feature": "study-rating-buttons-above-fold",
+  "status": "implementation_review",
+  "github_issue_url": "https://github.com/Ardama18/KANJI-EVERYDAY/issues/80",
+  "github_branch": "issue/80-study-rating-buttons-above-fold",
+  "related_epic": "E-02",
+  "source_of_truth": "GitHub issue #80 summary provided by issue-sprint child process; gh issue view failed with HTTP 401 in sandbox",
+  "created": "2026-07-28",
+  "updated": "2026-07-28"
+}

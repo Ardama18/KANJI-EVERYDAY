@@ -55,7 +55,7 @@ export function RatingButtons({ intervalPreview, disabled = false, onRate }: Rat
 					type="button"
 					disabled={disabled}
 					onClick={() => onRate(button.rating)}
-					className={`rounded-xl border px-2 py-3 text-center transition disabled:cursor-not-allowed disabled:opacity-60 ${button.className}`}
+					className={`flex min-h-16 flex-col items-center justify-center rounded-xl border px-2 py-3 text-center transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:cursor-not-allowed disabled:opacity-60 ${button.className}`}
 				>
 					<p className="text-xl leading-none">{button.icon}</p>
 					<p className="mt-1 text-sm font-semibold">{button.label}</p>
