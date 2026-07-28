@@ -24,6 +24,7 @@ import {
 } from "./deck-action-types";
 import {
 	createDeck,
+	getDeckLearningMetrics,
 	getDeckOverview,
 	getDecksWithCounts,
 	updateDeckStudyLimit,
@@ -57,6 +58,25 @@ type DeckCardRow = {
 	card_id: string;
 };
 
+type StudySessionRow = {
+	id: string;
+	user_id?: string;
+	deck_id?: string;
+	finished_at: string | null;
+};
+
+type CardRow = {
+	id: string;
+	owner_user_id?: string | null;
+	illustration_key: string | null;
+};
+
+type CardMnemonicRow = {
+	owner_user_id?: string;
+	illustration_key: string;
+	status: string;
+};
+
 type SetupOptions = {
 	userId?: string | null;
 	authError?: unknown;
@@ -64,6 +84,15 @@ type SetupOptions = {
 	deckOverview?: DeckRow | null;
 	deckCards?: DeckCardRow[];
 	reviewStates?: ReviewStateRow[];
+	studySessions?: StudySessionRow[];
+	cards?: CardRow[];
+	cardMnemonics?: CardMnemonicRow[];
+	deckOverviewError?: { message: string } | null;
+	deckCardsError?: { message: string } | null;
+	reviewStatesError?: { message: string } | null;
+	studySessionsError?: { message: string } | null;
+	cardsError?: { message: string } | null;
+	cardMnemonicsError?: { message: string } | null;
 	insertResult?: { data: unknown; error: unknown };
 	updateStudyLimitResult?: { data: { id: string } | null; error: { message: string } | null };
 };
@@ -82,16 +111,25 @@ const setupClient = (options: SetupOptions = {}) => {
 	});
 	const decksMaybeSingleMock = vi.fn().mockResolvedValue({
 		data: options.deckOverview ?? null,
-		error: null,
+		error: options.deckOverviewError ?? null,
 	});
-	const deckCardsInMock = vi.fn().mockResolvedValue({
-		data: options.deckCards ?? [],
-		error: null,
-	});
-	const reviewStatesInMock = vi.fn().mockResolvedValue({
-		data: options.reviewStates ?? [],
-		error: null,
-	});
+	const deckCardsInMock = vi.fn(async (_column: string, values: readonly string[]) => ({
+		data: (options.deckCards ?? []).filter((row) => values.includes(row.deck_id)),
+		error: options.deckCardsError ?? null,
+	}));
+	const deckCardsEqMock = vi.fn(async (_column: string, value: string) => ({
+		data: (options.deckCards ?? []).filter((row) => row.deck_id === value),
+		error: options.deckCardsError ?? null,
+	}));
+	let reviewStatesUserFilter: string | null = null;
+	const reviewStatesInMock = vi.fn(async (_column: string, values: readonly string[]) => ({
+		data: (options.reviewStates ?? []).filter(
+			(row) =>
+				values.includes(row.card_id) &&
+				(reviewStatesUserFilter === null || row.user_id === reviewStatesUserFilter)
+		),
+		error: options.reviewStatesError ?? null,
+	}));
 	const decksInsertSingleMock = vi.fn().mockResolvedValue(
 		options.insertResult ?? {
 			data: { id: "created-deck-1", name: "新しいデッキ" },
@@ -145,11 +183,97 @@ const setupClient = (options: SetupOptions = {}) => {
 
 	const deckCardsSelectMock = vi.fn().mockReturnValue({
 		in: deckCardsInMock,
+		eq: deckCardsEqMock,
+	});
+	const reviewStatesEqMock = vi.fn((column: string, value: string) => {
+		if (column === "user_id") {
+			reviewStatesUserFilter = value;
+		}
+		return {
+			in: reviewStatesInMock,
+		};
 	});
 	const reviewStatesSelectMock = vi.fn().mockReturnValue({
-		eq: vi.fn().mockReturnValue({
-			in: reviewStatesInMock,
-		}),
+		eq: reviewStatesEqMock,
+	});
+
+	let studySessionsUserFilter: string | null = null;
+	const studySessionsDeckEqMock = vi.fn(async (_column: string, value: string) => ({
+		data: (options.studySessions ?? []).filter(
+			(row) =>
+				(row.user_id === undefined ||
+					studySessionsUserFilter === null ||
+					row.user_id === studySessionsUserFilter) &&
+				(row.deck_id === undefined || row.deck_id === value)
+		),
+		error: options.studySessionsError ?? null,
+	}));
+	const studySessionsUserEqMock = vi.fn((column: string, value: string) => {
+		if (column === "user_id") {
+			studySessionsUserFilter = value;
+		}
+		return {
+			eq: studySessionsDeckEqMock,
+		};
+	});
+	const studySessionsSelectMock = vi.fn().mockReturnValue({
+		eq: studySessionsUserEqMock,
+	});
+
+	let cardsOwnerFilter: string | null = null;
+	const cardsInMock = vi.fn(async (_column: string, values: readonly string[]) => ({
+		data: (options.cards ?? []).filter(
+			(row) =>
+				values.includes(row.id) &&
+				(row.owner_user_id === undefined ||
+					cardsOwnerFilter === null ||
+					row.owner_user_id === cardsOwnerFilter)
+		),
+		error: options.cardsError ?? null,
+	}));
+	const cardsOwnerEqMock = vi.fn((column: string, value: string) => {
+		if (column === "owner_user_id") {
+			cardsOwnerFilter = value;
+		}
+		return {
+			in: cardsInMock,
+		};
+	});
+	const cardsSelectMock = vi.fn().mockReturnValue({
+		eq: cardsOwnerEqMock,
+	});
+
+	let cardMnemonicsOwnerFilter: string | null = null;
+	let cardMnemonicsStatusFilter: string | null = null;
+	const cardMnemonicsInMock = vi.fn(async (_column: string, values: readonly string[]) => ({
+		data: (options.cardMnemonics ?? []).filter(
+			(row) =>
+				values.includes(row.illustration_key) &&
+				(row.owner_user_id === undefined ||
+					cardMnemonicsOwnerFilter === null ||
+					row.owner_user_id === cardMnemonicsOwnerFilter) &&
+				(cardMnemonicsStatusFilter === null || row.status === cardMnemonicsStatusFilter)
+		),
+		error: options.cardMnemonicsError ?? null,
+	}));
+	const cardMnemonicsStatusEqMock = vi.fn((column: string, value: string) => {
+		if (column === "status") {
+			cardMnemonicsStatusFilter = value;
+		}
+		return {
+			in: cardMnemonicsInMock,
+		};
+	});
+	const cardMnemonicsOwnerEqMock = vi.fn((column: string, value: string) => {
+		if (column === "owner_user_id") {
+			cardMnemonicsOwnerFilter = value;
+		}
+		return {
+			eq: cardMnemonicsStatusEqMock,
+		};
+	});
+	const cardMnemonicsSelectMock = vi.fn().mockReturnValue({
+		eq: cardMnemonicsOwnerEqMock,
 	});
 
 	const fromMock = vi.fn((table: string) => {
@@ -163,6 +287,18 @@ const setupClient = (options: SetupOptions = {}) => {
 
 		if (table === "review_states") {
 			return { select: reviewStatesSelectMock };
+		}
+
+		if (table === "study_sessions") {
+			return { select: studySessionsSelectMock };
+		}
+
+		if (table === "cards") {
+			return { select: cardsSelectMock };
+		}
+
+		if (table === "card_mnemonics") {
+			return { select: cardMnemonicsSelectMock };
 		}
 
 		throw new Error(`Unsupported table: ${table}`);
@@ -191,7 +327,19 @@ const setupClient = (options: SetupOptions = {}) => {
 		decksUpdateMaybeSingleMock,
 		deckCardsSelectMock,
 		deckCardsInMock,
+		deckCardsEqMock,
+		reviewStatesEqMock,
 		reviewStatesInMock,
+		studySessionsSelectMock,
+		studySessionsUserEqMock,
+		studySessionsDeckEqMock,
+		cardsSelectMock,
+		cardsOwnerEqMock,
+		cardsInMock,
+		cardMnemonicsSelectMock,
+		cardMnemonicsOwnerEqMock,
+		cardMnemonicsStatusEqMock,
+		cardMnemonicsInMock,
 	};
 };
 
@@ -670,6 +818,228 @@ describe("frontend/src/actions/deck-actions.ts", () => {
 			scheduledCards: 1,
 			nextDueDate: "2026-02-25",
 		});
+	});
+
+	it("UT-S24-METRICS-OWNER-MISSING: owner deck が無ければ子行を読まず null を返す", async () => {
+		const { fromMock, deckCardsSelectMock, reviewStatesInMock } = setupClient({
+			userId: "owner-user-1",
+			deckOverview: null,
+		});
+
+		await expect(getDeckLearningMetrics("missing-deck")).resolves.toBeNull();
+
+		expect(fromMock.mock.calls.map(([table]) => table)).toEqual(["decks"]);
+		expect(deckCardsSelectMock).not.toHaveBeenCalled();
+		expect(reviewStatesInMock).not.toHaveBeenCalled();
+	});
+
+	it("UT-S24-METRICS-CARD0: card0 deck は empty metrics を返して子テーブルを追加取得しない", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-02-23T15:30:00.000Z"));
+		const {
+			fromMock,
+			deckCardsEqMock,
+			reviewStatesInMock,
+			studySessionsSelectMock,
+			cardsSelectMock,
+			cardMnemonicsSelectMock,
+		} = setupClient({
+			userId: "owner-user-1",
+			deckOverview: {
+				id: "deck-empty",
+				name: "空デッキ",
+				new_limit_per_day: 20,
+				daily_study_limit: 20,
+			},
+			deckCards: [],
+		});
+
+		const result = await getDeckLearningMetrics("deck-empty");
+
+		expect(fromMock.mock.calls.map(([table]) => table)).toEqual(["decks", "deck_cards"]);
+		expect(deckCardsEqMock).toHaveBeenCalledWith("deck_id", "deck-empty");
+		expect(reviewStatesInMock).not.toHaveBeenCalled();
+		expect(studySessionsSelectMock).not.toHaveBeenCalled();
+		expect(cardsSelectMock).not.toHaveBeenCalled();
+		expect(cardMnemonicsSelectMock).not.toHaveBeenCalled();
+		expect(result).toMatchObject({
+			contractVersion: 1,
+			today: "2026-02-24",
+			activeDays: 0,
+			latestRatings: { total: 0, again: 0, hard: 0, good: 0, goodRate: null },
+			mnemonicTrend: { comparable: false },
+		});
+		expect(result?.recentDays).toHaveLength(7);
+	});
+
+	it("UT-S24-METRICS-OWNER-FILTERS: actor/deck/card/mnemonic 境界で最新評価を集計する", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-02-23T15:30:00.000Z"));
+		const {
+			reviewStatesEqMock,
+			reviewStatesInMock,
+			studySessionsUserEqMock,
+			studySessionsDeckEqMock,
+			cardsOwnerEqMock,
+			cardsInMock,
+			cardMnemonicsOwnerEqMock,
+			cardMnemonicsStatusEqMock,
+			cardMnemonicsInMock,
+		} = setupClient({
+			userId: "owner-user-1",
+			deckOverview: {
+				id: "deck-1",
+				name: "小学3年生",
+				new_limit_per_day: 20,
+				daily_study_limit: 20,
+			},
+			deckCards: [
+				{ deck_id: "deck-1", card_id: "card-with-mnemonic" },
+				{ deck_id: "deck-1", card_id: "card-without-mnemonic" },
+				{ deck_id: "other-deck", card_id: "card-other-deck" },
+			],
+			reviewStates: [
+				{
+					user_id: "owner-user-1",
+					card_id: "card-with-mnemonic",
+					level: 2,
+					due_date: "2026-02-25",
+					last_rating: "good",
+					retry_today_count: 0,
+					last_reviewed_at: "2026-02-23T15:00:00.000Z",
+				},
+				{
+					user_id: "owner-user-1",
+					card_id: "card-without-mnemonic",
+					level: 1,
+					due_date: "2026-02-25",
+					last_rating: "hard",
+					retry_today_count: 0,
+					last_reviewed_at: "2026-02-22T08:00:00.000Z",
+				},
+				{
+					user_id: "other-user",
+					card_id: "card-with-mnemonic",
+					level: 1,
+					due_date: "2026-02-25",
+					last_rating: "again",
+					retry_today_count: 0,
+					last_reviewed_at: "2026-02-23T15:00:00.000Z",
+				},
+			],
+			studySessions: [
+				{
+					id: "session-owner",
+					user_id: "owner-user-1",
+					deck_id: "deck-1",
+					finished_at: "2026-02-23T15:00:00.000Z",
+				},
+				{
+					id: "session-other-user",
+					user_id: "other-user",
+					deck_id: "deck-1",
+					finished_at: "2026-02-23T15:00:00.000Z",
+				},
+				{
+					id: "session-other-deck",
+					user_id: "owner-user-1",
+					deck_id: "other-deck",
+					finished_at: "2026-02-23T15:00:00.000Z",
+				},
+			],
+			cards: [
+				{
+					id: "card-with-mnemonic",
+					owner_user_id: "owner-user-1",
+					illustration_key: "key-approved",
+				},
+				{
+					id: "card-without-mnemonic",
+					owner_user_id: "owner-user-1",
+					illustration_key: "key-draft",
+				},
+				{
+					id: "card-with-mnemonic",
+					owner_user_id: "other-user",
+					illustration_key: "key-other-user",
+				},
+			],
+			cardMnemonics: [
+				{
+					owner_user_id: "owner-user-1",
+					illustration_key: "key-approved",
+					status: "approved",
+				},
+				{
+					owner_user_id: "owner-user-1",
+					illustration_key: "key-draft",
+					status: "draft",
+				},
+				{
+					owner_user_id: "other-user",
+					illustration_key: "key-draft",
+					status: "approved",
+				},
+			],
+		});
+
+		const result = await getDeckLearningMetrics("deck-1");
+
+		expect(reviewStatesEqMock).toHaveBeenCalledWith("user_id", "owner-user-1");
+		expect(reviewStatesInMock).toHaveBeenCalledWith("card_id", [
+			"card-with-mnemonic",
+			"card-without-mnemonic",
+		]);
+		expect(studySessionsUserEqMock).toHaveBeenCalledWith("user_id", "owner-user-1");
+		expect(studySessionsDeckEqMock).toHaveBeenCalledWith("deck_id", "deck-1");
+		expect(cardsOwnerEqMock).toHaveBeenCalledWith("owner_user_id", "owner-user-1");
+		expect(cardsInMock).toHaveBeenCalledWith("id", ["card-with-mnemonic", "card-without-mnemonic"]);
+		expect(cardMnemonicsOwnerEqMock).toHaveBeenCalledWith("owner_user_id", "owner-user-1");
+		expect(cardMnemonicsStatusEqMock).toHaveBeenCalledWith("status", "approved");
+		expect(cardMnemonicsInMock).toHaveBeenCalledWith("illustration_key", [
+			"key-approved",
+			"key-draft",
+		]);
+		expect(result).toMatchObject({
+			today: "2026-02-24",
+			activeDays: 2,
+			latestRatings: {
+				total: 2,
+				again: 0,
+				hard: 1,
+				good: 1,
+				hardRate: 50,
+				goodRate: 50,
+			},
+			mnemonicTrend: {
+				withMnemonic: { total: 1, good: 1, goodRate: 100 },
+				withoutMnemonic: { total: 1, hard: 1, hardRate: 100 },
+				comparable: true,
+			},
+		});
+		expect(result?.recentDays.at(-1)).toEqual({
+			date: "2026-02-24",
+			completedSessions: 1,
+			reviewedCards: 1,
+		});
+	});
+
+	it("UT-S24-METRICS-SAFE-ERROR: Supabase error detailを例外messageに含めない", async () => {
+		setupClient({
+			userId: "owner-user-1",
+			deckOverview: {
+				id: "deck-1",
+				name: "小学3年生",
+				new_limit_per_day: 20,
+				daily_study_limit: 20,
+			},
+			deckCardsError: { message: "raw SQL secret token detail" },
+		});
+
+		await expect(getDeckLearningMetrics("deck-1")).rejects.toThrow(
+			"Failed to fetch deck learning metrics"
+		);
+		await expect(getDeckLearningMetrics("deck-1")).rejects.not.toThrow("secret");
 	});
 
 	it.each([

@@ -1,0 +1,12 @@
+{
+  "story_id": "S-24",
+  "issue_story_label": "S-23",
+  "feature": "learning-effect-minimal-metrics",
+  "status": "implementation_review",
+  "github_issue_url": "https://github.com/Ardama18/KANJI-EVERYDAY/issues/76",
+  "github_branch": "issue/76-learning-effect-minimal-metrics",
+  "related_epic": "E-02",
+  "source_of_truth": "GitHub issue #76 body fetched by issue-sprint orchestrator",
+  "created": "2026-07-27",
+  "updated": "2026-07-28"
+}
