@@ -9,6 +9,10 @@ import { redirect } from "next/navigation";
 
 import { getJstDateForInstant, getTodayJST } from "../lib/date";
 import {
+	type DeckLearningMetrics,
+	summarizeDeckLearningMetrics,
+} from "../lib/deck/learning-metrics";
+import {
 	type DeckActionState,
 	type DeckStudyLimitActionState,
 	normalizeDeckNameInput,
@@ -37,6 +41,21 @@ type DeckCardQueryRow = {
 	card_id: string;
 	review_states: ReviewStateRow[] | ReviewStateRow | null;
 };
+
+type StudySessionMetricQueryRow = Pick<
+	Database["public"]["Tables"]["study_sessions"]["Row"],
+	"id" | "finished_at"
+>;
+
+type CardMetricQueryRow = Pick<
+	Database["public"]["Tables"]["cards"]["Row"],
+	"id" | "illustration_key"
+>;
+
+type CardMnemonicMetricQueryRow = Pick<
+	Database["public"]["Tables"]["card_mnemonics"]["Row"],
+	"illustration_key" | "status"
+>;
 
 export interface DeckCounts {
 	new: number;
@@ -334,6 +353,138 @@ export async function getDeckOverview(deckId: string): Promise<DeckOverview | nu
 		...summary,
 		nextDueDate: findNextDueDate(cards, today),
 	};
+}
+
+export async function getDeckLearningMetrics(deckId: string): Promise<DeckLearningMetrics | null> {
+	const supabase = createServerClient();
+	const userId = await requireAuthenticatedUserId(supabase);
+	const today = getTodayJST();
+	const { data: rawDeck, error: deckError } = await supabase
+		.from("decks")
+		.select("id")
+		.eq("id", deckId)
+		.eq("owner_user_id", userId)
+		.maybeSingle();
+	const deck = rawDeck as Pick<DeckRow, "id"> | null;
+
+	if (deckError) {
+		throwLearningMetricsFetchError();
+	}
+
+	if (!deck) {
+		return null;
+	}
+
+	const { data: deckCardData, error: deckCardError } = await supabase
+		.from("deck_cards")
+		.select("deck_id, card_id")
+		.eq("deck_id", deck.id);
+
+	if (deckCardError) {
+		throwLearningMetricsFetchError();
+	}
+
+	const deckCards = (deckCardData ?? []) as Pick<DeckCardQueryRow, "deck_id" | "card_id">[];
+	const cardIds = [...new Set(deckCards.map((row) => row.card_id))];
+	if (cardIds.length === 0) {
+		return summarizeDeckLearningMetrics({
+			today,
+			deckCardIds: [],
+			reviewStates: [],
+			studySessions: [],
+			cards: [],
+			approvedMnemonicKeys: [],
+		});
+	}
+
+	const { data: reviewData, error: reviewError } = await supabase
+		.from("review_states")
+		.select("user_id, card_id, last_rating, last_reviewed_at")
+		.eq("user_id", userId)
+		.in("card_id", cardIds);
+
+	if (reviewError) {
+		throwLearningMetricsFetchError();
+	}
+
+	const { data: sessionData, error: sessionError } = await supabase
+		.from("study_sessions")
+		.select("id, finished_at")
+		.eq("user_id", userId)
+		.eq("deck_id", deck.id);
+
+	if (sessionError) {
+		throwLearningMetricsFetchError();
+	}
+
+	const { data: cardData, error: cardError } = await supabase
+		.from("cards")
+		.select("id, illustration_key")
+		.eq("owner_user_id", userId)
+		.in("id", cardIds);
+
+	if (cardError) {
+		throwLearningMetricsFetchError();
+	}
+
+	const cards = (cardData ?? []) as CardMetricQueryRow[];
+	const illustrationKeys = [
+		...new Set(
+			cards
+				.map((card) => card.illustration_key)
+				.filter((key): key is string => typeof key === "string" && key.length > 0)
+		),
+	];
+	const approvedMnemonicKeys =
+		illustrationKeys.length === 0
+			? []
+			: await fetchApprovedMnemonicKeys(supabase, userId, illustrationKeys);
+
+	return summarizeDeckLearningMetrics({
+		today,
+		deckCardIds: cardIds,
+		reviewStates: (
+			(reviewData ?? []) as Pick<ReviewStateRow, "card_id" | "last_rating" | "last_reviewed_at">[]
+		).map((row) => ({
+			cardId: row.card_id,
+			lastRating: row.last_rating,
+			lastReviewedAt: row.last_reviewed_at,
+		})),
+		studySessions: ((sessionData ?? []) as StudySessionMetricQueryRow[]).map((row) => ({
+			id: row.id,
+			finishedAt: row.finished_at,
+		})),
+		cards: cards.map((row) => ({
+			id: row.id,
+			illustrationKey: row.illustration_key,
+		})),
+		approvedMnemonicKeys,
+	});
+}
+
+async function fetchApprovedMnemonicKeys(
+	supabase: ReturnType<typeof createServerClient>,
+	userId: string,
+	illustrationKeys: readonly string[]
+): Promise<string[]> {
+	const { data, error } = await supabase
+		.from("card_mnemonics")
+		.select("illustration_key, status")
+		.eq("owner_user_id", userId)
+		.eq("status", "approved")
+		.in("illustration_key", illustrationKeys);
+
+	if (error) {
+		throwLearningMetricsFetchError();
+	}
+
+	return ((data ?? []) as CardMnemonicMetricQueryRow[])
+		.filter((row) => row.status === "approved")
+		.map((row) => row.illustration_key);
+}
+
+function throwLearningMetricsFetchError(): never {
+	throw new Error("Failed to fetch deck learning metrics");
 }
 
 const parseDailyStudyLimitInput = (value: unknown): number | null => {

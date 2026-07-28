@@ -1,5 +1,6 @@
-import { getDeckOverview } from "@/actions/deck-actions";
+import { getDeckLearningMetrics, getDeckOverview } from "@/actions/deck-actions";
 import { DeckStudyLimitForm } from "@/components/deck/DeckStudyLimitForm";
+import { LearningMetricsPanel } from "@/components/deck/LearningMetricsPanel";
 import { getTodayJST } from "@/lib/date";
 import {
 	DECK_LABEL_NEW,
@@ -39,13 +40,15 @@ export default async function DeckOverviewPage({ params }: DeckOverviewPageProps
 		notFound();
 	}
 
+	const today = getTodayJST();
+	const metrics = await getDeckLearningMetrics(params.deckId);
 	const status = resolveDeckStudyStatus({
 		totalCards: overview.totalCards,
 		todayCount: overview.counts.total,
 		studiedToday: overview.studiedToday,
 		dailyStudyLimit: overview.dailyStudyLimit,
 		nextDueDate: overview.nextDueDate,
-		today: getTodayJST(),
+		today,
 	});
 	const canStartStudy = status.kind === "todo";
 	// 完了・上限到達では 0 の羅列ではなく完了メッセージを主表示にする（FR-03 / AC-2）。
@@ -95,6 +98,8 @@ export default async function DeckOverviewPage({ params }: DeckOverviewPageProps
 					今日やること {overview.counts.total}枚 / 今日やれる残り {status.remainingToday}枚
 				</p>
 			</section>
+
+			<LearningMetricsPanel status={status} metrics={metrics} />
 
 			<section className="mt-6" aria-labelledby="whole-study-heading">
 				<h2 id="whole-study-heading" className="text-sm font-bold text-slate-800">

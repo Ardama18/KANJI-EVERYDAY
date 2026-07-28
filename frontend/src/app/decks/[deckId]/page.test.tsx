@@ -1,10 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const getDeckLearningMetricsMock = vi.hoisted(() => vi.fn());
 const getDeckOverviewMock = vi.hoisted(() => vi.fn());
 const notFoundMock = vi.hoisted(() => vi.fn<() => never>());
 
 vi.mock("@/actions/deck-actions", () => ({
+	getDeckLearningMetrics: getDeckLearningMetricsMock,
 	getDeckOverview: getDeckOverviewMock,
 }));
 
@@ -52,6 +54,53 @@ class NotFoundSignal extends Error {
 const FIXED_NOW = new Date("2026-02-23T15:30:00.000Z");
 
 const WHOLE_STUDY_HEADING = "これまでの記録";
+const LEARNING_METRICS_HEADING = "最近の学習メモ";
+const defaultMetrics = {
+	contractVersion: 1,
+	today: "2026-02-24",
+	windowStart: "2026-02-18",
+	windowEnd: "2026-02-24",
+	activeDays: 2,
+	recentDays: [
+		{ date: "2026-02-18", completedSessions: 0, reviewedCards: 0 },
+		{ date: "2026-02-19", completedSessions: 0, reviewedCards: 0 },
+		{ date: "2026-02-20", completedSessions: 1, reviewedCards: 1 },
+		{ date: "2026-02-21", completedSessions: 0, reviewedCards: 0 },
+		{ date: "2026-02-22", completedSessions: 0, reviewedCards: 0 },
+		{ date: "2026-02-23", completedSessions: 0, reviewedCards: 0 },
+		{ date: "2026-02-24", completedSessions: 1, reviewedCards: 2 },
+	],
+	latestRatings: {
+		total: 3,
+		again: 1,
+		hard: 1,
+		good: 1,
+		againRate: 33,
+		hardRate: 33,
+		goodRate: 33,
+	},
+	mnemonicTrend: {
+		withMnemonic: {
+			total: 0,
+			again: 0,
+			hard: 0,
+			good: 0,
+			againRate: null,
+			hardRate: null,
+			goodRate: null,
+		},
+		withoutMnemonic: {
+			total: 3,
+			again: 1,
+			hard: 1,
+			good: 1,
+			againRate: 33,
+			hardRate: 33,
+			goodRate: 33,
+		},
+		comparable: false,
+	},
+};
 
 /**
  * StatCard の値がラベルへ正しく結線されているかを検証する（AC-1 / AC-3）。
@@ -79,11 +128,13 @@ const expectDisabledButtonDescribedByText = (html: string, expectedText: string)
 
 describe("frontend/app/(auth)/decks/[deckId]/page.tsx", () => {
 	beforeEach(() => {
+		getDeckLearningMetricsMock.mockReset();
 		getDeckOverviewMock.mockReset();
 		notFoundMock.mockReset();
 		notFoundMock.mockImplementation(() => {
 			throw new NotFoundSignal();
 		});
+		getDeckLearningMetricsMock.mockResolvedValue(defaultMetrics);
 		vi.useFakeTimers();
 		vi.setSystemTime(FIXED_NOW);
 	});
@@ -120,12 +171,28 @@ describe("frontend/app/(auth)/decks/[deckId]/page.tsx", () => {
 		expect(html).toContain("小学3年生の漢字");
 		expect(html).toContain("今日の学習");
 		expect(html).toContain("今日やること 11枚 / 今日やれる残り 16枚");
+		expect(html).toContain(LEARNING_METRICS_HEADING);
+		expect(html).toContain("学習した日 2日 / 7日");
 		expect(html).toContain(WHOLE_STUDY_HEADING);
 		expect(html).toContain("一日最大 25枚 / きょうやった 9枚");
 		expect(html).toContain('data-testid="study-limit-form"');
 		expect(html).toContain(DECK_OVERVIEW_START_LABEL);
 		expect(html).toContain('href="/decks/deck-1/study"');
 		expect(html).not.toContain(DECK_STUDY_DONE_MESSAGE);
+		expect(getDeckLearningMetricsMock).toHaveBeenCalledWith("deck-1");
+	});
+
+	it("最近の学習メモを 今日の学習 と これまでの記録 の間に表示する", async () => {
+		getDeckOverviewMock.mockResolvedValue(todoOverview);
+
+		const html = renderToStaticMarkup(await DeckOverviewPage({ params: { deckId: "deck-1" } }));
+
+		expect(html.indexOf("今日の学習")).toBeLessThan(html.indexOf(LEARNING_METRICS_HEADING));
+		expect(html.indexOf(LEARNING_METRICS_HEADING)).toBeLessThan(html.indexOf(WHOLE_STUDY_HEADING));
+		expect(html).toContain("むり");
+		expect(html).toContain("あやしい");
+		expect(html).toContain("できた");
+		expect(html).toContain("比較できる学習データがまだありません。");
 	});
 
 	it("今日の学習 StatCard が各指標の値を表示する", async () => {
@@ -431,5 +498,6 @@ describe("frontend/app/(auth)/decks/[deckId]/page.tsx", () => {
 			"NEXT_NOT_FOUND"
 		);
 		expect(notFoundMock).toHaveBeenCalledTimes(1);
+		expect(getDeckLearningMetricsMock).not.toHaveBeenCalled();
 	});
 });
