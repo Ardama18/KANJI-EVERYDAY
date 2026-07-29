@@ -38,20 +38,20 @@ CREATE TRIGGER guard_deck_logical_delete_active_session
 BEFORE UPDATE OF deleted_at ON public.decks
 FOR EACH ROW EXECUTE FUNCTION public.guard_deck_logical_delete_active_session();
 
-DROP POLICY decks_select_owner ON public.decks;
+DROP POLICY IF EXISTS decks_select_owner ON public.decks;
 CREATE POLICY decks_select_owner
 ON public.decks
 FOR SELECT
 USING ((SELECT auth.uid()) = owner_user_id AND deleted_at IS NULL);
 
-DROP POLICY decks_update_owner ON public.decks;
+DROP POLICY IF EXISTS decks_update_owner ON public.decks;
 CREATE POLICY decks_update_owner
 ON public.decks
 FOR UPDATE
 USING ((SELECT auth.uid()) = owner_user_id AND deleted_at IS NULL)
 WITH CHECK ((SELECT auth.uid()) = owner_user_id);
 
-DROP POLICY deck_cards_select_owner_deck ON public.deck_cards;
+DROP POLICY IF EXISTS deck_cards_select_owner_deck ON public.deck_cards;
 CREATE POLICY deck_cards_select_owner_deck
 ON public.deck_cards
 FOR SELECT
@@ -65,7 +65,7 @@ USING (
   )
 );
 
-DROP POLICY deck_cards_insert_owner_deck ON public.deck_cards;
+DROP POLICY IF EXISTS deck_cards_insert_owner_deck ON public.deck_cards;
 CREATE POLICY deck_cards_insert_owner_deck
 ON public.deck_cards
 FOR INSERT
@@ -79,7 +79,7 @@ WITH CHECK (
   )
 );
 
-DROP POLICY deck_cards_update_owner_deck ON public.deck_cards;
+DROP POLICY IF EXISTS deck_cards_update_owner_deck ON public.deck_cards;
 CREATE POLICY deck_cards_update_owner_deck
 ON public.deck_cards
 FOR UPDATE
