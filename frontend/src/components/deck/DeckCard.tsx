@@ -7,6 +7,8 @@ import {
 } from "@/lib/deck/study-status";
 import Link from "next/link";
 
+import { DeleteDeckForm } from "./DeleteDeckForm";
+
 type DeckCardProps = {
 	deck: DeckWithCounts;
 	/** Server 側で決めた JST の今日。Client で現在時刻を評価しないため props で受け取る（NFR-03）。 */
@@ -58,34 +60,39 @@ export function DeckCard({ deck, today }: DeckCardProps) {
 	const reviewCount = deck.counts.learn + deck.counts.due;
 
 	return (
-		<Link
-			href={`/decks/${deck.id}`}
-			className="flex min-h-[88px] flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 sm:flex-row sm:items-center sm:justify-between"
-		>
-			<span className="min-w-0">
-				<span className="block break-words text-base font-semibold text-slate-900">
-					{deck.name}
-				</span>
-				<span className="mt-1 block text-sm text-slate-600">
-					カード {deck.totalCards}枚 ・ 学習した {deck.learnedCards}枚
-				</span>
-			</span>
-			<span className="flex flex-wrap items-center gap-2 sm:justify-end">
-				{status.kind === "todo" ? (
-					<span className="flex flex-wrap items-center gap-1.5">
-						<CountBadge label={DECK_LABEL_NEW} value={deck.counts.new} kind="new" />
-						<CountBadge label={DECK_LABEL_REVIEW} value={reviewCount} kind="review" />
+		<article className="flex min-h-[88px] flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+			<Link
+				href={`/decks/${deck.id}`}
+				className="min-w-0 flex-1 rounded-md transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-sky-500"
+			>
+				<span className="block min-w-0">
+					<span className="block break-words text-base font-semibold text-slate-900">
+						{deck.name}
 					</span>
-				) : (
-					<span className="flex flex-col sm:text-right">
-						<span className="text-sm font-medium text-slate-700">{status.message}</span>
-						{status.nextDueMessage === null ? null : (
-							<span className="text-xs text-slate-500">{status.nextDueMessage}</span>
-						)}
+					<span className="mt-1 block text-sm text-slate-600">
+						カード {deck.totalCards}枚 ・ 学習した {deck.learnedCards}枚
 					</span>
-				)}
-				<StudiedTodayPill value={deck.studiedToday} />
-			</span>
-		</Link>
+				</span>
+				<span className="mt-3 flex flex-wrap items-center gap-2 sm:justify-start">
+					{status.kind === "todo" ? (
+						<span className="flex flex-wrap items-center gap-1.5">
+							<CountBadge label={DECK_LABEL_NEW} value={deck.counts.new} kind="new" />
+							<CountBadge label={DECK_LABEL_REVIEW} value={reviewCount} kind="review" />
+						</span>
+					) : (
+						<span className="flex flex-col">
+							<span className="text-sm font-medium text-slate-700">{status.message}</span>
+							{status.nextDueMessage === null ? null : (
+								<span className="text-xs text-slate-500">{status.nextDueMessage}</span>
+							)}
+						</span>
+					)}
+					<StudiedTodayPill value={deck.studiedToday} />
+				</span>
+			</Link>
+			<div className="sm:ml-4">
+				<DeleteDeckForm deckId={deck.id} deckName={deck.name} />
+			</div>
+		</article>
 	);
 }

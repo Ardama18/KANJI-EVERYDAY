@@ -18,12 +18,14 @@ vi.mock("next/cache", () => ({
 
 import {
 	DECK_ACTION_INITIAL_STATE,
+	DECK_DELETE_ACTION_INITIAL_STATE,
 	DECK_STUDY_LIMIT_ACTION_INITIAL_STATE,
 	MAX_DECK_NAME_LENGTH,
 	normalizeDeckNameInput,
 } from "./deck-action-types";
 import {
 	createDeck,
+	deleteDeck,
 	getDeckLearningMetrics,
 	getDeckOverview,
 	getDecksWithCounts,
@@ -95,7 +97,14 @@ type SetupOptions = {
 	cardMnemonicsError?: { message: string } | null;
 	insertResult?: { data: unknown; error: unknown };
 	updateStudyLimitResult?: { data: { id: string } | null; error: { message: string } | null };
+	deleteDeckResult?: {
+		data: { id: string } | null;
+		error: { code?: string; message: string } | null;
+	};
 };
+
+const VALID_DECK_ID = "11111111-1111-4111-8111-111111111111";
+const OTHER_VALID_DECK_ID = "22222222-2222-4222-8222-222222222222";
 
 const setupClient = (options: SetupOptions = {}) => {
 	const getUserMock = vi.fn().mockResolvedValue({
@@ -142,37 +151,60 @@ const setupClient = (options: SetupOptions = {}) => {
 	const decksInsertMock = vi.fn().mockReturnValue({
 		select: decksInsertSelectMock,
 	});
-	const decksUpdateMaybeSingleMock = vi.fn().mockResolvedValue(
-		options.updateStudyLimitResult ?? {
-			data: { id: "deck-1" },
-			error: null,
-		}
+	let decksUpdateResult: {
+		data: { id: string } | null;
+		error: { code?: string; message: string } | null;
+	} | null = null;
+	const decksUpdateMaybeSingleMock = vi.fn().mockImplementation(() =>
+		Promise.resolve(
+			decksUpdateResult ??
+				options.updateStudyLimitResult ?? {
+					data: { id: "deck-1" },
+					error: null,
+				}
+		)
 	);
 	const decksUpdateSelectMock = vi.fn().mockReturnValue({
 		maybeSingle: decksUpdateMaybeSingleMock,
 	});
+	const decksUpdateDeletedAtIsMock = vi.fn().mockReturnValue({
+		select: decksUpdateSelectMock,
+	});
 	const decksUpdateOwnerEqMock = vi.fn().mockReturnValue({
+		is: decksUpdateDeletedAtIsMock,
 		select: decksUpdateSelectMock,
 	});
 	const decksUpdateIdEqMock = vi.fn().mockReturnValue({
 		eq: decksUpdateOwnerEqMock,
 	});
-	const decksUpdateMock = vi.fn().mockReturnValue({
-		eq: decksUpdateIdEqMock,
+	const decksUpdateMock = vi.fn((values: Record<string, unknown>) => {
+		decksUpdateResult =
+			"deleted_at" in values
+				? (options.deleteDeckResult ?? { data: { id: VALID_DECK_ID }, error: null })
+				: (options.updateStudyLimitResult ?? { data: { id: "deck-1" }, error: null });
+		return {
+			eq: decksUpdateIdEqMock,
+		};
+	});
+	const decksSelectOrderDeletedAtIsMock = vi.fn().mockReturnValue({
+		order: decksOrderMock,
+	});
+	const decksSelectSingleDeletedAtIsMock = vi.fn().mockReturnValue({
+		maybeSingle: decksMaybeSingleMock,
 	});
 
 	const decksSelectMock = vi.fn().mockImplementation(() => ({
 		eq: vi.fn((column: string) => {
 			if (column === "owner_user_id") {
 				return {
-					order: decksOrderMock,
+					is: decksSelectOrderDeletedAtIsMock,
 				};
 			}
 
 			if (column === "id") {
 				return {
 					eq: vi.fn(() => ({
-						maybeSingle: decksMaybeSingleMock,
+						is: decksSelectSingleDeletedAtIsMock,
 					})),
 				};
 			}
@@ -198,16 +230,39 @@ const setupClient = (options: SetupOptions = {}) => {
 	});
 
 	let studySessionsUserFilter: string | null = null;
-	const studySessionsDeckEqMock = vi.fn(async (_column: string, value: string) => ({
+	const resolveStudySessions = (deckId: string, activeOnly: boolean) => ({
 		data: (options.studySessions ?? []).filter(
 			(row) =>
 				(row.user_id === undefined ||
 					studySessionsUserFilter === null ||
 					row.user_id === studySessionsUserFilter) &&
-				(row.deck_id === undefined || row.deck_id === value)
+				(row.deck_id === undefined || row.deck_id === deckId) &&
+				(!activeOnly || row.finished_at === null)
 		),
 		error: options.studySessionsError ?? null,
-	}));
+	});
+	const studySessionsLimitMock = vi.fn((deckId: string, activeOnly: boolean) =>
+		Promise.resolve(resolveStudySessions(deckId, activeOnly))
+	);
+	const studySessionsFinishedAtIsMock = vi.fn(
+		(deckId: string, _column: string, value: unknown) => ({
+			limit: vi.fn((_count: number) => studySessionsLimitMock(deckId, value === null)),
+		})
+	);
+	const studySessionsDeckEqMock = vi.fn((_column: string, value: string) => {
+		const query = Promise.resolve(resolveStudySessions(value, false)) as Promise<
+			ReturnType<typeof resolveStudySessions>
+		> & {
+			is: (
+				column: string,
+				filterValue: unknown
+			) => ReturnType<typeof studySessionsFinishedAtIsMock>;
+		};
+		query.is = (column: string, filterValue: unknown) =>
+			studySessionsFinishedAtIsMock(value, column, filterValue);
+
+		return query;
+	});
 	const studySessionsUserEqMock = vi.fn((column: string, value: string) => {
 		if (column === "user_id") {
 			studySessionsUserFilter = value;
@@ -278,7 +333,11 @@ const setupClient = (options: SetupOptions = {}) => {
 
 	const fromMock = vi.fn((table: string) => {
 		if (table === "decks") {
-			return { select: decksSelectMock, insert: decksInsertMock, update: decksUpdateMock };
+			return {
+				select: decksSelectMock,
+				insert: decksInsertMock,
+				update: decksUpdateMock,
+			};
 		}
 
 		if (table === "deck_cards") {
@@ -323,8 +382,11 @@ const setupClient = (options: SetupOptions = {}) => {
 		decksUpdateMock,
 		decksUpdateIdEqMock,
 		decksUpdateOwnerEqMock,
+		decksUpdateDeletedAtIsMock,
 		decksUpdateSelectMock,
 		decksUpdateMaybeSingleMock,
+		decksSelectOrderDeletedAtIsMock,
+		decksSelectSingleDeletedAtIsMock,
 		deckCardsSelectMock,
 		deckCardsInMock,
 		deckCardsEqMock,
@@ -333,6 +395,8 @@ const setupClient = (options: SetupOptions = {}) => {
 		studySessionsSelectMock,
 		studySessionsUserEqMock,
 		studySessionsDeckEqMock,
+		studySessionsFinishedAtIsMock,
+		studySessionsLimitMock,
 		cardsSelectMock,
 		cardsOwnerEqMock,
 		cardsInMock,
@@ -434,6 +498,193 @@ describe("frontend/src/actions/deck-actions.ts", () => {
 		});
 		expect(JSON.stringify(result)).not.toContain("duplicate key");
 		expect(JSON.stringify(result)).not.toContain("secret");
+		expect(revalidatePathMock).not.toHaveBeenCalled();
+	});
+
+	it("UT-S25-DELETE-DECK-VALIDATION: invalid deckId は auth / DB 前に安全なerror stateを返す", async () => {
+		const formData = new FormData();
+		formData.set("deckId", "not-a-uuid");
+
+		const result = await deleteDeck(DECK_DELETE_ACTION_INITIAL_STATE, formData);
+
+		expect(result).toEqual({
+			status: "error",
+			message: "デッキを削除できませんでした。時間をおいて再度お試しください。",
+		});
+		expect(createServerClientMock).not.toHaveBeenCalled();
+		expect(revalidatePathMock).not.toHaveBeenCalled();
+	});
+
+	it("UT-S25-DELETE-DECK-UNAUTH: 未認証ではDB DMLを実行しない", async () => {
+		const { fromMock, decksUpdateMock } = setupClient({ userId: null });
+		const formData = new FormData();
+		formData.set("deckId", VALID_DECK_ID);
+
+		const result = await deleteDeck(DECK_DELETE_ACTION_INITIAL_STATE, formData);
+
+		expect(result).toEqual({ status: "error", message: "ログインが必要です。" });
+		expect(fromMock).not.toHaveBeenCalled();
+		expect(decksUpdateMock).not.toHaveBeenCalled();
+		expect(revalidatePathMock).not.toHaveBeenCalled();
+	});
+
+	it("UT-S25-DELETE-DECK-SUCCESS: owner deck をowner filter付きで論理削除し /decks をrevalidateする", async () => {
+		const {
+			decksMaybeSingleMock,
+			studySessionsUserEqMock,
+			studySessionsDeckEqMock,
+			studySessionsFinishedAtIsMock,
+			decksUpdateMock,
+			decksUpdateIdEqMock,
+			decksUpdateOwnerEqMock,
+			decksUpdateDeletedAtIsMock,
+			decksUpdateSelectMock,
+		} = setupClient({
+			userId: "owner-user-1",
+			deckOverview: {
+				id: VALID_DECK_ID,
+				name: "小学3年生",
+				new_limit_per_day: 20,
+				daily_study_limit: 20,
+			},
+			studySessions: [{ id: "completed-session", finished_at: "2026-02-24T00:00:00.000Z" }],
+			deleteDeckResult: { data: { id: VALID_DECK_ID }, error: null },
+		});
+		const formData = new FormData();
+		formData.set("deckId", VALID_DECK_ID);
+
+		const result = await deleteDeck(DECK_DELETE_ACTION_INITIAL_STATE, formData);
+
+		expect(decksMaybeSingleMock).toHaveBeenCalledTimes(1);
+		expect(studySessionsUserEqMock).toHaveBeenCalledWith("user_id", "owner-user-1");
+		expect(studySessionsDeckEqMock).toHaveBeenCalledWith("deck_id", VALID_DECK_ID);
+		expect(studySessionsFinishedAtIsMock).toHaveBeenCalledWith(VALID_DECK_ID, "finished_at", null);
+		expect(decksUpdateMock).toHaveBeenCalledWith({ deleted_at: expect.any(String) });
+		const deletedAt = decksUpdateMock.mock.calls[0]?.[0].deleted_at;
+		expect(typeof deletedAt).toBe("string");
+		expect(Number.isNaN(Date.parse(String(deletedAt)))).toBe(false);
+		expect(decksUpdateIdEqMock).toHaveBeenCalledWith("id", VALID_DECK_ID);
+		expect(decksUpdateOwnerEqMock).toHaveBeenCalledWith("owner_user_id", "owner-user-1");
+		expect(decksUpdateDeletedAtIsMock).toHaveBeenCalledWith("deleted_at", null);
+		expect(decksUpdateSelectMock).toHaveBeenCalledWith("id");
+		expect(revalidatePathMock).toHaveBeenCalledWith("/decks");
+		expect(result).toEqual({ status: "success", message: "デッキを削除しました。" });
+	});
+
+	it("UT-S25-DELETE-DECK-MISSING-OR-OTHER: 他ownerと不存在は同じ安全な失敗にする", async () => {
+		setupClient({
+			userId: "owner-user-1",
+			deckOverview: null,
+		});
+		const otherOwnerFormData = new FormData();
+		otherOwnerFormData.set("deckId", OTHER_VALID_DECK_ID);
+
+		const otherOwnerResult = await deleteDeck(DECK_DELETE_ACTION_INITIAL_STATE, otherOwnerFormData);
+
+		createServerClientMock.mockReset();
+		revalidatePathMock.mockReset();
+		setupClient({
+			userId: "owner-user-1",
+			deckOverview: null,
+		});
+		const missingFormData = new FormData();
+		missingFormData.set("deckId", VALID_DECK_ID);
+
+		const missingResult = await deleteDeck(DECK_DELETE_ACTION_INITIAL_STATE, missingFormData);
+
+		expect(otherOwnerResult).toEqual(missingResult);
+		expect(missingResult).toEqual({
+			status: "error",
+			message: "デッキを削除できませんでした。時間をおいて再度お試しください。",
+		});
+		expect(revalidatePathMock).not.toHaveBeenCalled();
+	});
+
+	it("UT-S25-DELETE-DECK-ACTIVE-SESSION: active session があるdeckは論理削除しない", async () => {
+		const { decksUpdateMock } = setupClient({
+			userId: "owner-user-1",
+			deckOverview: {
+				id: VALID_DECK_ID,
+				name: "小学3年生",
+				new_limit_per_day: 20,
+				daily_study_limit: 20,
+			},
+			studySessions: [
+				{
+					id: "active-session",
+					user_id: "owner-user-1",
+					deck_id: VALID_DECK_ID,
+					finished_at: null,
+				},
+			],
+		});
+		const formData = new FormData();
+		formData.set("deckId", VALID_DECK_ID);
+
+		const result = await deleteDeck(DECK_DELETE_ACTION_INITIAL_STATE, formData);
+
+		expect(result).toEqual({
+			status: "error",
+			message: "学習中のデッキは削除できません。学習を終えてからもう一度お試しください。",
+		});
+		expect(decksUpdateMock).not.toHaveBeenCalled();
+		expect(revalidatePathMock).not.toHaveBeenCalled();
+	});
+
+	it("UT-S25-DELETE-DECK-P1007: trigger race のactive-session errorを安全な文言へ写像する", async () => {
+		setupClient({
+			userId: "owner-user-1",
+			deckOverview: {
+				id: VALID_DECK_ID,
+				name: "小学3年生",
+				new_limit_per_day: 20,
+				daily_study_limit: 20,
+			},
+			deleteDeckResult: {
+				data: null,
+				error: { code: "P1007", message: "S-25 deck has an active session" },
+			},
+		});
+		const formData = new FormData();
+		formData.set("deckId", VALID_DECK_ID);
+
+		const result = await deleteDeck(DECK_DELETE_ACTION_INITIAL_STATE, formData);
+
+		expect(result).toEqual({
+			status: "error",
+			message: "学習中のデッキは削除できません。学習を終えてからもう一度お試しください。",
+		});
+		expect(JSON.stringify(result)).not.toContain("P1007");
+		expect(JSON.stringify(result)).not.toContain("active session");
+		expect(revalidatePathMock).not.toHaveBeenCalled();
+	});
+
+	it("UT-S25-DELETE-DECK-SAFE-ERROR: Supabase error detailを返却stateに含めない", async () => {
+		setupClient({
+			userId: "owner-user-1",
+			deckOverview: {
+				id: VALID_DECK_ID,
+				name: "小学3年生",
+				new_limit_per_day: 20,
+				daily_study_limit: 20,
+			},
+			deleteDeckResult: {
+				data: null,
+				error: { message: "raw SQL stack secret other-owner-id" },
+			},
+		});
+		const formData = new FormData();
+		formData.set("deckId", VALID_DECK_ID);
+
+		const result = await deleteDeck(DECK_DELETE_ACTION_INITIAL_STATE, formData);
+
+		expect(result).toEqual({
+			status: "error",
+			message: "デッキを削除できませんでした。時間をおいて再度お試しください。",
+		});
+		expect(JSON.stringify(result)).not.toContain("raw SQL");
+		expect(JSON.stringify(result)).not.toContain("secret");
+		expect(JSON.stringify(result)).not.toContain("other-owner");
 		expect(revalidatePathMock).not.toHaveBeenCalled();
 	});
 

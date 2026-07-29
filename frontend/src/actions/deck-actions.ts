@@ -14,11 +14,17 @@ import {
 } from "../lib/deck/learning-metrics";
 import {
 	type DeckActionState,
+	type DeckDeleteActionState,
 	type DeckStudyLimitActionState,
 	normalizeDeckNameInput,
 } from "./deck-action-types";
 
 const LOGIN_PATH = "/login";
+const GENERIC_DECK_DELETE_ERROR_MESSAGE =
+	"デッキを削除できませんでした。時間をおいて再度お試しください。";
+const ACTIVE_DECK_DELETE_ERROR_MESSAGE =
+	"学習中のデッキは削除できません。学習を終えてからもう一度お試しください。";
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type DeckRow = Pick<
 	Database["public"]["Tables"]["decks"]["Row"],
@@ -56,6 +62,38 @@ type CardMnemonicMetricQueryRow = Pick<
 	Database["public"]["Tables"]["card_mnemonics"]["Row"],
 	"illustration_key" | "status"
 >;
+
+type DeckDeleteTable = {
+	update: (values: Database["public"]["Tables"]["decks"]["Update"]) => {
+		eq: (
+			column: string,
+			value: string
+		) => {
+			eq: (
+				column: string,
+				value: string
+			) => {
+				is: (
+					column: string,
+					value: null
+				) => {
+					select: (columns: string) => {
+						maybeSingle: () => Promise<{
+							data: Pick<Database["public"]["Tables"]["decks"]["Row"], "id"> | null;
+							error: { code?: string; message: string } | null;
+						}>;
+					};
+				};
+				select: (columns: string) => {
+					maybeSingle: () => Promise<{
+						data: Pick<Database["public"]["Tables"]["decks"]["Row"], "id"> | null;
+						error: { code?: string; message: string } | null;
+					}>;
+				};
+			};
+		};
+	};
+};
 
 export interface DeckCounts {
 	new: number;
@@ -196,6 +234,86 @@ function isCreatedDeckRow(value: unknown): value is Readonly<{ id: string; name:
 	);
 }
 
+const normalizeDeckIdInput = (value: unknown): string | null => {
+	if (typeof value !== "string") {
+		return null;
+	}
+
+	const deckId = value.trim();
+	return UUID_PATTERN.test(deckId) ? deckId : null;
+};
+
+const isActiveDeckDeleteError = (error: { code?: string; message: string } | null): boolean =>
+	error?.code === "P1007";
+
+export async function deleteDeck(
+	previousState: DeckDeleteActionState,
+	formData: FormData
+): Promise<DeckDeleteActionState> {
+	void previousState;
+
+	const deckId = normalizeDeckIdInput(formData.get("deckId"));
+	if (deckId === null) {
+		return { status: "error", message: GENERIC_DECK_DELETE_ERROR_MESSAGE };
+	}
+
+	const supabase = createServerClient();
+	const { data: authData, error: authError } = await supabase.auth.getUser();
+	if (authError || !authData.user) {
+		return { status: "error", message: "ログインが必要です。" };
+	}
+	const userId = authData.user.id;
+
+	const { data: deck, error: deckError } = await supabase
+		.from("decks")
+		.select("id")
+		.eq("id", deckId)
+		.eq("owner_user_id", userId)
+		.is("deleted_at", null)
+		.maybeSingle();
+
+	if (deckError || deck === null) {
+		return { status: "error", message: GENERIC_DECK_DELETE_ERROR_MESSAGE };
+	}
+
+	const { data: activeSessions, error: activeSessionError } = await supabase
+		.from("study_sessions")
+		.select("id")
+		.eq("user_id", userId)
+		.eq("deck_id", deckId)
+		.is("finished_at", null)
+		.limit(1);
+
+	if (activeSessionError) {
+		return { status: "error", message: GENERIC_DECK_DELETE_ERROR_MESSAGE };
+	}
+
+	if ((activeSessions ?? []).length > 0) {
+		return { status: "error", message: ACTIVE_DECK_DELETE_ERROR_MESSAGE };
+	}
+
+	const table = supabase.from("decks") as unknown as DeckDeleteTable;
+	const { data: deletedDeck, error: deleteError } = await table
+		.update({ deleted_at: new Date().toISOString() })
+		.eq("id", deckId)
+		.eq("owner_user_id", userId)
+		.is("deleted_at", null)
+		.select("id")
+		.maybeSingle();
+
+	if (isActiveDeckDeleteError(deleteError)) {
+		return { status: "error", message: ACTIVE_DECK_DELETE_ERROR_MESSAGE };
+	}
+
+	if (deleteError || deletedDeck === null) {
+		return { status: "error", message: GENERIC_DECK_DELETE_ERROR_MESSAGE };
+	}
+
+	revalidatePath("/decks");
+
+	return { status: "success", message: "デッキを削除しました。" };
+}
+
 const fetchDeckCardRows = async (
 	supabase: ReturnType<typeof createServerClient>,
 	deckIds: string[],
@@ -274,6 +392,7 @@ const fetchOwnedDecks = async (
 		.from("decks")
 		.select("id, name, new_limit_per_day, daily_study_limit")
 		.eq("owner_user_id", userId)
+		.is("deleted_at", null)
 		.order("created_at", { ascending: true });
 
 	if (error) {
@@ -320,6 +439,7 @@ export async function getDeckOverview(deckId: string): Promise<DeckOverview | nu
 		.select("id, name, new_limit_per_day, daily_study_limit")
 		.eq("id", deckId)
 		.eq("owner_user_id", userId)
+		.is("deleted_at", null)
 		.maybeSingle();
 	const deck = rawDeck as DeckRow | null;
 
@@ -364,6 +484,7 @@ export async function getDeckLearningMetrics(deckId: string): Promise<DeckLearni
 		.select("id")
 		.eq("id", deckId)
 		.eq("owner_user_id", userId)
+		.is("deleted_at", null)
 		.maybeSingle();
 	const deck = rawDeck as Pick<DeckRow, "id"> | null;
 
@@ -510,6 +631,17 @@ type DeckStudyLimitUpdateTable = {
 				column: string,
 				value: string
 			) => {
+				is: (
+					column: string,
+					value: null
+				) => {
+					select: (columns: string) => {
+						maybeSingle: () => Promise<{
+							data: Pick<Database["public"]["Tables"]["decks"]["Row"], "id"> | null;
+							error: { message: string } | null;
+						}>;
+					};
+				};
 				select: (columns: string) => {
 					maybeSingle: () => Promise<{
 						data: Pick<Database["public"]["Tables"]["decks"]["Row"], "id"> | null;
@@ -549,6 +681,7 @@ export async function updateDeckStudyLimit(
 		.update({ daily_study_limit: dailyStudyLimit })
 		.eq("id", normalizedDeckId)
 		.eq("owner_user_id", authData.user.id)
+		.is("deleted_at", null)
 		.select("id")
 		.maybeSingle();
 

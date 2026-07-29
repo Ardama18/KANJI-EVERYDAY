@@ -90,7 +90,8 @@ async function fetchOwnedDecks(
 	const { data, error } = await client
 		.from("decks")
 		.select("id,daily_study_limit")
-		.eq("owner_user_id", userId);
+		.eq("owner_user_id", userId)
+		.is("deleted_at", null);
 	if (error !== null || !Array.isArray(data)) throw new Error("Failed to fetch daily study decks");
 	return data as DeckRow[];
 }

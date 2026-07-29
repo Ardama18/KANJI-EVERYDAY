@@ -122,6 +122,7 @@ export async function getAiCardManagementOptionsAction(): Promise<
 			.from("decks")
 			.select("id, name")
 			.eq("owner_user_id", boundary.userId)
+			.is("deleted_at", null)
 			.order("name", { ascending: true });
 		if (deckError) return { ok: false, error: mapAiCardManagementError(deckError) };
 		const { data: tags, error: tagError } = await boundary.supabase

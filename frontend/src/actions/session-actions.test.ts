@@ -50,8 +50,11 @@ const createOwnedDeckSelectChain = (deck: Record<string, unknown> | null) => {
 		data: deck,
 		error: null,
 	});
-	const eqOwnerMock = vi.fn().mockReturnValue({
+	const isDeletedAtMock = vi.fn().mockReturnValue({
 		maybeSingle: maybeSingleMock,
+	});
+	const eqOwnerMock = vi.fn().mockReturnValue({
+		is: isDeletedAtMock,
 	});
 	const eqIdMock = vi.fn().mockReturnValue({
 		eq: eqOwnerMock,
@@ -62,6 +65,7 @@ const createOwnedDeckSelectChain = (deck: Record<string, unknown> | null) => {
 
 	return {
 		selectMock,
+		isDeletedAtMock,
 		maybeSingleMock,
 	};
 };

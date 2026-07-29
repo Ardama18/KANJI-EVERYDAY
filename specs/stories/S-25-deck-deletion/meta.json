@@ -1,0 +1,11 @@
+{
+  "story_id": "S-25",
+  "feature": "deck-deletion",
+  "status": "implementation_review",
+  "github_issue_url": "https://github.com/Ardama18/KANJI-EVERYDAY/issues/81",
+  "github_branch": "issue/81",
+  "related_epic": "E-02",
+  "source_of_truth": "GitHub issue #81 body provided by issue-sprint orchestrator; gh issue view returned HTTP 401 in Codex sandbox",
+  "created": "2026-07-28",
+  "updated": "2026-07-28"
+}

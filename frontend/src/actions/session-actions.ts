@@ -389,6 +389,7 @@ const requireOwnedDeck = async (
 		.select("id, name, owner_user_id, new_limit_per_day, daily_study_limit")
 		.eq("id", deckId)
 		.eq("owner_user_id", userId)
+		.is("deleted_at", null)
 		.maybeSingle();
 
 	if (error) {

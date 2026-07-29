@@ -219,6 +219,7 @@ async function listOwnerDecks(client: JwtScopedSupabaseClient): Promise<unknown>
 	const { data, error } = await client
 		.from("decks")
 		.select("id,name")
+		.is("deleted_at", null)
 		.order("name", { ascending: true })
 		.order("id", { ascending: true });
 	if (error !== null || !Array.isArray(data)) return unavailable();

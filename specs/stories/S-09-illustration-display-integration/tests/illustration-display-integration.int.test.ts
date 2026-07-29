@@ -17,9 +17,9 @@
 // AC-20 -> IT-AC11-NO-EXTRA-API-AFTER-REVEAL
 // AC-18 -> IT-AC18-NEXT-CONFIG-REMOTE-PATTERNS
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const createServerClientMock = vi.hoisted(() => vi.fn());
 const redirectMock = vi.hoisted(() => vi.fn<(location: string) => never>());
@@ -90,8 +90,11 @@ const createOwnedDeckSelectChain = (deck: Record<string, unknown> | null) => {
 		data: deck,
 		error: null,
 	});
-	const eqOwnerMock = vi.fn().mockReturnValue({
+	const isDeletedAtMock = vi.fn().mockReturnValue({
 		maybeSingle: maybeSingleMock,
+	});
+	const eqOwnerMock = vi.fn().mockReturnValue({
+		is: isDeletedAtMock,
 	});
 	const eqIdMock = vi.fn().mockReturnValue({
 		eq: eqOwnerMock,

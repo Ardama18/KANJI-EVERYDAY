@@ -54,10 +54,11 @@ function dailyClient(
 	}>
 ) {
 	const tableCalls: string[] = [];
-	const deckEq = vi.fn(async (_column: string, _value: string) => ({
+	const deckDeletedAtIs = vi.fn(async (_column: string, _value: null) => ({
 		data: fixture.decks ?? [],
 		error: fixture.deckError ?? null,
 	}));
+	const deckEq = vi.fn((_column: string, _value: string) => ({ is: deckDeletedAtIs }));
 	const deckCardsIn = vi.fn(async (_column: string, _values: readonly string[]) => ({
 		data: fixture.deckCards ?? [],
 		error: fixture.deckCardsError ?? null,
@@ -85,6 +86,7 @@ function dailyClient(
 		client: { from } as never,
 		tableCalls,
 		deckEq,
+		deckDeletedAtIs,
 		deckCardsIn,
 		reviewStatesEq,
 		reviewStatesIn,
