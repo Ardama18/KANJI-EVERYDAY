@@ -4,6 +4,7 @@ import {
 	DECK_LABEL_REVIEW,
 	DECK_LABEL_STUDIED_TODAY,
 	resolveDeckStudyStatus,
+	summarizePlannedStudy,
 } from "@/lib/deck/study-status";
 import Link from "next/link";
 
@@ -49,6 +50,12 @@ const StudiedTodayPill = ({ value }: { value: number }) => (
 );
 
 export function DeckCard({ deck, today }: DeckCardProps) {
+	const plannedStudy = summarizePlannedStudy({
+		counts: deck.counts,
+		studiedToday: deck.studiedToday,
+		dailyStudyLimit: deck.dailyStudyLimit,
+		newLimitPerDay: deck.newLimitPerDay,
+	});
 	const status = resolveDeckStudyStatus({
 		totalCards: deck.totalCards,
 		todayCount: deck.counts.new + deck.counts.learn + deck.counts.due,
@@ -57,7 +64,6 @@ export function DeckCard({ deck, today }: DeckCardProps) {
 		nextDueDate: deck.nextDueDate,
 		today,
 	});
-	const reviewCount = deck.counts.learn + deck.counts.due;
 
 	return (
 		<article className="flex min-h-[88px] flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
@@ -75,9 +81,19 @@ export function DeckCard({ deck, today }: DeckCardProps) {
 				</span>
 				<span className="mt-3 flex flex-wrap items-center gap-2 sm:justify-start">
 					{status.kind === "todo" ? (
-						<span className="flex flex-wrap items-center gap-1.5">
-							<CountBadge label={DECK_LABEL_NEW} value={deck.counts.new} kind="new" />
-							<CountBadge label={DECK_LABEL_REVIEW} value={reviewCount} kind="review" />
+						<span className="flex min-w-0 flex-col gap-1.5">
+							<span className="text-sm font-medium text-slate-700">
+								今日の出題予定 {plannedStudy.total}枚
+							</span>
+							<span className="flex flex-wrap items-center gap-1.5">
+								<CountBadge label={DECK_LABEL_NEW} value={plannedStudy.new} kind="new" />
+								<CountBadge label={DECK_LABEL_REVIEW} value={plannedStudy.review} kind="review" />
+							</span>
+							{plannedStudy.newLimitReached ? (
+								<span className="text-xs text-slate-500">
+									新規カードは1日{deck.newLimitPerDay}枚までです
+								</span>
+							) : null}
 						</span>
 					) : (
 						<span className="flex flex-col">

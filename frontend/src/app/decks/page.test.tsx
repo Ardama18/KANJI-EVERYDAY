@@ -67,6 +67,7 @@ describe("frontend/app/(auth)/decks/page.tsx", () => {
 				totalCards: 18,
 				learnedCards: 8,
 				scheduledCards: 2,
+				newLimitPerDay: 10,
 				dailyStudyLimit: 20,
 				studiedToday: 3,
 				nextDueDate: "2999-01-01",
@@ -81,6 +82,7 @@ describe("frontend/app/(auth)/decks/page.tsx", () => {
 				totalCards: 6,
 				learnedCards: 6,
 				scheduledCards: 6,
+				newLimitPerDay: 10,
 				dailyStudyLimit: 20,
 				studiedToday: 4,
 				nextDueDate: "2026-02-25",
@@ -97,7 +99,8 @@ describe("frontend/app/(auth)/decks/page.tsx", () => {
 		expect(html).toContain("あたらしい");
 		expect(html).toContain("ふくしゅう");
 		expect(html).toContain("きょうやった");
-		expect(readBadgeValue(html, "あたらしい")).toBe("10");
+		expect(html).toContain("今日の出題予定 17枚");
+		expect(readBadgeValue(html, "あたらしい")).toBe("9");
 		// ふくしゅう は learn + due の合算値
 		expect(readBadgeValue(html, "ふくしゅう")).toBe("8");
 		expect(html).toContain("3枚");

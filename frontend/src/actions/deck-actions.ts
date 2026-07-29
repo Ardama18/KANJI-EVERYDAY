@@ -108,6 +108,7 @@ export interface DeckWithCounts {
 	totalCards: number;
 	learnedCards: number;
 	scheduledCards: number;
+	newLimitPerDay: number;
 	dailyStudyLimit: number;
 	studiedToday: number;
 	nextDueDate: string | null;
@@ -424,6 +425,7 @@ export async function getDecksWithCounts(): Promise<DeckWithCounts[]> {
 			name: deck.name,
 			counts: countByCategory(cards, today),
 			...summarizeDeckStudyState(cards, today),
+			newLimitPerDay: deck.new_limit_per_day,
 			dailyStudyLimit: deck.daily_study_limit,
 			studiedToday: countCardsReviewedOnJstDate(cards, today),
 			nextDueDate: findNextDueDate(cards, today),
