@@ -7,11 +7,17 @@ const S25_MIGRATION_PATH = resolve(
 	process.cwd(),
 	"../supabase/migrations/20260728000000_s25_deck_delete.sql"
 );
+const S25_SELECT_POLICY_FIX_MIGRATION_PATH = resolve(
+	process.cwd(),
+	"../supabase/migrations/20260729000000_s25_deck_delete_select_policy_fix.sql"
+);
 const S02_MIGRATION_PATH = resolve(
 	process.cwd(),
 	"../supabase/migrations/20260223000000_s02_schema_rls.sql"
 );
 const DATABASE_TYPES_PATH = resolve(process.cwd(), "src/types/database.ts");
+const DECK_ACTIONS_PATH = resolve(process.cwd(), "src/actions/deck-actions.ts");
+const SESSION_ACTIONS_PATH = resolve(process.cwd(), "src/actions/session-actions.ts");
 
 const normalizeSql = (sql: string): string => sql.replace(/\s+/g, " ").toLowerCase();
 
@@ -37,6 +43,19 @@ describe("S-25 deck logical delete migration contract", () => {
 		expect(sql).toContain("using ((select auth.uid()) = owner_user_id and deleted_at is null)");
 		expect(sql).toContain("with check ((select auth.uid()) = owner_user_id)");
 		expect(sql).toContain("grant update (deleted_at) on table public.decks to authenticated");
+	});
+
+	it("keeps owner SELECT broad enough for tombstone UPDATE while app reads filter active decks", () => {
+		const fixSql = normalizeSql(readFileSync(S25_SELECT_POLICY_FIX_MIGRATION_PATH, "utf8"));
+		const deckActionsSource = readFileSync(DECK_ACTIONS_PATH, "utf8");
+		const sessionActionsSource = readFileSync(SESSION_ACTIONS_PATH, "utf8");
+
+		expect(fixSql).toContain("drop policy if exists decks_select_owner on public.decks");
+		expect(fixSql).toContain("create policy decks_select_owner on public.decks for select");
+		expect(fixSql).toContain("using ((select auth.uid()) = owner_user_id)");
+		expect(fixSql).not.toContain("using ((select auth.uid()) = owner_user_id and deleted_at is null)");
+		expect(deckActionsSource).toContain('.is("deleted_at", null)');
+		expect(sessionActionsSource).toContain('.is("deleted_at", null)');
 	});
 
 	it("guards logical deletion while an unfinished study session exists", () => {
