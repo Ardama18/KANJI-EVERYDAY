@@ -39,7 +39,7 @@ MCP_OAUTH_ISSUER=https://<project-ref>.supabase.co/auth/v1
 MCP_ALLOWED_ORIGIN=https://chatgpt.com
 ```
 
-`MCP_PUBLIC_ORIGIN` は末尾に path を含めない。canonical resource は常に `<MCP_PUBLIC_ORIGIN>/api/mcp` である。
+`MCP_ALLOWED_ORIGIN` は ChatGPT 単独なら上記の値にする。TimeCoin や Claude など複数 client origin を同時に許可する場合は、`https://chatgpt.com,https://timecoin-cloud.vercel.app,https://claude.ai` のようにカンマ区切りで設定する。`MCP_PUBLIC_ORIGIN` は末尾に path を含めない。canonical resource は常に `<MCP_PUBLIC_ORIGIN>/api/mcp` である。
 
 ## 3. 接続成功の判定
 
@@ -134,7 +134,7 @@ ChatGPT と MCP SDK の実リクエストを受けられるよう、現在の実
 
 Accept は `application/json`、`text/event-stream`、`*/*` を許可する。notification の HTTP 202 と request の HTTP 200 を区別する。
 
-同時に Host と Origin は厳格に検証する。CORS はブラウザから許可する送信元を制限する仕組みであり、`MCP_ALLOWED_ORIGIN` 以外からの Origin は拒否する。
+同時に Host と Origin は厳格に検証する。CORS はブラウザから許可する送信元を制限する仕組みであり、`MCP_ALLOWED_ORIGIN` に含まれない Origin は拒否する。
 
 ### 5.8 Hosted Supabase と local Supabase の役割は別
 
@@ -185,7 +185,7 @@ request内容が同じなら import request hash が同じになること自体�
 
 - ChatGPT の URL と `MCP_PUBLIC_ORIGIN` が同じ origin を指している。
 - `MCP_OAUTH_ISSUER` が同じ Hosted Supabase project を指している。
-- `MCP_ALLOWED_ORIGIN=https://chatgpt.com` である。
+- `MCP_ALLOWED_ORIGIN` が接続元 client origin を含む。ChatGPT 単独なら `https://chatgpt.com`、複数 client 併用ならカンマ区切りで指定する。
 - `MCP_ENABLED=true` である。
 - Vercel の `AI_PREVIEW_HMAC_SECRET` と Supabase の remote MCP runtime config が同じ値である。
 

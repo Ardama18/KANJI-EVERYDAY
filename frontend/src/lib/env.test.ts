@@ -55,8 +55,19 @@ describe("S-14 MCP server config", () => {
 		expect(getMcpEnvConfig()).toMatchObject({
 			publicOrigin: "https://cards.example.test",
 			oauthIssuer: "https://project.supabase.co/auth/v1",
-			allowedOrigin: "https://chat.example.test",
+			allowedOrigins: ["https://chat.example.test"],
 		});
+	});
+
+	it("accepts comma-separated strict HTTPS allowed origins", () => {
+		setValidMcpEnv();
+		process.env.MCP_ALLOWED_ORIGIN =
+			"https://chatgpt.com, https://timecoin-cloud.vercel.app,https://claude.ai";
+		expect(getMcpEnvConfig().allowedOrigins).toEqual([
+			"https://chatgpt.com",
+			"https://timecoin-cloud.vercel.app",
+			"https://claude.ai",
+		]);
 	});
 
 	it("rejects missing, non-HTTPS, credentialed, path-bearing, or malformed values", () => {
@@ -67,6 +78,9 @@ describe("S-14 MCP server config", () => {
 			["MCP_PUBLIC_ORIGIN", "https://user@cards.example.test"],
 			["MCP_PUBLIC_ORIGIN", "https://cards.example.test/path"],
 			["MCP_ALLOWED_ORIGIN", "not a url"],
+			["MCP_ALLOWED_ORIGIN", "https://chat.example.test,https://chat.example.test"],
+			["MCP_ALLOWED_ORIGIN", "https://chat.example.test,"],
+			["MCP_ALLOWED_ORIGIN", "https://chat.example.test,https://claude.ai/path"],
 			["MCP_OAUTH_ISSUER", "https://project.supabase.co"],
 			["MCP_OAUTH_ISSUER", "https://project.supabase.co/auth/v1?x=1"],
 		] as const) {

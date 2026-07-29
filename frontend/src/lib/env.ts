@@ -33,7 +33,7 @@ export interface McpEnvConfig {
 	readonly enabled: boolean;
 	readonly publicOrigin: string;
 	readonly oauthIssuer: string;
-	readonly allowedOrigin: string;
+	readonly allowedOrigins: readonly string[];
 }
 
 export interface McpAutoMnemonicConfig {
@@ -76,7 +76,7 @@ export function getMcpEnvConfig(): McpEnvConfig {
 		enabled: isMcpEnabled(),
 		publicOrigin: parseMcpOrigin("MCP_PUBLIC_ORIGIN", process.env.MCP_PUBLIC_ORIGIN),
 		oauthIssuer: parseMcpIssuer(process.env.MCP_OAUTH_ISSUER),
-		allowedOrigin: parseMcpOrigin("MCP_ALLOWED_ORIGIN", process.env.MCP_ALLOWED_ORIGIN),
+		allowedOrigins: parseMcpOrigins("MCP_ALLOWED_ORIGIN", process.env.MCP_ALLOWED_ORIGIN),
 	};
 }
 
@@ -194,6 +194,16 @@ function parseMcpOrigin(key: string, value: string | undefined): string {
 		throw new Error(`Invalid ${key}`);
 	}
 	return parsed.origin;
+}
+
+function parseMcpOrigins(key: string, value: string | undefined): readonly string[] {
+	const trimmed = value?.trim();
+	if (trimmed === undefined || trimmed.length === 0) throw new Error(`Missing ${key}`);
+	const origins = trimmed.split(",").map((origin) => parseMcpOrigin(key, origin));
+	if (origins.length === 0 || new Set(origins).size !== origins.length) {
+		throw new Error(`Invalid ${key}`);
+	}
+	return Object.freeze(origins);
 }
 
 function parseMcpIssuer(value: string | undefined): string {

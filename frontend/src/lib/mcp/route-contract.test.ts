@@ -61,7 +61,7 @@ function createDependencies(overrides: Partial<McpRouteDependencies> = {}) {
 			enabled: true,
 			publicOrigin: "https://cards.example.test",
 			oauthIssuer: "https://project.supabase.co/auth/v1",
-			allowedOrigin: "https://chat.example.test",
+			allowedOrigins: ["https://chat.example.test"],
 		}),
 		authenticate: vi.fn(async () => actor),
 		createClient: vi.fn(() => client as never),
@@ -93,6 +93,32 @@ describe("S-14 MCP route boundary", () => {
 		expect(wrongHost.status).toBe(403);
 		expect(wrongOrigin.status).toBe(403);
 		expect(dependencies.authenticate).not.toHaveBeenCalled();
+	});
+
+	it("accepts any configured browser Origin and echoes it for CORS preflight", async () => {
+		const { dependencies } = createDependencies({
+			getEnv: () => ({
+				enabled: true,
+				publicOrigin: "https://cards.example.test",
+				oauthIssuer: "https://project.supabase.co/auth/v1",
+				allowedOrigins: [
+					"https://chatgpt.com",
+					"https://timecoin-cloud.vercel.app",
+					"https://claude.ai",
+				],
+			}),
+		});
+		const post = await handleMcpRoute(
+			request("POST", undefined, { origin: "https://timecoin-cloud.vercel.app" }),
+			dependencies
+		);
+		const options = await handleMcpRoute(
+			request("OPTIONS", undefined, { origin: "https://claude.ai" }),
+			dependencies
+		);
+		expect(post.status).toBe(200);
+		expect(options.status).toBe(204);
+		expect(options.headers.get("Access-Control-Allow-Origin")).toBe("https://claude.ai");
 	});
 
 	it("rejects bad content negotiation and payloads before authentication", async () => {

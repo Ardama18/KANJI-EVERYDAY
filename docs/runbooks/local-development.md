@@ -53,7 +53,7 @@ MCPを有効にする場合は、次のURL設定も必要である。
 |---|---|---|
 | `MCP_PUBLIC_ORIGIN` | MCPサーバー自身の公開origin | HTTPS origin。path、query、hash、userinfo不可 |
 | `MCP_OAUTH_ISSUER` | Supabase OAuth issuer | HTTPS URLでpathは `/auth/v1` |
-| `MCP_ALLOWED_ORIGIN` | 許可するMCP client origin | HTTPS origin。path、query、hash、userinfo不可 |
+| `MCP_ALLOWED_ORIGIN` | 許可するMCP client origin | HTTPS origin。複数の場合はカンマ区切り。path、query、hash、userinfo不可 |
 
 MCPを使わない通常のローカル起動では、`MCP_ENABLED=false` のままにし、URL設定は空値でよい。
 

@@ -99,9 +99,10 @@ export async function handleMcpRoute(
 	}
 	if (!env.enabled) return unavailableResponse();
 
-	const requestBoundary = validateHttpBoundary(request, env.publicOrigin, env.allowedOrigin);
+	const requestBoundary = validateHttpBoundary(request, env.publicOrigin, env.allowedOrigins);
 	if (requestBoundary !== undefined) return requestBoundary;
-	if (request.method === "OPTIONS") return optionsResponse(env.allowedOrigin);
+	if (request.method === "OPTIONS")
+		return optionsResponse(resolveCorsOrigin(request, env.allowedOrigins));
 	if (request.method !== "POST") return methodNotAllowedResponse();
 
 	const parsedBody = await inspectMcpPayload(request);
@@ -128,12 +129,12 @@ export async function handleMcpRoute(
 function validateHttpBoundary(
 	request: Request,
 	publicOrigin: string,
-	allowedOrigin: string
+	allowedOrigins: readonly string[]
 ): Response | undefined {
 	const host = request.headers.get("host");
 	if (host === null || host !== new URL(publicOrigin).host) return forbiddenResponse();
 	const origin = request.headers.get("origin");
-	if (origin !== null && origin !== allowedOrigin) return forbiddenResponse();
+	if (origin !== null && !allowedOrigins.includes(origin)) return forbiddenResponse();
 	if (request.method === "POST") {
 		if (!isJsonContentType(request.headers.get("content-type")))
 			return unsupportedMediaTypeResponse({
@@ -148,6 +149,11 @@ function validateHttpBoundary(
 		}
 	}
 	return undefined;
+}
+
+function resolveCorsOrigin(request: Request, allowedOrigins: readonly string[]): string {
+	const origin = request.headers.get("origin");
+	return origin !== null && allowedOrigins.includes(origin) ? origin : (allowedOrigins[0] ?? "");
 }
 
 async function inspectMcpPayload(request: Request): Promise<unknown | Response> {
