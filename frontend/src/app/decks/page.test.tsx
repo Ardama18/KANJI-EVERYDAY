@@ -2,9 +2,16 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getDecksWithCountsMock = vi.hoisted(() => vi.fn());
+const deleteDeckMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/actions/deck-actions", () => ({
+	deleteDeck: deleteDeckMock,
 	getDecksWithCounts: getDecksWithCountsMock,
+}));
+
+vi.mock("react-dom", () => ({
+	useFormState: (_action: unknown, initialState: unknown) => [initialState, "/mock-delete-deck"],
+	useFormStatus: () => ({ pending: false }),
 }));
 
 vi.mock("@/components/deck/CreateDeckForm", () => ({
@@ -85,6 +92,8 @@ describe("frontend/app/(auth)/decks/page.tsx", () => {
 		expect(html).toContain("小学3年生の漢字");
 		expect(html).toContain('aria-label="新しいデッキ作成"');
 		expect(html).toContain('href="/decks/deck-1"');
+		expect(html).toContain('aria-label="「小学3年生の漢字」を削除"');
+		expect(html).toContain('name="deckId"');
 		expect(html).toContain("あたらしい");
 		expect(html).toContain("ふくしゅう");
 		expect(html).toContain("きょうやった");

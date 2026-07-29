@@ -6,7 +6,12 @@ import {
 	DECK_STUDY_NO_NEXT_DUE_MESSAGE,
 } from "@/lib/deck/study-status";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("react-dom", () => ({
+	useFormState: (_action: unknown, initialState: unknown) => [initialState, "/mock-delete-deck"],
+	useFormStatus: () => ({ pending: false }),
+}));
 
 import { DeckCard } from "./DeckCard";
 
@@ -38,7 +43,12 @@ describe("frontend/src/components/deck/DeckCard.tsx", () => {
 	it("UT-S19-DECKCARD-TODO: 今日やることがあるとき あたらしい/ふくしゅう と きょうやった を表示する", () => {
 		const html = renderToStaticMarkup(<DeckCard deck={createDeck()} today={TODAY} />);
 
+		expect(html).toContain("<article");
 		expect(html).toContain('href="/decks/deck-1"');
+		expect(html).toContain('name="deckId"');
+		expect(html).toContain('value="deck-1"');
+		expect(html).toContain('aria-label="「小学3年生の漢字」を削除"');
+		expect(html).toContain("削除");
 		expect(html).toContain("小学3年生の漢字");
 		expect(html).toContain("あたらしい");
 		expect(html).toContain("ふくしゅう");
@@ -50,6 +60,16 @@ describe("frontend/src/components/deck/DeckCard.tsx", () => {
 		expect(html).toContain("カード 18枚");
 		expect(html).toContain("学習した 8枚");
 		expect(html).not.toContain(DECK_STUDY_DONE_MESSAGE);
+	});
+
+	it("UT-S25-DECKCARD-NO-NESTED-INTERACTIVE: 詳細linkと削除formを sibling として描画する", () => {
+		const html = renderToStaticMarkup(<DeckCard deck={createDeck()} today={TODAY} />);
+		const anchorHtml = html.match(/<a[\s\S]*?<\/a>/)?.[0] ?? "";
+		const formHtml = html.match(/<form[\s\S]*?<\/form>/)?.[0] ?? "";
+
+		expect(html).toMatch(/<\/a><div class="sm:ml-4"><form/);
+		expect(anchorHtml).not.toContain("<form");
+		expect(formHtml).not.toContain("<a");
 	});
 
 	it("UT-S19-DECKCARD-NO-ENGLISH-LABEL: 英語ラベルと将来予定枚数を表示しない", () => {

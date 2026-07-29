@@ -95,6 +95,12 @@ describe("S-13 management Server Action boundary", () => {
 		const from = vi.fn((table: string) => ({
 			select: vi.fn(() => ({
 				eq: vi.fn(() => ({
+					is: vi.fn(() => ({
+						order: vi.fn(async () => ({
+							data: [{ id: "deck-1", name: "一年生" }],
+							error: null,
+						})),
+					})),
 					order: vi.fn(async () => ({
 						data:
 							table === "decks"

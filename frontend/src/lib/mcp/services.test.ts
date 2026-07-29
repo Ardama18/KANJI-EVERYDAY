@@ -36,10 +36,11 @@ function dependencies(
 describe("frontend/src/lib/mcp/services.ts", () => {
 	it("UT-S22-MCP-DAILY-STATUS-OWNER: get_daily_study_status reads actor-owned decks only", async () => {
 		const tableCalls: string[] = [];
-		const deckEq = vi.fn(async () => ({
+		const deckDeletedAtIs = vi.fn(async () => ({
 			data: [{ id: DAILY_DECK_ID, daily_study_limit: 5 }],
 			error: null,
 		}));
+		const deckEq = vi.fn(() => ({ is: deckDeletedAtIs }));
 		const deckCardsIn = vi.fn(async () => ({ data: [], error: null }));
 		const client = {
 			from: vi.fn((table: string) => {
@@ -59,6 +60,7 @@ describe("frontend/src/lib/mcp/services.ts", () => {
 			completed: false,
 		});
 		expect(deckEq).toHaveBeenCalledWith("owner_user_id", actor.userId);
+		expect(deckDeletedAtIs).toHaveBeenCalledWith("deleted_at", null);
 		expect(deckCardsIn).toHaveBeenCalledWith("deck_id", [DAILY_DECK_ID]);
 		expect(tableCalls).toEqual(["decks", "deck_cards"]);
 	});

@@ -52,6 +52,7 @@ export async function POST(request: Request): Promise<Response> {
 			.select("id")
 			.eq("id", checked.data.deckId)
 			.eq("owner_user_id", authData.user.id)
+			.is("deleted_at", null)
 			.maybeSingle();
 		if (deckError !== null || deck === null) return safeError("DECK_NOT_FOUND", 404);
 		const sources = await loadGenerationSources(service, authData.user.id, releaseIds);
