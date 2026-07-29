@@ -36,6 +36,12 @@ export interface McpEnvConfig {
 	readonly allowedOrigins: readonly string[];
 }
 
+export interface TimeCoinApiEnvConfig {
+	readonly enabled: boolean;
+	readonly allowedOrigin: string;
+	readonly oauthIssuer: string;
+}
+
 export interface McpAutoMnemonicConfig {
 	readonly maxConcepts: number;
 	readonly budgetMs: number;
@@ -80,8 +86,26 @@ export function getMcpEnvConfig(): McpEnvConfig {
 	};
 }
 
+export function getTimeCoinApiEnvConfig(): TimeCoinApiEnvConfig {
+	return {
+		enabled: isTimeCoinApiEnabled(),
+		allowedOrigin: parseStrictHttpsOrigin(
+			"TIMECOIN_API_ALLOWED_ORIGIN",
+			process.env.TIMECOIN_API_ALLOWED_ORIGIN
+		),
+		oauthIssuer: parseStrictSupabaseAuthIssuer(
+			"TIMECOIN_API_OAUTH_ISSUER",
+			process.env.TIMECOIN_API_OAUTH_ISSUER
+		),
+	};
+}
+
 export function isMcpEnabled(): boolean {
 	return process.env.MCP_ENABLED?.trim() === "true";
+}
+
+export function isTimeCoinApiEnabled(): boolean {
+	return process.env.TIMECOIN_API_ENABLED === "true";
 }
 
 export function isAiCardImportEnabled(): boolean {
@@ -189,7 +213,7 @@ function isOpenAiImageDetail(value: string): value is OpenAiImageDetail {
 }
 
 function parseMcpOrigin(key: string, value: string | undefined): string {
-	const parsed = parseMcpUrl(key, value);
+	const parsed = parseStrictHttpsUrl(key, value);
 	if (parsed.pathname !== "/" || parsed.search.length > 0 || parsed.hash.length > 0) {
 		throw new Error(`Invalid ${key}`);
 	}
@@ -207,14 +231,30 @@ function parseMcpOrigins(key: string, value: string | undefined): readonly strin
 }
 
 function parseMcpIssuer(value: string | undefined): string {
-	const parsed = parseMcpUrl("MCP_OAUTH_ISSUER", value);
+	const parsed = parseStrictHttpsUrl("MCP_OAUTH_ISSUER", value);
 	if (parsed.pathname !== "/auth/v1" || parsed.search.length > 0 || parsed.hash.length > 0) {
 		throw new Error("Invalid MCP_OAUTH_ISSUER");
 	}
 	return parsed.href;
 }
 
-function parseMcpUrl(key: string, value: string | undefined): URL {
+function parseStrictHttpsOrigin(key: string, value: string | undefined): string {
+	const parsed = parseStrictHttpsUrl(key, value);
+	if (parsed.pathname !== "/" || parsed.search.length > 0 || parsed.hash.length > 0) {
+		throw new Error(`Invalid ${key}`);
+	}
+	return parsed.origin;
+}
+
+function parseStrictSupabaseAuthIssuer(key: string, value: string | undefined): string {
+	const parsed = parseStrictHttpsUrl(key, value);
+	if (parsed.pathname !== "/auth/v1" || parsed.search.length > 0 || parsed.hash.length > 0) {
+		throw new Error(`Invalid ${key}`);
+	}
+	return parsed.href;
+}
+
+function parseStrictHttpsUrl(key: string, value: string | undefined): URL {
 	const trimmed = value?.trim();
 	if (trimmed === undefined || trimmed.length === 0) throw new Error(`Missing ${key}`);
 	let parsed: URL;

@@ -1,0 +1,10 @@
+{
+  "story_id": "S-27",
+  "feature": "timecoin-rest-daily-study-status",
+  "status": "implementation_review",
+  "github_issue_url": "https://github.com/Ardama18/KANJI-EVERYDAY/issues/88",
+  "github_branch": "issue/88",
+  "source_of_truth": "GitHub issue #88 user-provided body; issue comments fetched via GitHub Connector",
+  "created": "2026-07-30",
+  "updated": "2026-07-30"
+}
