@@ -32,7 +32,7 @@ describe("S-25 deck logical delete migration contract", () => {
 		expect(sql).not.toContain("create policy decks_delete_owner");
 		expect(sql).not.toContain("grant delete on table public.decks to authenticated");
 		expect(sql).not.toMatch(/\bdelete\s+from\s+public\.decks\b/);
-		expect(sql).toContain("drop policy decks_update_owner on public.decks");
+		expect(sql).toContain("drop policy if exists decks_update_owner on public.decks");
 		expect(sql).toContain("for update");
 		expect(sql).toContain("using ((select auth.uid()) = owner_user_id and deleted_at is null)");
 		expect(sql).toContain("with check ((select auth.uid()) = owner_user_id)");
@@ -66,9 +66,15 @@ describe("S-25 deck logical delete migration contract", () => {
 		const baseSql = normalizeSql(readFileSync(S02_MIGRATION_PATH, "utf8"));
 		const s25Sql = normalizeSql(readFileSync(S25_MIGRATION_PATH, "utf8"));
 
-		expect(s25Sql).toContain("drop policy deck_cards_select_owner_deck on public.deck_cards");
-		expect(s25Sql).toContain("drop policy deck_cards_insert_owner_deck on public.deck_cards");
-		expect(s25Sql).toContain("drop policy deck_cards_update_owner_deck on public.deck_cards");
+		expect(s25Sql).toContain(
+			"drop policy if exists deck_cards_select_owner_deck on public.deck_cards"
+		);
+		expect(s25Sql).toContain(
+			"drop policy if exists deck_cards_insert_owner_deck on public.deck_cards"
+		);
+		expect(s25Sql).toContain(
+			"drop policy if exists deck_cards_update_owner_deck on public.deck_cards"
+		);
 		expect(s25Sql).toContain("decks.deleted_at is null");
 		expect(baseSql).toContain(
 			"deck_id uuid not null references public.decks (id) on delete cascade"
