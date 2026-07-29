@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.6.1.0] - 2026-07-29
+
+### Changed
+
+- Changed the deck list and deck detail study counters to show the actual planned study count instead of raw eligible card totals.
+- Clarified the difference between the daily total study limit and the separate new-card limit, including a note when new cards are capped.
+- Added S-26 story artifacts for the study limit display clarification.
+
+### Verification
+
+- Passed focused S-26 Vitest coverage: 5 files, 79 tests.
+- Passed `npm --prefix frontend run lint`, `npm --prefix frontend run typecheck`, dummy public Supabase env build, and `git diff --check`.
+- Confirmed full `npm --prefix frontend run check` reaches lint/typecheck, then blocks only on existing real-database suites requiring `S10_TEST_DATABASE_URL`.
+
 ## [0.6.0.1] - 2026-07-27
 
 ### Changed
