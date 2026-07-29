@@ -170,11 +170,13 @@ describe("frontend/app/(auth)/decks/[deckId]/page.tsx", () => {
 
 		expect(html).toContain("小学3年生の漢字");
 		expect(html).toContain("今日の学習");
-		expect(html).toContain("今日やること 11枚 / 今日やれる残り 16枚");
+		expect(html).toContain("今日の出題予定 11枚");
+		expect(html).toContain("内訳: あたらしい4枚 / ふくしゅう7枚");
+		expect(html).toContain("今日やれる残り 16枚 / 新規は最大20枚");
 		expect(html).toContain(LEARNING_METRICS_HEADING);
 		expect(html).toContain("学習した日 2日 / 7日");
 		expect(html).toContain(WHOLE_STUDY_HEADING);
-		expect(html).toContain("一日最大 25枚 / きょうやった 9枚");
+		expect(html).toContain("一日最大 25枚 / 新規は最大 20枚");
 		expect(html).toContain('data-testid="study-limit-form"');
 		expect(html).toContain(DECK_OVERVIEW_START_LABEL);
 		expect(html).toContain('href="/decks/deck-1/study"');
@@ -205,6 +207,59 @@ describe("frontend/app/(auth)/decks/[deckId]/page.tsx", () => {
 		expect(readStatCardValue(html, "ふくしゅう")).toBe("7");
 		// きょうやった は overview.studiedToday（FR-02）
 		expect(readStatCardValue(html, "きょうやった")).toBe("9");
+	});
+
+	it("新規20枚だけなら今日の出題予定10枚と新規上限補足を表示する", async () => {
+		getDeckOverviewMock.mockResolvedValue({
+			...todoOverview,
+			newLimitPerDay: 10,
+			dailyStudyLimit: 20,
+			studiedToday: 0,
+			remainingToday: 20,
+			totalCards: 20,
+			learnedCards: 0,
+			counts: {
+				new: 20,
+				learn: 0,
+				due: 0,
+				total: 20,
+			},
+		});
+
+		const html = renderToStaticMarkup(await DeckOverviewPage({ params: { deckId: "deck-1" } }));
+
+		expect(html).toContain("今日の出題予定 10枚");
+		expect(html).toContain("内訳: あたらしい10枚 / ふくしゅう0枚");
+		expect(html).toContain("今日やれる残り 20枚 / 新規は最大10枚");
+		expect(html).toContain("新規カードは1日10枚までです");
+		expect(readStatCardValue(html, "あたらしい")).toBe("10");
+		expect(readStatCardValue(html, "ふくしゅう")).toBe("0");
+	});
+
+	it("新規20枚・復習5枚なら今日の出題予定15枚を表示する", async () => {
+		getDeckOverviewMock.mockResolvedValue({
+			...todoOverview,
+			newLimitPerDay: 10,
+			dailyStudyLimit: 20,
+			studiedToday: 0,
+			remainingToday: 20,
+			totalCards: 25,
+			learnedCards: 5,
+			counts: {
+				new: 20,
+				learn: 2,
+				due: 3,
+				total: 25,
+			},
+		});
+
+		const html = renderToStaticMarkup(await DeckOverviewPage({ params: { deckId: "deck-1" } }));
+
+		expect(html).toContain("今日の出題予定 15枚");
+		expect(html).toContain("内訳: あたらしい10枚 / ふくしゅう5枚");
+		expect(html).toContain("新規カードは1日10枚までです");
+		expect(readStatCardValue(html, "あたらしい")).toBe("10");
+		expect(readStatCardValue(html, "ふくしゅう")).toBe("5");
 	});
 
 	it("これまでの記録 StatCard が各指標の値を表示する", async () => {

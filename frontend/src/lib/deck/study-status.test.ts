@@ -8,6 +8,7 @@ import {
 	type DeckStudyStatusInput,
 	formatNextDueLabel,
 	resolveDeckStudyStatus,
+	summarizePlannedStudy,
 } from "./study-status";
 
 const TODAY = "2026-02-24";
@@ -176,5 +177,95 @@ describe("resolveDeckStudyStatus", () => {
 		expect(status.remainingToday).toBe(0);
 		// 残り枠0でも todayCount が0なら limit-reached ではなく done（D-5 の判定順序）。
 		expect(status.kind).toBe("done");
+	});
+});
+
+describe("summarizePlannedStudy", () => {
+	it("UT-S26-PLAN-NEW-LIMIT: 新規20枚だけなら新規上限10枚を予定にする", () => {
+		expect(
+			summarizePlannedStudy({
+				counts: { new: 20, learn: 0, due: 0 },
+				studiedToday: 0,
+				dailyStudyLimit: 20,
+				newLimitPerDay: 10,
+			})
+		).toMatchObject({
+			new: 10,
+			review: 0,
+			total: 10,
+			newLimitReached: true,
+		});
+	});
+
+	it("UT-S26-PLAN-NEW-AND-REVIEW: 新規20枚と復習5枚なら合計15枚を予定にする", () => {
+		expect(
+			summarizePlannedStudy({
+				counts: { new: 20, learn: 2, due: 3 },
+				studiedToday: 0,
+				dailyStudyLimit: 20,
+				newLimitPerDay: 10,
+			})
+		).toMatchObject({
+			due: 3,
+			learn: 2,
+			new: 10,
+			review: 5,
+			total: 15,
+			newLimitReached: true,
+		});
+	});
+
+	it("UT-S26-PLAN-DAILY-LIMIT: Due と Learn を優先し、New は総上限の残枠までにする", () => {
+		expect(
+			summarizePlannedStudy({
+				counts: { new: 20, learn: 4, due: 6 },
+				studiedToday: 0,
+				dailyStudyLimit: 20,
+				newLimitPerDay: 10,
+			})
+		).toMatchObject({
+			due: 6,
+			learn: 4,
+			review: 10,
+			new: 10,
+			total: 20,
+			newLimitReached: true,
+		});
+	});
+
+	it("UT-S26-PLAN-REMAINING-TODAY: 今日すでに学習済みなら残り枠だけ予定にする", () => {
+		expect(
+			summarizePlannedStudy({
+				counts: { new: 20, learn: 5, due: 10 },
+				studiedToday: 15,
+				dailyStudyLimit: 20,
+				newLimitPerDay: 10,
+			})
+		).toMatchObject({
+			due: 5,
+			learn: 0,
+			new: 0,
+			review: 5,
+			total: 5,
+			newLimitReached: false,
+		});
+	});
+
+	it("UT-S26-PLAN-NORMALIZE: 小数、負数、NaN を buildSessionQueue と同じ方針で正規化する", () => {
+		expect(
+			summarizePlannedStudy({
+				counts: { new: 3.9, learn: Number.NaN, due: -1 },
+				studiedToday: -2,
+				dailyStudyLimit: 2.9,
+				newLimitPerDay: 1.9,
+			})
+		).toMatchObject({
+			due: 0,
+			learn: 0,
+			new: 1,
+			review: 0,
+			total: 1,
+			newLimitReached: true,
+		});
 	});
 });

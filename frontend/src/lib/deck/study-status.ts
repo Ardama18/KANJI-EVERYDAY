@@ -42,6 +42,27 @@ export interface DeckStudyStatus {
 	nextDueMessage: string | null;
 }
 
+export interface PlannedStudyInput {
+	counts: Readonly<{
+		new: number;
+		learn: number;
+		due: number;
+	}>;
+	studiedToday: number;
+	dailyStudyLimit: number;
+	newLimitPerDay: number;
+}
+
+export interface PlannedStudySummary {
+	new: number;
+	review: number;
+	due: number;
+	learn: number;
+	total: number;
+	remainingToday: number;
+	newLimitReached: boolean;
+}
+
 export function formatNextDueLabel(nextDueDate: string, today: string): string {
 	return nextDueDate === getTomorrowJST(today)
 		? NEXT_DUE_TOMORROW_LABEL
@@ -52,6 +73,45 @@ const buildNextDueMessage = (nextDueDate: string | null, today: string): string 
 	nextDueDate === null
 		? DECK_STUDY_NO_NEXT_DUE_MESSAGE
 		: `${NEXT_DUE_MESSAGE_PREFIX}${formatNextDueLabel(nextDueDate, today)}`;
+
+const normalizeCount = (value: number): number => {
+	if (!Number.isFinite(value)) {
+		return 0;
+	}
+
+	return Math.max(0, Math.floor(value));
+};
+
+export function summarizePlannedStudy(input: PlannedStudyInput): PlannedStudySummary {
+	const newLimit = normalizeCount(input.newLimitPerDay);
+	let remaining = Math.max(
+		0,
+		normalizeCount(input.dailyStudyLimit) - normalizeCount(input.studiedToday)
+	);
+
+	const availableDue = normalizeCount(input.counts.due);
+	const availableLearn = normalizeCount(input.counts.learn);
+	const availableNew = normalizeCount(input.counts.new);
+
+	const due = Math.min(availableDue, remaining);
+	remaining -= due;
+
+	const learn = Math.min(availableLearn, remaining);
+	remaining -= learn;
+
+	const newCount = Math.min(availableNew, newLimit, remaining);
+	remaining -= newCount;
+
+	return {
+		new: newCount,
+		review: due + learn,
+		due,
+		learn,
+		total: due + learn + newCount,
+		remainingToday: Math.max(0, remaining),
+		newLimitReached: availableNew > newCount && newCount === newLimit,
+	};
+}
 
 export function resolveDeckStudyStatus(input: DeckStudyStatusInput): DeckStudyStatus {
 	const remainingToday = Math.max(0, input.dailyStudyLimit - input.studiedToday);

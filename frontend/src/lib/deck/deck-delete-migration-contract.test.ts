@@ -53,7 +53,9 @@ describe("S-25 deck logical delete migration contract", () => {
 		expect(fixSql).toContain("drop policy if exists decks_select_owner on public.decks");
 		expect(fixSql).toContain("create policy decks_select_owner on public.decks for select");
 		expect(fixSql).toContain("using ((select auth.uid()) = owner_user_id)");
-		expect(fixSql).not.toContain("using ((select auth.uid()) = owner_user_id and deleted_at is null)");
+		expect(fixSql).not.toContain(
+			"using ((select auth.uid()) = owner_user_id and deleted_at is null)"
+		);
 		expect(deckActionsSource).toContain('.is("deleted_at", null)');
 		expect(sessionActionsSource).toContain('.is("deleted_at", null)');
 	});

@@ -33,6 +33,7 @@ const createDeck = (overrides: Partial<DeckWithCounts> = {}): DeckWithCounts => 
 	totalCards: 18,
 	learnedCards: 8,
 	scheduledCards: 2,
+	newLimitPerDay: 10,
 	dailyStudyLimit: 20,
 	studiedToday: 3,
 	nextDueDate: null,
@@ -52,7 +53,8 @@ describe("frontend/src/components/deck/DeckCard.tsx", () => {
 		expect(html).toContain("小学3年生の漢字");
 		expect(html).toContain("あたらしい");
 		expect(html).toContain("ふくしゅう");
-		expect(readBadgeValue(html, "あたらしい")).toBe("10");
+		expect(html).toContain("今日の出題予定 17枚");
+		expect(readBadgeValue(html, "あたらしい")).toBe("9");
 		// ふくしゅう は learn + due の合算値
 		expect(readBadgeValue(html, "ふくしゅう")).toBe("8");
 		expect(html).toContain("きょうやった");
@@ -60,6 +62,48 @@ describe("frontend/src/components/deck/DeckCard.tsx", () => {
 		expect(html).toContain("カード 18枚");
 		expect(html).toContain("学習した 8枚");
 		expect(html).not.toContain(DECK_STUDY_DONE_MESSAGE);
+	});
+
+	it("UT-S26-DECKCARD-PLANNED-NEW-LIMIT: 新規20枚だけなら予定10枚と補足を表示する", () => {
+		const html = renderToStaticMarkup(
+			<DeckCard
+				deck={createDeck({
+					counts: { new: 20, learn: 0, due: 0 },
+					totalCards: 20,
+					learnedCards: 0,
+					newLimitPerDay: 10,
+					dailyStudyLimit: 20,
+					studiedToday: 0,
+				})}
+				today={TODAY}
+			/>
+		);
+
+		expect(html).toContain("今日の出題予定 10枚");
+		expect(readBadgeValue(html, "あたらしい")).toBe("10");
+		expect(readBadgeValue(html, "ふくしゅう")).toBe("0");
+		expect(html).toContain("新規カードは1日10枚までです");
+	});
+
+	it("UT-S26-DECKCARD-PLANNED-NEW-AND-REVIEW: 新規20枚と復習5枚なら予定15枚を表示する", () => {
+		const html = renderToStaticMarkup(
+			<DeckCard
+				deck={createDeck({
+					counts: { new: 20, learn: 2, due: 3 },
+					totalCards: 25,
+					learnedCards: 5,
+					newLimitPerDay: 10,
+					dailyStudyLimit: 20,
+					studiedToday: 0,
+				})}
+				today={TODAY}
+			/>
+		);
+
+		expect(html).toContain("今日の出題予定 15枚");
+		expect(readBadgeValue(html, "あたらしい")).toBe("10");
+		expect(readBadgeValue(html, "ふくしゅう")).toBe("5");
+		expect(html).toContain("新規カードは1日10枚までです");
 	});
 
 	it("UT-S25-DECKCARD-NO-NESTED-INTERACTIVE: 詳細linkと削除formを sibling として描画する", () => {

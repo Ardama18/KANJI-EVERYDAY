@@ -7,6 +7,7 @@ import {
 	DECK_LABEL_REVIEW,
 	DECK_LABEL_STUDIED_TODAY,
 	resolveDeckStudyStatus,
+	summarizePlannedStudy,
 } from "@/lib/deck/study-status";
 import { isAiCardImportEnabled } from "@/lib/env";
 import Link from "next/link";
@@ -42,6 +43,12 @@ export default async function DeckOverviewPage({ params }: DeckOverviewPageProps
 
 	const today = getTodayJST();
 	const metrics = await getDeckLearningMetrics(params.deckId);
+	const plannedStudy = summarizePlannedStudy({
+		counts: overview.counts,
+		studiedToday: overview.studiedToday,
+		dailyStudyLimit: overview.dailyStudyLimit,
+		newLimitPerDay: overview.newLimitPerDay,
+	});
 	const status = resolveDeckStudyStatus({
 		totalCards: overview.totalCards,
 		todayCount: overview.counts.total,
@@ -53,7 +60,6 @@ export default async function DeckOverviewPage({ params }: DeckOverviewPageProps
 	const canStartStudy = status.kind === "todo";
 	// 完了・上限到達では 0 の羅列ではなく完了メッセージを主表示にする（FR-03 / AC-2）。
 	const showCompletionBanner = status.kind === "done" || status.kind === "limit-reached";
-	const reviewCount = overview.counts.learn + overview.counts.due;
 	const studyHref = `/decks/${overview.id}/study`;
 
 	return (
@@ -80,13 +86,13 @@ export default async function DeckOverviewPage({ params }: DeckOverviewPageProps
 				<div className="mt-3 grid grid-cols-3 gap-3">
 					<StatCard
 						label={DECK_LABEL_NEW}
-						value={overview.counts.new}
-						tone={overview.counts.new === 0 ? "text-slate-500" : "text-blue-600"}
+						value={plannedStudy.new}
+						tone={plannedStudy.new === 0 ? "text-slate-500" : "text-blue-600"}
 					/>
 					<StatCard
 						label={DECK_LABEL_REVIEW}
-						value={reviewCount}
-						tone={reviewCount === 0 ? "text-slate-500" : "text-green-600"}
+						value={plannedStudy.review}
+						tone={plannedStudy.review === 0 ? "text-slate-500" : "text-green-600"}
 					/>
 					<StatCard
 						label={DECK_LABEL_STUDIED_TODAY}
@@ -94,9 +100,23 @@ export default async function DeckOverviewPage({ params }: DeckOverviewPageProps
 						tone={overview.studiedToday === 0 ? "text-slate-500" : "text-amber-700"}
 					/>
 				</div>
-				<p className="mt-4 text-center text-sm font-medium text-slate-700">
-					今日やること {overview.counts.total}枚 / 今日やれる残り {status.remainingToday}枚
-				</p>
+				<div className="mt-4 space-y-1 text-center text-sm text-slate-700">
+					<p className="font-semibold">今日の出題予定 {plannedStudy.total}枚</p>
+					<p>
+						内訳: {DECK_LABEL_NEW}
+						{plannedStudy.new}枚 / {DECK_LABEL_REVIEW}
+						{plannedStudy.review}枚
+					</p>
+					<p>
+						今日やれる残り {status.remainingToday}枚 / 新規は最大
+						{overview.newLimitPerDay}枚
+					</p>
+					{plannedStudy.newLimitReached ? (
+						<p className="text-xs text-slate-500">
+							新規カードは1日{overview.newLimitPerDay}枚までです
+						</p>
+					) : null}
+				</div>
 			</section>
 
 			<LearningMetricsPanel status={status} metrics={metrics} />
@@ -143,7 +163,7 @@ export default async function DeckOverviewPage({ params }: DeckOverviewPageProps
 			<section className="mt-6 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
 				<h2 className="text-sm font-bold text-slate-800">学習設定</h2>
 				<p className="mt-1 text-sm text-slate-600">
-					{`一日最大 ${overview.dailyStudyLimit}枚 / ${DECK_LABEL_STUDIED_TODAY} ${overview.studiedToday}枚`}
+					{`一日最大 ${overview.dailyStudyLimit}枚 / 新規は最大 ${overview.newLimitPerDay}枚`}
 				</p>
 				<DeckStudyLimitForm
 					key={`${overview.id}:${overview.dailyStudyLimit}`}
