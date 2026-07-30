@@ -5,8 +5,10 @@ import {
 	getMcpEnvConfig,
 	getOpenAiCardGenerationConfig,
 	getPublicEnvConfig,
+	getTimeCoinApiEnvConfig,
 	isAiCardImportEnabled,
 	isAiCardManagementEnabled,
+	isTimeCoinApiEnabled,
 } from "./env";
 
 const keys = [
@@ -26,6 +28,9 @@ const keys = [
 	"MCP_ALLOWED_ORIGIN",
 	"MCP_AUTO_MNEMONIC_MAX_CONCEPTS",
 	"MCP_AUTO_MNEMONIC_BUDGET_MS",
+	"TIMECOIN_API_ENABLED",
+	"TIMECOIN_API_ALLOWED_ORIGIN",
+	"TIMECOIN_API_OAUTH_ISSUER",
 ] as const;
 
 afterEach(() => {
@@ -87,6 +92,55 @@ describe("S-14 MCP server config", () => {
 			process.env[key] = value;
 			expect(() => getMcpEnvConfig()).toThrow();
 			setValidMcpEnv();
+		}
+	});
+});
+
+describe("S-27 TimeCoin REST API config", () => {
+	function setValidTimeCoinApiEnv(): void {
+		process.env.TIMECOIN_API_ENABLED = "true";
+		process.env.TIMECOIN_API_ALLOWED_ORIGIN = "https://timecoin-cloud.vercel.app";
+		process.env.TIMECOIN_API_OAUTH_ISSUER = "https://project.supabase.co/auth/v1";
+	}
+
+	it("enables only exact true without trimming", () => {
+		for (const value of [undefined, "", "false", "TRUE", "1", " true "]) {
+			if (value === undefined) Reflect.deleteProperty(process.env, "TIMECOIN_API_ENABLED");
+			else process.env.TIMECOIN_API_ENABLED = value;
+			expect(isTimeCoinApiEnabled()).toBe(false);
+		}
+		process.env.TIMECOIN_API_ENABLED = "true";
+		expect(isTimeCoinApiEnabled()).toBe(true);
+	});
+
+	it("normalizes the strict HTTPS TimeCoin origin and Supabase issuer", () => {
+		setValidTimeCoinApiEnv();
+
+		expect(getTimeCoinApiEnvConfig()).toEqual({
+			enabled: true,
+			allowedOrigin: "https://timecoin-cloud.vercel.app",
+			oauthIssuer: "https://project.supabase.co/auth/v1",
+		});
+	});
+
+	it("fails closed for missing, non-HTTPS, credentialed, path-bearing, or malformed values", () => {
+		setValidTimeCoinApiEnv();
+		for (const [key, value] of [
+			["TIMECOIN_API_ALLOWED_ORIGIN", ""],
+			["TIMECOIN_API_ALLOWED_ORIGIN", "http://timecoin-cloud.vercel.app"],
+			["TIMECOIN_API_ALLOWED_ORIGIN", "https://user@timecoin-cloud.vercel.app"],
+			["TIMECOIN_API_ALLOWED_ORIGIN", "https://timecoin-cloud.vercel.app/path"],
+			["TIMECOIN_API_ALLOWED_ORIGIN", "not a url"],
+			["TIMECOIN_API_OAUTH_ISSUER", ""],
+			["TIMECOIN_API_OAUTH_ISSUER", "http://project.supabase.co/auth/v1"],
+			["TIMECOIN_API_OAUTH_ISSUER", "https://user@project.supabase.co/auth/v1"],
+			["TIMECOIN_API_OAUTH_ISSUER", "https://project.supabase.co"],
+			["TIMECOIN_API_OAUTH_ISSUER", "https://project.supabase.co/auth/v1?x=1"],
+			["TIMECOIN_API_OAUTH_ISSUER", "not a url"],
+		] as const) {
+			process.env[key] = value;
+			expect(() => getTimeCoinApiEnvConfig(), `${key}=${value}`).toThrow();
+			setValidTimeCoinApiEnv();
 		}
 	});
 });
