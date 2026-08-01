@@ -15,6 +15,10 @@ const remoteCommitClientRotationMigrationPath = resolve(
 	process.cwd(),
 	"../supabase/migrations/20260720000004_s14_remote_commit_allows_client_rotation.sql"
 );
+const s29SaferDeckDeleteMigrationPath = resolve(
+	process.cwd(),
+	"../supabase/migrations/20260801000000_s29_safer_deck_delete_with_sessions.sql"
+);
 
 async function readMigration(): Promise<string> {
 	return await readFile(migrationPath, "utf8");
@@ -26,6 +30,10 @@ async function readRuntimeConfigMigration(): Promise<string> {
 
 async function readRemoteCommitClientRotationMigration(): Promise<string> {
 	return await readFile(remoteCommitClientRotationMigrationPath, "utf8");
+}
+
+async function readS29SaferDeckDeleteMigration(): Promise<string> {
+	return await readFile(s29SaferDeckDeleteMigrationPath, "utf8");
 }
 
 describe("S-14 remote MCP migration contract", () => {
@@ -120,5 +128,18 @@ describe("S-14 remote MCP migration contract", () => {
 		expect(sql).toContain("public.s14_consume_oauth_consent_state");
 		expect(sql).toContain("DELETE FROM s14_private.oauth_consent_states");
 		expect(sql).toContain("TO anon, authenticated");
+	});
+
+	it("S-29: remote preview and deck patch internals reject tombstoned decks inside SECURITY DEFINER SQL", async () => {
+		const sql = await readS29SaferDeckDeleteMigration();
+		const normalized = sql.replace(/\s+/gu, " ").toLowerCase();
+
+		expect(normalized).toContain(
+			"create or replace function public.s14_remote_validate_import_preview"
+		);
+		expect(normalized).toContain("and decks.deleted_at is null");
+		expect(normalized).toContain("create trigger s29_guard_deck_cards_active_deck");
+		expect(normalized).toContain("before insert or update of deck_id on public.deck_cards");
+		expect(normalized).toContain("public.ai_raise_import_error('deck_not_found')");
 	});
 });

@@ -95,7 +95,8 @@ describe("frontend/app/(auth)/decks/page.tsx", () => {
 		expect(html).toContain('aria-label="新しいデッキ作成"');
 		expect(html).toContain('href="/decks/deck-1"');
 		expect(html).toContain('aria-label="「小学3年生の漢字」を削除"');
-		expect(html).toContain('name="deckId"');
+		expect(html).not.toContain('name="deckId"');
+		expect(html).not.toContain('role="dialog"');
 		expect(html).toContain("あたらしい");
 		expect(html).toContain("ふくしゅう");
 		expect(html).toContain("きょうやった");

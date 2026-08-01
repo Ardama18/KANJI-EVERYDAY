@@ -6,12 +6,18 @@ import { describe, expect, it } from "vitest";
 const MIGRATIONS_DIR = resolve(process.cwd(), "../supabase/migrations");
 const MIGRATION_FILE = "20260726000000_s20_ai_card_mnemonic_edit.sql";
 const MIGRATION_PATH = resolve(MIGRATIONS_DIR, MIGRATION_FILE);
+const S29_MIGRATION_PATH = resolve(
+	MIGRATIONS_DIR,
+	"20260801000000_s29_safer_deck_delete_with_sessions.sql"
+);
 const SIGNATURE =
 	"public.list_ai_managed_cards(integer,timestamptz,uuid,uuid,uuid,text,timestamptz,timestamptz)";
 
 const migration = readFileSync(MIGRATION_PATH, "utf8");
+const s29Migration = readFileSync(S29_MIGRATION_PATH, "utf8");
 const normalizeSql = (sql: string): string => sql.replace(/\s+/gu, " ").toLowerCase();
 const normalized = normalizeSql(migration);
+const s29Normalized = normalizeSql(s29Migration);
 
 describe("S-20 list_ai_managed_cards projection migration contract", () => {
 	// 同一 prefix の migration は `supabase db push` に黙って読み飛ばされる
@@ -91,5 +97,16 @@ describe("S-20 list_ai_managed_cards projection migration contract", () => {
 		);
 		expect(normalized).not.toContain("to service_role;");
 		expect(normalized).not.toContain("to anon;");
+	});
+
+	it("S-29: replacement keeps deleted decks out of list validation, filters, and enriched deck lists", () => {
+		expect(s29Normalized).toContain("create or replace function public.list_ai_managed_cards");
+		expect(s29Normalized).toContain("where d.id = p_deck_id");
+		expect(s29Normalized).toContain("and d.owner_user_id = actor_id");
+		expect(s29Normalized).toContain("and d.deleted_at is null");
+		expect(s29Normalized).toContain("where dc.card_id = c.id");
+		expect(s29Normalized).toContain("and dc.deck_id = p_deck_id");
+		expect(s29Normalized).toContain("where dc.card_id = s.id");
+		expect(s29Normalized).toContain("and d.deleted_at is null), '[]'::jsonb) as decks");
 	});
 });

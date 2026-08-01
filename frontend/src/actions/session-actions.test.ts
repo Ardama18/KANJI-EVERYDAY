@@ -25,6 +25,7 @@ import {
 	getNextCard,
 	getStudySessionState,
 	normalizeIllustrationState,
+	rateCard,
 	revealCard,
 	startStudySession,
 } from "./session-actions";
@@ -258,8 +259,12 @@ const createRevealCardClient = (options: {
 	illustrationKey: string | null;
 	illustration: Record<string, unknown> | null;
 	mnemonic?: Record<string, unknown> | null;
+	activeDeck?: Record<string, unknown> | null;
 }) => {
 	const sessionSelectChain = createRequireSessionChain(createSessionRow(false));
+	const deckSelectChain = createOwnedDeckSelectChain(
+		options.activeDeck === undefined ? { id: "deck-1" } : options.activeDeck
+	);
 	const sessionUpdateMock = vi.fn().mockReturnValue({
 		eq: vi.fn().mockResolvedValue({ error: null }),
 	});
@@ -272,6 +277,12 @@ const createRevealCardClient = (options: {
 			return {
 				select: sessionSelectChain.selectMock,
 				update: sessionUpdateMock,
+			};
+		}
+
+		if (table === "decks") {
+			return {
+				select: deckSelectChain.selectMock,
 			};
 		}
 
@@ -674,6 +685,7 @@ describe("frontend/src/actions/session-actions.ts", () => {
 			created_at: "2026-02-24T00:00:00.000Z",
 			finished_at: null,
 		});
+		const deckSelectChain = createOwnedDeckSelectChain({ id: "deck-1" });
 		const updateEqMock = vi.fn().mockResolvedValue({ error: null });
 		const updateMock = vi.fn().mockReturnValue({
 			eq: updateEqMock,
@@ -686,6 +698,11 @@ describe("frontend/src/actions/session-actions.ts", () => {
 					return {
 						select: sessionSelectChain.selectMock,
 						update: updateMock,
+					};
+				}
+				if (table === "decks") {
+					return {
+						select: deckSelectChain.selectMock,
 					};
 				}
 				throw new Error(`Unsupported table: ${table}`);
@@ -717,6 +734,7 @@ describe("frontend/src/actions/session-actions.ts", () => {
 			created_at: "2026-02-24T00:00:00.000Z",
 			finished_at: null,
 		});
+		const deckSelectChain = createOwnedDeckSelectChain({ id: "deck-1" });
 		const sessionUpdateMock = vi.fn().mockReturnValue({
 			eq: vi.fn().mockResolvedValue({ error: null }),
 		});
@@ -764,6 +782,12 @@ describe("frontend/src/actions/session-actions.ts", () => {
 					};
 				}
 
+				if (table === "decks") {
+					return {
+						select: deckSelectChain.selectMock,
+					};
+				}
+
 				if (table === "cards") {
 					return {
 						select: cardSelectMock,
@@ -794,6 +818,178 @@ describe("frontend/src/actions/session-actions.ts", () => {
 			},
 		});
 		expect(sessionUpdateMock).toHaveBeenCalledWith({ revealed: true });
+	});
+
+	it("UT-S29-STUDY-DELETED-DECK-GET-NEXT: 削除済みdeckのsessionIdではfinished_at更新前に停止する", async () => {
+		const sessionSelectChain = createRequireSessionChain({
+			id: "session-deleted",
+			user_id: "user-1",
+			deck_id: "deleted-deck-1",
+			queue_due: [],
+			queue_learn: [],
+			queue_new: [],
+			queue_retry: [],
+			current_card_id: null,
+			revealed: false,
+			created_at: "2026-02-24T00:00:00.000Z",
+			finished_at: null,
+		});
+		const deckSelectChain = createOwnedDeckSelectChain(null);
+		const updateMock = vi.fn().mockReturnValue({
+			eq: vi.fn().mockResolvedValue({ error: null }),
+		});
+
+		createServerClientMock.mockReturnValue({
+			auth: createAuth("user-1"),
+			from: vi.fn((table: string) => {
+				if (table === "study_sessions") {
+					return {
+						select: sessionSelectChain.selectMock,
+						update: updateMock,
+					};
+				}
+				if (table === "decks") {
+					return { select: deckSelectChain.selectMock };
+				}
+				throw new Error(`Unsupported table: ${table}`);
+			}),
+		});
+
+		await expect(getNextCard("session-deleted")).rejects.toThrow("Deck not found");
+
+		expect(updateMock).not.toHaveBeenCalled();
+	});
+
+	it("UT-S29-STUDY-DELETED-DECK-GET-NEXT-FINISHED: finished_at済み削除deck sessionでも安全に失敗する", async () => {
+		const sessionSelectChain = createRequireSessionChain({
+			id: "session-deleted-finished",
+			user_id: "user-1",
+			deck_id: "deleted-deck-1",
+			queue_due: [],
+			queue_learn: [],
+			queue_new: [],
+			queue_retry: [],
+			current_card_id: null,
+			revealed: false,
+			created_at: "2026-02-24T00:00:00.000Z",
+			finished_at: "2026-08-01T00:00:00.000Z",
+		});
+		const deckSelectChain = createOwnedDeckSelectChain(null);
+		const updateMock = vi.fn();
+
+		createServerClientMock.mockReturnValue({
+			auth: createAuth("user-1"),
+			from: vi.fn((table: string) => {
+				if (table === "study_sessions") {
+					return {
+						select: sessionSelectChain.selectMock,
+						update: updateMock,
+					};
+				}
+				if (table === "decks") {
+					return { select: deckSelectChain.selectMock };
+				}
+				throw new Error(`Unsupported table: ${table}`);
+			}),
+		});
+
+		await expect(getNextCard("session-deleted-finished")).rejects.toThrow("Deck not found");
+
+		expect(updateMock).not.toHaveBeenCalled();
+	});
+
+	it("UT-S29-STUDY-DELETED-DECK-REVEAL: 削除済みdeckのsessionIdではrevealed更新前に停止する", async () => {
+		const { client, sessionUpdateMock } = createRevealCardClient({
+			illustrationKey: null,
+			illustration: null,
+			activeDeck: null,
+		});
+		createServerClientMock.mockReturnValue(client);
+
+		await expect(revealCard("session-2")).rejects.toThrow("Deck not found");
+
+		expect(sessionUpdateMock).not.toHaveBeenCalled();
+		expect(client.from).not.toHaveBeenCalledWith("cards");
+		expect(client.from).not.toHaveBeenCalledWith("review_states");
+	});
+
+	it("UT-S29-STUDY-DELETED-DECK-RATE: 削除済みdeckのsessionIdではreview_statesとsession queueを更新しない", async () => {
+		const sessionSelectChain = createRequireSessionChain(createSessionRow(true));
+		const deckSelectChain = createOwnedDeckSelectChain(null);
+		const sessionUpdateMock = vi.fn().mockReturnValue({
+			eq: vi.fn().mockResolvedValue({ error: null }),
+		});
+		const reviewSelectMock = vi.fn();
+		const reviewUpsertMock = vi.fn();
+
+		createServerClientMock.mockReturnValue({
+			auth: createAuth("user-1"),
+			from: vi.fn((table: string) => {
+				if (table === "study_sessions") {
+					return {
+						select: sessionSelectChain.selectMock,
+						update: sessionUpdateMock,
+					};
+				}
+				if (table === "decks") {
+					return { select: deckSelectChain.selectMock };
+				}
+				if (table === "review_states") {
+					return {
+						select: reviewSelectMock,
+						upsert: reviewUpsertMock,
+					};
+				}
+				throw new Error(`Unsupported table: ${table}`);
+			}),
+		});
+
+		await expect(rateCard("session-2", "good")).rejects.toThrow("Deck not found");
+
+		expect(reviewSelectMock).not.toHaveBeenCalled();
+		expect(reviewUpsertMock).not.toHaveBeenCalled();
+		expect(sessionUpdateMock).not.toHaveBeenCalled();
+	});
+
+	it("UT-S29-STUDY-DELETED-DECK-RATE-FINISHED: finished_at済み削除deck sessionでもsummaryを作らず失敗する", async () => {
+		const sessionSelectChain = createRequireSessionChain({
+			...createSessionRow(true),
+			id: "session-deleted-finished",
+			deck_id: "deleted-deck-1",
+			finished_at: "2026-08-01T00:00:00.000Z",
+		});
+		const deckSelectChain = createOwnedDeckSelectChain(null);
+		const sessionUpdateMock = vi.fn();
+		const reviewSelectMock = vi.fn();
+		const reviewUpsertMock = vi.fn();
+
+		createServerClientMock.mockReturnValue({
+			auth: createAuth("user-1"),
+			from: vi.fn((table: string) => {
+				if (table === "study_sessions") {
+					return {
+						select: sessionSelectChain.selectMock,
+						update: sessionUpdateMock,
+					};
+				}
+				if (table === "decks") {
+					return { select: deckSelectChain.selectMock };
+				}
+				if (table === "review_states") {
+					return {
+						select: reviewSelectMock,
+						upsert: reviewUpsertMock,
+					};
+				}
+				throw new Error(`Unsupported table: ${table}`);
+			}),
+		});
+
+		await expect(rateCard("session-deleted-finished", "good")).rejects.toThrow("Deck not found");
+
+		expect(reviewSelectMock).not.toHaveBeenCalled();
+		expect(reviewUpsertMock).not.toHaveBeenCalled();
+		expect(sessionUpdateMock).not.toHaveBeenCalled();
 	});
 
 	it("UT-S09-AC08-TRIGGER-STARTED-GENERATING: レコードなし + started=true は generating/null を返す", async () => {

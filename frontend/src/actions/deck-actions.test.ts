@@ -97,8 +97,8 @@ type SetupOptions = {
 	cardMnemonicsError?: { message: string } | null;
 	insertResult?: { data: unknown; error: unknown };
 	updateStudyLimitResult?: { data: { id: string } | null; error: { message: string } | null };
-	deleteDeckResult?: {
-		data: { id: string } | null;
+	deleteDeckRpcResult?: {
+		data: unknown | null;
 		error: { code?: string; message: string } | null;
 	};
 };
@@ -151,17 +151,12 @@ const setupClient = (options: SetupOptions = {}) => {
 	const decksInsertMock = vi.fn().mockReturnValue({
 		select: decksInsertSelectMock,
 	});
-	let decksUpdateResult: {
-		data: { id: string } | null;
-		error: { code?: string; message: string } | null;
-	} | null = null;
 	const decksUpdateMaybeSingleMock = vi.fn().mockImplementation(() =>
 		Promise.resolve(
-			decksUpdateResult ??
-				options.updateStudyLimitResult ?? {
-					data: { id: "deck-1" },
-					error: null,
-				}
+			options.updateStudyLimitResult ?? {
+				data: { id: "deck-1" },
+				error: null,
+			}
 		)
 	);
 	const decksUpdateSelectMock = vi.fn().mockReturnValue({
@@ -177,15 +172,9 @@ const setupClient = (options: SetupOptions = {}) => {
 	const decksUpdateIdEqMock = vi.fn().mockReturnValue({
 		eq: decksUpdateOwnerEqMock,
 	});
-	const decksUpdateMock = vi.fn((values: Record<string, unknown>) => {
-		decksUpdateResult =
-			"deleted_at" in values
-				? (options.deleteDeckResult ?? { data: { id: VALID_DECK_ID }, error: null })
-				: (options.updateStudyLimitResult ?? { data: { id: "deck-1" }, error: null });
-		return {
-			eq: decksUpdateIdEqMock,
-		};
-	});
+	const decksUpdateMock = vi.fn(() => ({
+		eq: decksUpdateIdEqMock,
+	}));
 	const decksSelectOrderDeletedAtIsMock = vi.fn().mockReturnValue({
 		order: decksOrderMock,
 	});
@@ -363,11 +352,23 @@ const setupClient = (options: SetupOptions = {}) => {
 		throw new Error(`Unsupported table: ${table}`);
 	});
 
+	const rpcMock = vi.fn().mockResolvedValue(
+		options.deleteDeckRpcResult ?? {
+			data: {
+				deckId: VALID_DECK_ID,
+				deletedAt: "2026-08-01T00:00:00.000Z",
+				closedSessionCount: 0,
+			},
+			error: null,
+		}
+	);
+
 	createServerClientMock.mockReturnValue({
 		auth: {
 			getUser: getUserMock,
 		},
 		from: fromMock,
+		rpc: rpcMock,
 	});
 
 	return {
@@ -404,6 +405,7 @@ const setupClient = (options: SetupOptions = {}) => {
 		cardMnemonicsOwnerEqMock,
 		cardMnemonicsStatusEqMock,
 		cardMnemonicsInMock,
+		rpcMock,
 	};
 };
 
@@ -515,58 +517,73 @@ describe("frontend/src/actions/deck-actions.ts", () => {
 		expect(revalidatePathMock).not.toHaveBeenCalled();
 	});
 
-	it("UT-S25-DELETE-DECK-UNAUTH: 未認証ではDB DMLを実行しない", async () => {
-		const { fromMock, decksUpdateMock } = setupClient({ userId: null });
+	it("UT-S29-DELETE-DECK-CONFIRMATION-VALIDATION: confirmationName欠落は auth / DB 前に安全なerror stateを返す", async () => {
 		const formData = new FormData();
 		formData.set("deckId", VALID_DECK_ID);
+
+		const result = await deleteDeck(DECK_DELETE_ACTION_INITIAL_STATE, formData);
+
+		expect(result).toEqual({
+			status: "error",
+			message: "デッキを削除できませんでした。時間をおいて再度お試しください。",
+		});
+		expect(createServerClientMock).not.toHaveBeenCalled();
+		expect(revalidatePathMock).not.toHaveBeenCalled();
+	});
+
+	it("UT-S29-DELETE-DECK-UNAUTH: 未認証ではDB DML/RPCを実行しない", async () => {
+		const { fromMock, decksUpdateMock, rpcMock } = setupClient({ userId: null });
+		const formData = new FormData();
+		formData.set("deckId", VALID_DECK_ID);
+		formData.set("confirmationName", "小学3年生");
 
 		const result = await deleteDeck(DECK_DELETE_ACTION_INITIAL_STATE, formData);
 
 		expect(result).toEqual({ status: "error", message: "ログインが必要です。" });
 		expect(fromMock).not.toHaveBeenCalled();
 		expect(decksUpdateMock).not.toHaveBeenCalled();
+		expect(rpcMock).not.toHaveBeenCalled();
 		expect(revalidatePathMock).not.toHaveBeenCalled();
 	});
 
-	it("UT-S25-DELETE-DECK-SUCCESS: owner deck をowner filter付きで論理削除し /decks をrevalidateする", async () => {
-		const {
-			decksMaybeSingleMock,
-			studySessionsUserEqMock,
-			studySessionsDeckEqMock,
-			studySessionsFinishedAtIsMock,
-			decksUpdateMock,
-			decksUpdateIdEqMock,
-			decksUpdateOwnerEqMock,
-			decksUpdateDeletedAtIsMock,
-			decksUpdateSelectMock,
-		} = setupClient({
-			userId: "owner-user-1",
-			deckOverview: {
-				id: VALID_DECK_ID,
-				name: "小学3年生",
-				new_limit_per_day: 20,
-				daily_study_limit: 20,
-			},
-			studySessions: [{ id: "completed-session", finished_at: "2026-02-24T00:00:00.000Z" }],
-			deleteDeckResult: { data: { id: VALID_DECK_ID }, error: null },
-		});
+	it("UT-S29-DELETE-DECK-SUCCESS: confirmationName一致後にowner deckをRPCで削除し /decks をrevalidateする", async () => {
+		const { decksMaybeSingleMock, decksUpdateMock, studySessionsSelectMock, rpcMock } = setupClient(
+			{
+				userId: "owner-user-1",
+				deckOverview: {
+					id: VALID_DECK_ID,
+					name: "小学3年生",
+					new_limit_per_day: 20,
+					daily_study_limit: 20,
+				},
+				studySessions: [
+					{ id: "completed-session", finished_at: "2026-02-24T00:00:00.000Z" },
+					{ id: "active-session", finished_at: null },
+				],
+				deleteDeckRpcResult: {
+					data: {
+						deckId: VALID_DECK_ID,
+						deletedAt: "2026-08-01T00:00:00.000Z",
+						closedSessionCount: 1,
+					},
+					error: null,
+				},
+			}
+		);
 		const formData = new FormData();
 		formData.set("deckId", VALID_DECK_ID);
+		formData.set("confirmationName", " 小学3年生 ");
 
 		const result = await deleteDeck(DECK_DELETE_ACTION_INITIAL_STATE, formData);
 
 		expect(decksMaybeSingleMock).toHaveBeenCalledTimes(1);
-		expect(studySessionsUserEqMock).toHaveBeenCalledWith("user_id", "owner-user-1");
-		expect(studySessionsDeckEqMock).toHaveBeenCalledWith("deck_id", VALID_DECK_ID);
-		expect(studySessionsFinishedAtIsMock).toHaveBeenCalledWith(VALID_DECK_ID, "finished_at", null);
-		expect(decksUpdateMock).toHaveBeenCalledWith({ deleted_at: expect.any(String) });
-		const deletedAt = decksUpdateMock.mock.calls[0]?.[0].deleted_at;
-		expect(typeof deletedAt).toBe("string");
-		expect(Number.isNaN(Date.parse(String(deletedAt)))).toBe(false);
-		expect(decksUpdateIdEqMock).toHaveBeenCalledWith("id", VALID_DECK_ID);
-		expect(decksUpdateOwnerEqMock).toHaveBeenCalledWith("owner_user_id", "owner-user-1");
-		expect(decksUpdateDeletedAtIsMock).toHaveBeenCalledWith("deleted_at", null);
-		expect(decksUpdateSelectMock).toHaveBeenCalledWith("id");
+		expect(studySessionsSelectMock).not.toHaveBeenCalled();
+		expect(decksUpdateMock).not.toHaveBeenCalledWith(
+			expect.objectContaining({ deleted_at: expect.any(String) })
+		);
+		expect(rpcMock).toHaveBeenCalledWith("delete_deck_with_closed_sessions", {
+			p_deck_id: VALID_DECK_ID,
+		});
 		expect(revalidatePathMock).toHaveBeenCalledWith("/decks");
 		expect(result).toEqual({ status: "success", message: "デッキを削除しました。" });
 	});
@@ -578,6 +595,7 @@ describe("frontend/src/actions/deck-actions.ts", () => {
 		});
 		const otherOwnerFormData = new FormData();
 		otherOwnerFormData.set("deckId", OTHER_VALID_DECK_ID);
+		otherOwnerFormData.set("confirmationName", "小学3年生");
 
 		const otherOwnerResult = await deleteDeck(DECK_DELETE_ACTION_INITIAL_STATE, otherOwnerFormData);
 
@@ -589,6 +607,7 @@ describe("frontend/src/actions/deck-actions.ts", () => {
 		});
 		const missingFormData = new FormData();
 		missingFormData.set("deckId", VALID_DECK_ID);
+		missingFormData.set("confirmationName", "小学3年生");
 
 		const missingResult = await deleteDeck(DECK_DELETE_ACTION_INITIAL_STATE, missingFormData);
 
@@ -600,8 +619,8 @@ describe("frontend/src/actions/deck-actions.ts", () => {
 		expect(revalidatePathMock).not.toHaveBeenCalled();
 	});
 
-	it("UT-S25-DELETE-DECK-ACTIVE-SESSION: active session があるdeckは論理削除しない", async () => {
-		const { decksUpdateMock } = setupClient({
+	it("UT-S29-DELETE-DECK-CONFIRMATION-MISMATCH: deck名のexact match不一致ではRPCを呼ばない", async () => {
+		const { rpcMock } = setupClient({
 			userId: "owner-user-1",
 			deckOverview: {
 				id: VALID_DECK_ID,
@@ -609,6 +628,41 @@ describe("frontend/src/actions/deck-actions.ts", () => {
 				new_limit_per_day: 20,
 				daily_study_limit: 20,
 			},
+		});
+		const formData = new FormData();
+		formData.set("deckId", VALID_DECK_ID);
+		formData.set("confirmationName", "小学三年生");
+
+		const result = await deleteDeck(DECK_DELETE_ACTION_INITIAL_STATE, formData);
+
+		expect(result).toEqual({
+			status: "error",
+			message: "デッキを削除できませんでした。時間をおいて再度お試しください。",
+		});
+		expect(rpcMock).not.toHaveBeenCalled();
+		expect(revalidatePathMock).not.toHaveBeenCalled();
+	});
+
+	it("UT-S29-DELETE-DECK-REVIEW-AND-SESSIONS: review_statesや未完了/完了済みstudy_sessionsがあっても削除成功する", async () => {
+		const { rpcMock, studySessionsSelectMock } = setupClient({
+			userId: "owner-user-1",
+			deckOverview: {
+				id: VALID_DECK_ID,
+				name: "小学3年生",
+				new_limit_per_day: 20,
+				daily_study_limit: 20,
+			},
+			reviewStates: [
+				{
+					user_id: "owner-user-1",
+					card_id: "card-1",
+					level: 3,
+					due_date: "2026-02-24",
+					last_rating: "good",
+					retry_today_count: 0,
+					last_reviewed_at: "2026-02-24T00:00:00.000Z",
+				},
+			],
 			studySessions: [
 				{
 					id: "active-session",
@@ -616,22 +670,29 @@ describe("frontend/src/actions/deck-actions.ts", () => {
 					deck_id: VALID_DECK_ID,
 					finished_at: null,
 				},
+				{
+					id: "finished-session",
+					user_id: "owner-user-1",
+					deck_id: VALID_DECK_ID,
+					finished_at: "2026-02-24T00:00:00.000Z",
+				},
 			],
 		});
 		const formData = new FormData();
 		formData.set("deckId", VALID_DECK_ID);
+		formData.set("confirmationName", "小学3年生");
 
 		const result = await deleteDeck(DECK_DELETE_ACTION_INITIAL_STATE, formData);
 
-		expect(result).toEqual({
-			status: "error",
-			message: "学習中のデッキは削除できません。学習を終えてからもう一度お試しください。",
+		expect(result).toEqual({ status: "success", message: "デッキを削除しました。" });
+		expect(studySessionsSelectMock).not.toHaveBeenCalled();
+		expect(rpcMock).toHaveBeenCalledWith("delete_deck_with_closed_sessions", {
+			p_deck_id: VALID_DECK_ID,
 		});
-		expect(decksUpdateMock).not.toHaveBeenCalled();
-		expect(revalidatePathMock).not.toHaveBeenCalled();
+		expect(revalidatePathMock).toHaveBeenCalledWith("/decks");
 	});
 
-	it("UT-S25-DELETE-DECK-P1007: trigger race のactive-session errorを安全な文言へ写像する", async () => {
+	it("UT-S29-DELETE-DECK-SAFE-ERROR: RPC error detailを返却stateに含めない", async () => {
 		setupClient({
 			userId: "owner-user-1",
 			deckOverview: {
@@ -640,41 +701,14 @@ describe("frontend/src/actions/deck-actions.ts", () => {
 				new_limit_per_day: 20,
 				daily_study_limit: 20,
 			},
-			deleteDeckResult: {
-				data: null,
-				error: { code: "P1007", message: "S-25 deck has an active session" },
-			},
-		});
-		const formData = new FormData();
-		formData.set("deckId", VALID_DECK_ID);
-
-		const result = await deleteDeck(DECK_DELETE_ACTION_INITIAL_STATE, formData);
-
-		expect(result).toEqual({
-			status: "error",
-			message: "学習中のデッキは削除できません。学習を終えてからもう一度お試しください。",
-		});
-		expect(JSON.stringify(result)).not.toContain("P1007");
-		expect(JSON.stringify(result)).not.toContain("active session");
-		expect(revalidatePathMock).not.toHaveBeenCalled();
-	});
-
-	it("UT-S25-DELETE-DECK-SAFE-ERROR: Supabase error detailを返却stateに含めない", async () => {
-		setupClient({
-			userId: "owner-user-1",
-			deckOverview: {
-				id: VALID_DECK_ID,
-				name: "小学3年生",
-				new_limit_per_day: 20,
-				daily_study_limit: 20,
-			},
-			deleteDeckResult: {
+			deleteDeckRpcResult: {
 				data: null,
 				error: { message: "raw SQL stack secret other-owner-id" },
 			},
 		});
 		const formData = new FormData();
 		formData.set("deckId", VALID_DECK_ID);
+		formData.set("confirmationName", "小学3年生");
 
 		const result = await deleteDeck(DECK_DELETE_ACTION_INITIAL_STATE, formData);
 
@@ -685,6 +719,25 @@ describe("frontend/src/actions/deck-actions.ts", () => {
 		expect(JSON.stringify(result)).not.toContain("raw SQL");
 		expect(JSON.stringify(result)).not.toContain("secret");
 		expect(JSON.stringify(result)).not.toContain("other-owner");
+		expect(revalidatePathMock).not.toHaveBeenCalled();
+	});
+
+	it("UT-S29-DELETE-DECK-STALE-STATE: 削除済みdeck再削除はRPC前のowner lookupでsafe failureにする", async () => {
+		const { rpcMock } = setupClient({
+			userId: "owner-user-1",
+			deckOverview: null,
+		});
+		const formData = new FormData();
+		formData.set("deckId", VALID_DECK_ID);
+		formData.set("confirmationName", "小学3年生");
+
+		const result = await deleteDeck(DECK_DELETE_ACTION_INITIAL_STATE, formData);
+
+		expect(result).toEqual({
+			status: "error",
+			message: "デッキを削除できませんでした。時間をおいて再度お試しください。",
+		});
+		expect(rpcMock).not.toHaveBeenCalled();
 		expect(revalidatePathMock).not.toHaveBeenCalled();
 	});
 

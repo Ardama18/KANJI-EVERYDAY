@@ -106,6 +106,29 @@ const createRequireSessionChain = (session: Record<string, unknown>) => {
 	};
 };
 
+const createActiveDeckSelectChain = () => {
+	const maybeSingleMock = vi.fn().mockResolvedValue({
+		data: { id: "deck-1" },
+		error: null,
+	});
+	const isDeletedAtMock = vi.fn().mockReturnValue({
+		maybeSingle: maybeSingleMock,
+	});
+	const eqOwnerMock = vi.fn().mockReturnValue({
+		is: isDeletedAtMock,
+	});
+	const eqIdMock = vi.fn().mockReturnValue({
+		eq: eqOwnerMock,
+	});
+	const selectMock = vi.fn().mockReturnValue({
+		eq: eqIdMock,
+	});
+
+	return {
+		selectMock,
+	};
+};
+
 const createCardSelectChain = (card: Record<string, unknown> | null) => {
 	const maybeSingleMock = vi.fn().mockResolvedValue({
 		data: card,
@@ -243,6 +266,7 @@ const createRevealCardClient = (options: {
 	illustration: IllustrationRow | null;
 }) => {
 	const sessionSelectChain = createRequireSessionChain(createSessionRow(false));
+	const deckSelectChain = createActiveDeckSelectChain();
 	const sessionUpdateMock = vi.fn().mockReturnValue({
 		eq: vi.fn().mockResolvedValue({ error: null }),
 	});
@@ -255,6 +279,12 @@ const createRevealCardClient = (options: {
 			return {
 				select: sessionSelectChain.selectMock,
 				update: sessionUpdateMock,
+			};
+		}
+
+		if (table === "decks") {
+			return {
+				select: deckSelectChain.selectMock,
 			};
 		}
 

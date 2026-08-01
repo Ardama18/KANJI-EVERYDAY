@@ -986,6 +986,10 @@ export type Database = {
 				};
 				Returns: Json;
 			};
+			delete_deck_with_closed_sessions: {
+				Args: { p_deck_id: string };
+				Returns: Json;
+			};
 			get_ai_import_status: {
 				Args: {
 					p_actor_user_id: string;

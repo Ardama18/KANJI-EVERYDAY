@@ -34,6 +34,33 @@ function dependencies(
 }
 
 describe("frontend/src/lib/mcp/services.ts", () => {
+	it("UT-S29-MCP-LIST-DECKS-ACTIVE-ONLY: list_decks returns only non-deleted owner decks", async () => {
+		const deletedAtIs = vi.fn().mockReturnValue({
+			order: vi.fn().mockReturnValue({
+				order: vi.fn().mockResolvedValue({
+					data: [{ id: DAILY_DECK_ID, name: "一年生" }],
+					error: null,
+				}),
+			}),
+		});
+		const select = vi.fn().mockReturnValue({
+			is: deletedAtIs,
+		});
+		const client = {
+			from: vi.fn((table: string) => {
+				expect(table).toBe("decks");
+				return { select };
+			}),
+		};
+		const services = createMcpToolServices(dependencies(client));
+
+		const result = await services.listDecks();
+
+		expect(select).toHaveBeenCalledWith("id,name");
+		expect(deletedAtIs).toHaveBeenCalledWith("deleted_at", null);
+		expect(result).toEqual({ decks: [{ id: DAILY_DECK_ID, name: "一年生" }] });
+	});
+
 	it("UT-S22-MCP-DAILY-STATUS-OWNER: get_daily_study_status reads actor-owned decks only", async () => {
 		const tableCalls: string[] = [];
 		const deckDeletedAtIs = vi.fn(async () => ({
