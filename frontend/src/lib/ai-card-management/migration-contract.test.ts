@@ -6,6 +6,14 @@ const migration = readFileSync(
 	resolve(process.cwd(), "../supabase/migrations/20260719000001_s13_ai_card_management_undo.sql"),
 	"utf8"
 );
+const s29Migration = readFileSync(
+	resolve(
+		process.cwd(),
+		"../supabase/migrations/20260801000000_s29_safer_deck_delete_with_sessions.sql"
+	),
+	"utf8"
+);
+const normalizeSql = (sql: string): string => sql.replace(/\s+/gu, " ").toLowerCase();
 
 describe("S-13 forward migration contract", () => {
 	it("wraps every schema and privilege change in one explicit transaction", () => {
@@ -136,5 +144,20 @@ describe("S-13 forward migration contract", () => {
 		expect(revoke).toContain("public.ai_s13_assert_managed_card(uuid,uuid)");
 		expect(revoke).toContain("public.undo_import_internal(uuid,uuid)");
 		expect(migration).toContain("GRANT EXECUTE ON FUNCTION public.list_ai_managed_cards");
+	});
+
+	it("S-29: definer deck relation writes cannot target tombstoned decks", () => {
+		const normalized = normalizeSql(s29Migration);
+
+		expect(normalized).toContain(
+			"create or replace function public.s29_guard_deck_cards_active_deck"
+		);
+		expect(normalized).toContain("from public.decks as decks");
+		expect(normalized).toContain("where decks.id = new.deck_id");
+		expect(normalized).toContain("and decks.deleted_at is null");
+		expect(normalized).toContain("create trigger s29_guard_deck_cards_active_deck");
+		expect(normalized).toContain(
+			"for each row execute function public.s29_guard_deck_cards_active_deck()"
+		);
 	});
 });

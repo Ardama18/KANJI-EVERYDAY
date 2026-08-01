@@ -22,8 +22,6 @@ import {
 const LOGIN_PATH = "/login";
 const GENERIC_DECK_DELETE_ERROR_MESSAGE =
 	"デッキを削除できませんでした。時間をおいて再度お試しください。";
-const ACTIVE_DECK_DELETE_ERROR_MESSAGE =
-	"学習中のデッキは削除できません。学習を終えてからもう一度お試しください。";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type DeckRow = Pick<
@@ -62,38 +60,6 @@ type CardMnemonicMetricQueryRow = Pick<
 	Database["public"]["Tables"]["card_mnemonics"]["Row"],
 	"illustration_key" | "status"
 >;
-
-type DeckDeleteTable = {
-	update: (values: Database["public"]["Tables"]["decks"]["Update"]) => {
-		eq: (
-			column: string,
-			value: string
-		) => {
-			eq: (
-				column: string,
-				value: string
-			) => {
-				is: (
-					column: string,
-					value: null
-				) => {
-					select: (columns: string) => {
-						maybeSingle: () => Promise<{
-							data: Pick<Database["public"]["Tables"]["decks"]["Row"], "id"> | null;
-							error: { code?: string; message: string } | null;
-						}>;
-					};
-				};
-				select: (columns: string) => {
-					maybeSingle: () => Promise<{
-						data: Pick<Database["public"]["Tables"]["decks"]["Row"], "id"> | null;
-						error: { code?: string; message: string } | null;
-					}>;
-				};
-			};
-		};
-	};
-};
 
 export interface DeckCounts {
 	new: number;
@@ -244,8 +210,13 @@ const normalizeDeckIdInput = (value: unknown): string | null => {
 	return UUID_PATTERN.test(deckId) ? deckId : null;
 };
 
-const isActiveDeckDeleteError = (error: { code?: string; message: string } | null): boolean =>
-	error?.code === "P1007";
+const normalizeConfirmationNameInput = (value: unknown): string | null => {
+	if (typeof value !== "string") {
+		return null;
+	}
+
+	return value.trim();
+};
 
 export async function deleteDeck(
 	previousState: DeckDeleteActionState,
@@ -254,7 +225,8 @@ export async function deleteDeck(
 	void previousState;
 
 	const deckId = normalizeDeckIdInput(formData.get("deckId"));
-	if (deckId === null) {
+	const confirmationName = normalizeConfirmationNameInput(formData.get("confirmationName"));
+	if (deckId === null || confirmationName === null || confirmationName.length === 0) {
 		return { status: "error", message: GENERIC_DECK_DELETE_ERROR_MESSAGE };
 	}
 
@@ -267,7 +239,7 @@ export async function deleteDeck(
 
 	const { data: deck, error: deckError } = await supabase
 		.from("decks")
-		.select("id")
+		.select("id, name")
 		.eq("id", deckId)
 		.eq("owner_user_id", userId)
 		.is("deleted_at", null)
@@ -277,36 +249,14 @@ export async function deleteDeck(
 		return { status: "error", message: GENERIC_DECK_DELETE_ERROR_MESSAGE };
 	}
 
-	const { data: activeSessions, error: activeSessionError } = await supabase
-		.from("study_sessions")
-		.select("id")
-		.eq("user_id", userId)
-		.eq("deck_id", deckId)
-		.is("finished_at", null)
-		.limit(1);
-
-	if (activeSessionError) {
+	if (confirmationName === null || confirmationName !== deck.name) {
 		return { status: "error", message: GENERIC_DECK_DELETE_ERROR_MESSAGE };
 	}
 
-	if ((activeSessions ?? []).length > 0) {
-		return { status: "error", message: ACTIVE_DECK_DELETE_ERROR_MESSAGE };
-	}
-
-	const table = supabase.from("decks") as unknown as DeckDeleteTable;
-	const { data: deletedDeck, error: deleteError } = await table
-		.update({ deleted_at: new Date().toISOString() })
-		.eq("id", deckId)
-		.eq("owner_user_id", userId)
-		.is("deleted_at", null)
-		.select("id")
-		.maybeSingle();
-
-	if (isActiveDeckDeleteError(deleteError)) {
-		return { status: "error", message: ACTIVE_DECK_DELETE_ERROR_MESSAGE };
-	}
-
-	if (deleteError || deletedDeck === null) {
+	const { error: deleteError } = await supabase.rpc("delete_deck_with_closed_sessions", {
+		p_deck_id: deckId,
+	});
+	if (deleteError) {
 		return { status: "error", message: GENERIC_DECK_DELETE_ERROR_MESSAGE };
 	}
 

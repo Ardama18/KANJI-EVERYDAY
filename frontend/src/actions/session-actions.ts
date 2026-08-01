@@ -403,6 +403,28 @@ const requireOwnedDeck = async (
 	return data as DeckRow;
 };
 
+const requireActiveDeckForSession = async (
+	supabase: SupabaseClient,
+	deckId: string,
+	userId: string
+): Promise<void> => {
+	const { data, error } = await supabase
+		.from("decks")
+		.select("id")
+		.eq("id", deckId)
+		.eq("owner_user_id", userId)
+		.is("deleted_at", null)
+		.maybeSingle();
+
+	if (error) {
+		throw new Error(`Failed to fetch active deck: ${error.message}`);
+	}
+
+	if (!data) {
+		throw new Error("Deck not found");
+	}
+};
+
 const requireSessionOwner = async (
 	supabase: SupabaseClient,
 	sessionId: string,
@@ -897,6 +919,7 @@ export async function getNextCard(sessionId: string): Promise<CardFrontData | nu
 	const supabase = createServerClient();
 	const userId = await requireAuthenticatedUserId(supabase);
 	const session = await requireSessionOwner(supabase, sessionId, userId);
+	await requireActiveDeckForSession(supabase, session.deck_id, userId);
 
 	if (session.finished_at) {
 		return null;
@@ -925,6 +948,7 @@ export async function revealCard(sessionId: string): Promise<CardBackData> {
 	const supabase = createServerClient();
 	const userId = await requireAuthenticatedUserId(supabase);
 	const session = await requireSessionOwner(supabase, sessionId, userId);
+	await requireActiveDeckForSession(supabase, session.deck_id, userId);
 
 	if (session.finished_at) {
 		throw new Error("Session is already finished");
@@ -958,6 +982,7 @@ export async function rateCard(sessionId: string, rating: Rating): Promise<RateR
 	const supabase = createServerClient();
 	const userId = await requireAuthenticatedUserId(supabase);
 	const session = await requireSessionOwner(supabase, sessionId, userId);
+	await requireActiveDeckForSession(supabase, session.deck_id, userId);
 
 	if (session.finished_at) {
 		return {

@@ -264,6 +264,7 @@ const createRevealCardClient = (options: {
 	illustration: Record<string, unknown> | null;
 }) => {
 	const sessionSelectChain = createRequireSessionChain(createSessionRow(false));
+	const deckSelectChain = createOwnedDeckSelectChain({ id: "deck-1" });
 	const sessionUpdateMock = vi.fn().mockReturnValue({
 		eq: vi.fn().mockResolvedValue({ error: null }),
 	});
@@ -276,6 +277,12 @@ const createRevealCardClient = (options: {
 			return {
 				select: sessionSelectChain.selectMock,
 				update: sessionUpdateMock,
+			};
+		}
+
+		if (table === "decks") {
+			return {
+				select: deckSelectChain.selectMock,
 			};
 		}
 

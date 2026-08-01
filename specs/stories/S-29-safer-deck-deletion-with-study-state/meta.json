@@ -1,0 +1,11 @@
+{
+  "story_id": "S-29",
+  "feature": "safer-deck-deletion-with-study-state",
+  "status": "design_review",
+  "github_issue_url": "https://github.com/Ardama18/KANJI-EVERYDAY/issues/92",
+  "github_branch": "issue/92",
+  "related_epic": "E-02",
+  "source_of_truth": "GitHub issue #92 body provided by implement orchestrator",
+  "created": "2026-08-01",
+  "updated": "2026-08-01"
+}
