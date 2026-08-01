@@ -35,7 +35,7 @@ export default function AuthLayout({ children }: AuthLayoutProps) {
 							href="/oauth/connections"
 							className="min-h-12 rounded-lg px-3 py-3 text-sm font-medium text-blue-700 hover:bg-blue-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
 						>
-							外部AI連携
+							外部サービス連携
 						</Link>
 					</div>
 					<SignOutButton />

@@ -11,9 +11,9 @@ export default async function OAuthConnectionsPage() {
 	const connections = await getOAuthConnections(supabase.auth.oauth as unknown as OAuthServerApi);
 	return (
 		<section className="mx-auto w-full max-w-3xl px-4 py-8">
-			<h1 className="text-2xl font-bold text-slate-900">外部AIとの連携</h1>
+			<h1 className="text-2xl font-bold text-slate-900">外部サービス連携</h1>
 			<p className="mt-2 text-sm text-slate-600">
-				連携を解除すると、その外部AIは次回の操作からこのアカウントのデッキや非公開カードにアクセスできません。
+				連携を解除すると、そのサービスは次回の操作からこのアカウントで許可された情報にアクセスできません。
 			</p>
 			{connections === null ? (
 				<p
