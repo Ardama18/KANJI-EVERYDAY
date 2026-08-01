@@ -38,6 +38,7 @@ describe("S-14 official Supabase OAuth server boundary", () => {
 	it("accepts only current-user authorization details with the exact standard scopes", async () => {
 		await expect(getVerifiedAuthorization(oauth(), userId, authorizationId)).resolves.toEqual({
 			authorizationId,
+			clientId,
 			clientName: "テスト外部AI",
 		});
 		await expect(

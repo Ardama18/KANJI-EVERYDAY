@@ -11,6 +11,10 @@ describe("S-14 OAuth connections UI", () => {
 		expect(source).toContain("連携解除へ進む");
 		expect(source).toContain("との連携を解除する");
 		expect(source).toContain('type="hidden" name="client_id"');
+		expect(source).toContain("getOAuthClientDisplay");
+		expect(source).toContain("display.revokeNotice");
+		expect(source).toContain("外部サービス連携一覧");
+		expect(source).toContain("連携中の外部サービスはありません。");
 		expect(source).toContain("min-h-12");
 	});
 });

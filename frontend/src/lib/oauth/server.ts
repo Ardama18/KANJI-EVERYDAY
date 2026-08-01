@@ -18,6 +18,7 @@ export interface OAuthServerApi {
 
 export type VerifiedAuthorization = Readonly<{
 	authorizationId: string;
+	clientId: string;
 	clientName: string;
 }>;
 
@@ -57,7 +58,7 @@ export async function getVerifiedAuthorization(
 		if (typeof clientName !== "string" || clientName.trim().length < 1 || clientName.length > 200) {
 			return null;
 		}
-		return { authorizationId, clientName: clientName.trim() };
+		return { authorizationId, clientId: response.client.id, clientName: clientName.trim() };
 	} catch {
 		return null;
 	}

@@ -5,6 +5,7 @@ import { useFormState, useFormStatus } from "react-dom";
 
 import { OAUTH_ACTION_INITIAL_STATE, type OAuthActionState } from "@/actions/oauth-action-types";
 import { revokeOAuthConnection } from "@/actions/oauth-actions";
+import { getOAuthClientDisplay } from "@/lib/oauth/client-display";
 
 export interface OAuthConnectionView {
 	readonly clientId: string;
@@ -31,6 +32,7 @@ function ConnectionRow({ connection }: Readonly<{ connection: OAuthConnectionVie
 		revokeOAuthConnection,
 		OAUTH_ACTION_INITIAL_STATE
 	);
+	const display = getOAuthClientDisplay(connection.clientId, connection.clientName);
 	return (
 		<li className="rounded-lg border border-slate-200 p-4">
 			<p className="break-words font-semibold text-slate-900">{connection.clientName}</p>
@@ -43,7 +45,7 @@ function ConnectionRow({ connection }: Readonly<{ connection: OAuthConnectionVie
 			{confirming ? (
 				<form action={formAction} className="mt-4 flex flex-col gap-3">
 					<input type="hidden" name="client_id" value={connection.clientId} />
-					<p className="text-sm text-slate-700">この外部AIは直ちにカード操作できなくなります。</p>
+					<p className="text-sm text-slate-700">{display.revokeNotice}</p>
 					{state.status === "error" && state.message ? (
 						<p role="alert" className="text-sm text-rose-700">
 							{state.message}
@@ -79,12 +81,12 @@ export function OAuthConnectionsClient(
 	if (props.connections.length === 0) {
 		return (
 			<p className="rounded-lg bg-slate-100 p-4 text-sm text-slate-700">
-				連携中の外部AIはありません。
+				連携中の外部サービスはありません。
 			</p>
 		);
 	}
 	return (
-		<ul className="mt-5 grid gap-3" aria-label="外部AIとの連携一覧">
+		<ul className="mt-5 grid gap-3" aria-label="外部サービス連携一覧">
 			{props.connections.map((connection) => (
 				<ConnectionRow key={connection.clientId} connection={connection} />
 			))}

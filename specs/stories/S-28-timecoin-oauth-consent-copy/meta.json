@@ -1,0 +1,10 @@
+{
+  "story_id": "S-28",
+  "feature": "timecoin-oauth-consent-copy",
+  "status": "implementation_review",
+  "github_issue_url": "https://github.com/Ardama18/KANJI-EVERYDAY/issues/90",
+  "github_branch": "issue/90",
+  "source_of_truth": "GitHub issue #90",
+  "created": "2026-08-01",
+  "updated": "2026-08-01"
+}
