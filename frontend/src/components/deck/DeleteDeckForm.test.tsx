@@ -203,6 +203,20 @@ describe("frontend/src/components/deck/DeleteDeckForm.tsx", () => {
 		expect(source).toContain("h-12");
 	});
 
+	it("centers the confirmation dialog in the viewport", async () => {
+		const harness = await createHarness();
+		(
+			findOne(harness.render(), (node) => node.props["aria-label"] === "「小学3年生」を削除").props
+				.onClick as () => void
+		)();
+
+		const dialog = findOne(harness.render(), (node) => node.type === "dialog");
+		const dialogClasses = String(dialog.props.className).split(/\s+/);
+
+		expect(dialogClasses).toContain("m-auto");
+		expect(dialogClasses).not.toContain("m-0");
+	});
+
 	it("opens the dialog, blocks mismatch submit, allows exact-match submit, and cancels without action", async () => {
 		const harness = await createHarness();
 		let tree = harness.render();
