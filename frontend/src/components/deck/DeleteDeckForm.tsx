@@ -112,7 +112,7 @@ export function DeleteDeckForm({ deckId, deckName }: DeleteDeckFormProps) {
 								closeDialog();
 							}
 						}}
-						className="m-0 flex max-h-full w-full max-w-md flex-col overflow-y-auto rounded-lg bg-white p-0 shadow-xl backdrop:bg-transparent"
+						className="m-auto flex max-h-full w-full max-w-md flex-col overflow-y-auto rounded-lg bg-white p-0 shadow-xl backdrop:bg-transparent"
 					>
 						<form
 							action={formAction}
