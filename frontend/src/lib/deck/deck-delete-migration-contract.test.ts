@@ -15,6 +15,10 @@ const S29_MIGRATION_PATH = resolve(
 	process.cwd(),
 	"../supabase/migrations/20260801000000_s29_safer_deck_delete_with_sessions.sql"
 );
+const S29_ACTOR_FIX_MIGRATION_PATH = resolve(
+	process.cwd(),
+	"../supabase/migrations/20260802000000_s29_deck_delete_actor_fix.sql"
+);
 const S02_MIGRATION_PATH = resolve(
 	process.cwd(),
 	"../supabase/migrations/20260223000000_s02_schema_rls.sql"
@@ -110,6 +114,26 @@ describe("S-29 safer deck logical delete migration contract", () => {
 		);
 		expect(sql).toContain(
 			"revoke all on function public.delete_deck_with_closed_sessions(uuid) from public, anon, authenticated, service_role"
+		);
+	});
+
+	it("resolves the delete RPC actor from packed PostgREST claims without auth schema access", () => {
+		const sql = normalizeSql(readFileSync(S29_ACTOR_FIX_MIGRATION_PATH, "utf8"));
+
+		expect(sql).toContain(
+			"create or replace function public.delete_deck_with_closed_sessions(p_deck_id uuid)"
+		);
+		expect(sql).toContain("actor_id := public.ai_s13_authenticated_actor()");
+		expect(sql).not.toContain("actor_id := auth.uid()");
+		expect(sql).not.toContain("grant usage on schema auth");
+		expect(sql).toContain(
+			"alter function public.delete_deck_with_closed_sessions(uuid) owner to s10_migration_owner"
+		);
+		expect(sql).toContain(
+			"revoke all on function public.delete_deck_with_closed_sessions(uuid) from public, anon, authenticated, service_role"
+		);
+		expect(sql).toContain(
+			"grant execute on function public.delete_deck_with_closed_sessions(uuid) to authenticated"
 		);
 	});
 
