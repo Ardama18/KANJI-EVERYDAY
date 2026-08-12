@@ -13,7 +13,7 @@ ChatGPT
   -> authorize -> KANJI-EVERYDAY login -> consent
   -> Authorization Code + PKCE で token を取得
   -> /api/mcp を initialize
-  -> tools/list で9ツールを取得
+  -> tools/list で10ツールを取得
   -> tools/call を実行
 ```
 
@@ -52,9 +52,9 @@ MCP_ALLOWED_ORIGIN=https://chatgpt.com
 - 未認証の `/api/mcp` が HTTP 401 と Bearer challenge を返す。
 - Protected Resource Metadata が HTTP 200 を返し、canonical resource と exact scopes を示す。
 - 認証済み `initialize` が HTTP 200 を返し、protocol version `2025-11-25` を合意する。
-- 認証済み `tools/list` が HTTP 200 を返し、9ツールを返す。
-- 全9 descriptor に `title`、`description`、`inputSchema`、`outputSchema`、`annotations.openWorldHint=false` がある。
-- 全9 descriptor の top-level `securitySchemes` と `_meta.securitySchemes` が一致し、scopes が `openid email profile` だけである。
+- 認証済み `tools/list` が HTTP 200 を返し、10ツールを返す。
+- 全10 descriptor に `description`、`inputSchema`、`annotations` がある。
+- 全10 descriptor の top-level `securitySchemes` と `_meta.securitySchemes` が一致し、scopes が `openid email profile` だけである。
 - 少なくとも1つの安全な read tool を実行できる。
 
 HTTP 200 だけでは成功とみなさない。JSON-RPC response body と tool descriptor の内容まで確認する。
@@ -68,7 +68,7 @@ HTTP 200 だけでは成功とみなさない。JSON-RPC response body と tool 
 | 新規登録で環境設定エラー | Hosted auth / application env | Supabase URL、公開 key、signup 設定、対象 project の一致 |
 | 「許可」で client-side exception | consent 実装 | browser console、server log、client-side redirect や Server Action 境界 |
 | 「許可」後に ChatGPT が接続エラー | token / MCP / descriptor | token exchange、access token の audience、`initialize`、`tools/list` の順に確認 |
-| 接続できたが「アクションなし」 | MCP descriptor | 9ツールの件数と必須 descriptor fields を確認 |
+| 接続できたが「アクションなし」 | MCP descriptor | 10ツールの件数と必須 descriptor fields を確認 |
 | token 発行後の MCP が401 | authorization boundary | access token の audience、grant、session、exact scopes |
 | preview は成功するが commit だけ `UNAUTHORIZED` | preview HMAC / runtime config | Vercel と Supabase の preview 署名secretが同じか、`remote_mcp` batch が作成されたかを確認 |
 | 新しいコネクターでも同じエラー | server contract | コネクターを増やさず、直前の失敗レイヤーを修正する |
@@ -105,23 +105,23 @@ approve / deny は通常の POST route で server-side に処理し、Supabase �
 
 ChatGPT 互換性のため、各 tool は少なくとも次を返す。
 
-- 人が読める `title` と `description`
-- `inputSchema` と実際の `structuredContent` に対応する `outputSchema`
-- read / mutation / destructive 性を表す `annotations`
-- 外部の未知な対象へアクセスしないことを示す `openWorldHint=false`
+- 人が読める `description`
+- `inputSchema`
+- read / mutation / destructive / idempotent 性を表す `annotations`
 - top-level と `_meta` の双方に同じ OAuth `securitySchemes`
 
-KANJI-EVERYDAY は次の9ツールだけを公開する。
+KANJI-EVERYDAY は次の10ツールだけを公開する。
 
 1. `list_decks`
-2. `create_deck`
-3. `preview_card_import`
-4. `commit_card_import`
-5. `get_import_status`
-6. `list_ai_cards`
-7. `update_ai_card`
-8. `delete_ai_cards`
-9. `undo_import_batch`
+2. `get_daily_study_status`
+3. `create_deck`
+4. `preview_card_import`
+5. `commit_card_import`
+6. `get_import_status`
+7. `list_ai_cards`
+8. `update_ai_card`
+9. `delete_ai_cards`
+10. `undo_import_batch`
 
 ### 5.7 HTTP boundary を狭めすぎない
 
@@ -231,10 +231,9 @@ token、認可コード、cookie、authorization ID の実値は証跡へ保存�
 
 HTTP status だけでなく response body を確認する。
 
-- tool 数は9。
+- tool 数は10。
 - tool 名は固定 allowlist と一致する。
-- 全9件に `title`、`description`、`inputSchema`、`outputSchema` がある。
-- `openWorldHint=false` である。
+- 全10件に `description`、`inputSchema`、`annotations` がある。
 - top-level と `_meta` の `securitySchemes` が一致する。
 
 「利用できるアクションはありません」は、まずこのレイヤーの不整合を疑う。
@@ -286,7 +285,7 @@ chat、issue、console、screen capture に credential を貼った場合は、�
 - [ ] consent の authorization ID を opaque identifier として扱う。
 - [ ] approve / deny は server-side POST と公式 redirect を使う。
 - [ ] `initialize` は MCP `2025-11-25` で成功する。
-- [ ] `tools/list` は9件を返し、全 descriptor の必須項目を満たす。
+- [ ] `tools/list` は10件を返し、全 descriptor の必須項目を満たす。
 - [ ] top-level と `_meta` の OAuth security schemes が一致する。
 - [ ] HTTP status だけでなく JSON-RPC body を検証する。
 - [ ] Vercel と Supabase の preview 署名secretを同じ値で管理している。
