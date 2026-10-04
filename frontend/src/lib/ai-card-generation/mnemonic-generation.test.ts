@@ -466,7 +466,7 @@ describe("S-21 generateApprovedMnemonics", () => {
 		expect(stopped).toEqual([]);
 	});
 
-	it("skips concepts that have not started once the wall-clock budget is spent", async () => {
+	it("does not return drafts that cannot be moderated within the wall-clock budget", async () => {
 		let clock = 0;
 		const fetcher = providerFetcher(() => {
 			clock += 400;
@@ -484,8 +484,7 @@ describe("S-21 generateApprovedMnemonics", () => {
 			now: () => clock,
 		});
 
-		expect(entries.length).toBeLessThan(items.length);
-		expect(entries.length).toBeGreaterThan(0);
+		expect(entries).toEqual([]);
 	});
 
 	it("bounds provider concurrency", async () => {

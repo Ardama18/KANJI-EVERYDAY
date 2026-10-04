@@ -39,7 +39,8 @@ export function parseBatchPointer(value: string, expectedDeckId: string): BatchP
 }
 
 export function nextPollDelay(elapsedMs: number, status: ImportBatchStatus): number | undefined {
-	if (["completed", "partial", "failed", "undone"].includes(status)) return undefined;
+	if (["completed", "partial", "failed", "undone", "blocked_mnemonic"].includes(status))
+		return undefined;
 	return elapsedMs < 30_000 ? 2_000 : 5_000;
 }
 

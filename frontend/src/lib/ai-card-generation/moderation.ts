@@ -38,6 +38,7 @@ export async function moderate(args: {
 		"OPENAI_INPUT_TEXT_MODERATION" | "OPENAI_INPUT_IMAGE_MODERATION" | "OPENAI_OUTPUT_MODERATION"
 	>;
 	readonly fetcher?: typeof fetch;
+	readonly signal?: AbortSignal;
 }): Promise<void> {
 	const fetcher = args.fetcher ?? fetch;
 	let response: Response;
@@ -49,7 +50,7 @@ export async function moderate(args: {
 				"Content-Type": "application/json",
 			},
 			body: JSON.stringify(buildModerationPayload(args.config.moderationModel, args.input)),
-			signal: AbortSignal.timeout(args.config.moderationTimeoutMs),
+			signal: args.signal ?? AbortSignal.timeout(args.config.moderationTimeoutMs),
 		});
 	} catch {
 		throw new AiCardGenerationError("OPENAI_MODERATION_UNAVAILABLE");

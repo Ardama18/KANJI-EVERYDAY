@@ -24,14 +24,29 @@ export default function ImportStatus({ result, tracking, onRefresh }: ImportStat
 					? "状況を取得しています"
 					: `状態: ${result.status} / 成功 ${result.counts.succeeded}件 / 失敗 ${result.counts.failed}件`}
 			</p>
-			{result?.items.some((item) => item.status === "succeeded" || item.status === "failed") ? (
+			{result?.items.some(
+				(item) =>
+					item.status === "succeeded" ||
+					item.status === "failed" ||
+					item.status === "blocked_mnemonic"
+			) ? (
 				<ul className="mt-3 space-y-1 text-sm">
 					{result.items
-						.filter((item) => item.status === "succeeded" || item.status === "failed")
+						.filter(
+							(item) =>
+								item.status === "succeeded" ||
+								item.status === "failed" ||
+								item.status === "blocked_mnemonic"
+						)
 						.map((item, index) => (
 							<li key={item.itemId}>
-								カード{index + 1}: {item.status === "succeeded" ? "成功" : "失敗"} /{" "}
-								{item.conceptId} /{" "}
+								カード{index + 1}:{" "}
+								{item.status === "succeeded"
+									? "成功"
+									: item.status === "blocked_mnemonic"
+										? "未完了（再試行待ち）"
+										: "失敗"}{" "}
+								/ {item.conceptId} /{" "}
 								{item.status === "succeeded"
 									? "登録済み"
 									: safeCodeMessage(item.errorCode ?? "INTERNAL_ERROR")}

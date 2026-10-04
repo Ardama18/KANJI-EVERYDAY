@@ -39,4 +39,30 @@ describe("ImportStatus partial result", () => {
 		expect(text).toContain("カード2: 失敗 / concept-001 /");
 		expect(text).not.toContain("PROVIDER_TRANSIENT_ERROR");
 	});
+	it("shows missing mnemonic as unfinished with a safe reason", () => {
+		const markup = renderToStaticMarkup(
+			createElement(ImportStatus, {
+				tracking: false,
+				onRefresh: async () => undefined,
+				result: {
+					batchId: "11111111-1111-4111-8111-111111111111",
+					status: "blocked_mnemonic",
+					counts: { total: 1, succeeded: 0, failed: 0 },
+					items: [
+						{
+							itemId: "22222222-2222-4222-8222-222222222222",
+							conceptId: "危ない",
+							status: "blocked_mnemonic",
+							errorCode: "MNEMONIC_TIMEOUT",
+						},
+					],
+				},
+			})
+		);
+		const text = markup.replace(/<[^>]*>/gu, "");
+		expect(text).toContain("未完了（再試行待ち）");
+		expect(text).toContain("覚え方の生成が時間切れ");
+		expect(text).not.toContain("登録済み");
+		expect(text).not.toContain("MNEMONIC_TIMEOUT");
+	});
 });

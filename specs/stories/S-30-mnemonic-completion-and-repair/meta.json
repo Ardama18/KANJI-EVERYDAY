@@ -1,0 +1,11 @@
+{
+  "story_id": "S-30",
+  "feature": "mnemonic-completion-and-repair",
+  "status": "implementation_review",
+  "github_issue_url": "https://github.com/Ardama18/KANJI-EVERYDAY/issues/97",
+  "github_branch": "fix/97-mnemonic-completion",
+  "source_of_truth": "Issue #97 and user-authorized permanent fix; ADR-015",
+  "created": "2026-10-04",
+  "updated": "2026-10-04",
+  "verification": "local contract gates passed; Hosted/PostgREST/provider and browser rollout pending"
+}

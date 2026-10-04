@@ -2,9 +2,10 @@ import { createSafeLogger } from "../_shared/ai-card-import/logger.ts";
 import { createLazyMagickCodec } from "../_shared/ai-card-import/magick-codec.ts";
 import { createGeminiProvider } from "../_shared/ai-card-import/providers/gemini.ts";
 import { createOpenAiProvider } from "../_shared/ai-card-import/providers/openai.ts";
+import { createRepairDatabase, processOneRepair } from "../_shared/ai-card-import/repair-worker.ts";
 import { createStorageClient } from "../_shared/ai-card-import/storage.ts";
-import { handleWorkerRequest } from "../_shared/ai-card-import/worker-entrypoint.ts";
 import { createSupabaseDatabase } from "../_shared/ai-card-import/supabase.ts";
+import { handleWorkerRequest } from "../_shared/ai-card-import/worker-entrypoint.ts";
 import { processOneConcept } from "../_shared/ai-card-import/worker.ts";
 
 Deno.serve(async (request) => {
@@ -19,10 +20,8 @@ Deno.serve(async (request) => {
 			const database = createSupabaseDatabase({ supabaseUrl, serviceRoleKey });
 			const storage = createStorageClient({ supabaseUrl, serviceRoleKey });
 			const providerEndpoint = optionalEnvironment("ILLUSTRATION_PROVIDER_ENDPOINT");
-			const providerEndpointBinding = optionalEnvironment(
-				"ILLUSTRATION_PROVIDER_ENDPOINT_BINDING"
-			);
-			const outcome = await processOneConcept({
+			const providerEndpointBinding = optionalEnvironment("ILLUSTRATION_PROVIDER_ENDPOINT_BINDING");
+			const dependencies = {
 				database,
 				storage,
 				codec: createLazyMagickCodec(),
@@ -52,8 +51,12 @@ Deno.serve(async (request) => {
 				now: () => new Date(),
 				randomUuid: () => crypto.randomUUID(),
 				log: logger,
+			};
+			const repair = await processOneRepair({
+				...dependencies,
+				database: createRepairDatabase({ supabaseUrl, serviceRoleKey }),
 			});
-			return outcome;
+			return repair === "idle" ? await processOneConcept(dependencies) : repair;
 		},
 	});
 });

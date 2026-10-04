@@ -72,6 +72,8 @@ describe("S-14 MCP SDK v1 stateless server", () => {
 			"preview_card_import",
 			"commit_card_import",
 			"get_import_status",
+			"retry_mnemonic",
+			"repair_card_illustration",
 			"list_ai_cards",
 			"update_ai_card",
 			"delete_ai_cards",

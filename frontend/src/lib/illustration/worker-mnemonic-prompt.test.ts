@@ -62,16 +62,17 @@ describe("buildMnemonicPrompt（単字）", () => {
 });
 
 describe("buildMnemonicPrompt（複数字）", () => {
-	it("UT-S16H-03-MULTI-SUPPRESS-SHAPE-MAPPING: 部首→絵マッピングを出さず字形と語全体の物語は維持する", () => {
+	it("UT-S16H-03-MULTI-INCLUDE-SHAPE-MAPPING: 形の手掛かりを具体物として描き字形を維持する", () => {
 		const prompt = buildMnemonicPrompt(multiKanjiSlots);
 
 		expect(prompt).not.toContain("【形の手掛かり】");
 		expect(prompt).not.toContain("に関連づける");
-		expect(prompt).not.toContain("偏");
+		expect(prompt).toContain("偏");
+		expect(prompt).toContain("【形と場面の手掛かり】");
 		expect(prompt).toContain("【正確な字形】");
 		expect(prompt).toContain("・画数、線の向き、部首の位置を変更しない");
 		expect(prompt).toContain(
-			"「子どもたちが校舎で一緒に学ぶ」という一つの場面で、語全体の意味を表す"
+			"「子どもたちが校舎で一緒に学ぶ」に登場する具体物・動作・位置関係を一つの場面として描き、形の手掛かりと語の意味を結びつける"
 		);
 	});
 });

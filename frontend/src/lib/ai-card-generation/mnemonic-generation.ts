@@ -2,6 +2,8 @@ import { isUnicodeScalarText, normalizeDisplayText } from "@/lib/ai-import/norma
 import type { OpenAiCardGenerationConfig } from "@/lib/env";
 
 import type { MnemonicDraft, MnemonicDraftEntry } from "./contracts";
+import { AiCardGenerationError } from "./errors";
+import type { MnemonicErrorCode, MnemonicOutcome } from "./mnemonic-outcomes";
 import { sanitizeMnemonicExplanation, sanitizeMnemonicSlots } from "./mnemonic-sanitize";
 import { moderate } from "./moderation";
 import {
@@ -22,9 +24,8 @@ import {
  * policy, the per-field Japanese guidance, the length caps, mappings 2-4 and the
  * parse rules — are imported from `openai-adapter.ts` rather than restated here.
  *
- * Every failure path returns `null` / drops the concept: a missing mnemonic must
- * never block card creation (S-21 AC-4).  The provider response body and error are
- * never logged nor returned.
+ * MCP uses lossless per-concept outcomes (Issue #97). Legacy draft-only helpers
+ * remain for callers outside that contract. Provider bodies are never exposed.
  */
 
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
@@ -220,77 +221,209 @@ export function buildMnemonicResponsesPayload(
 	};
 }
 
-/**
- * Returns `null` on every failure (network, HTTP, timeout, refusal, schema
- * mismatch, sanitize rejection).  Never throws, so a caller can keep committing
- * cards without the mnemonic.
- */
-export async function generateMnemonicDraft(args: {
+type DraftResult =
+	| { readonly ok: true; readonly draft: MnemonicDraft }
+	| { readonly ok: false; readonly code: MnemonicErrorCode };
+
+/** No provider body or raw exception crosses this boundary. */
+export async function generateMnemonicResult(args: {
 	readonly config: OpenAiCardGenerationConfig;
 	readonly input: MnemonicGenerationInput;
 	readonly fetcher?: typeof fetch;
-}): Promise<MnemonicDraft | null> {
-	const fetcher = args.fetcher ?? fetch;
+	readonly signal?: AbortSignal;
+}): Promise<DraftResult> {
+	const signal = args.signal ?? AbortSignal.timeout(args.config.generationTimeoutMs);
+	let response: Response;
 	try {
-		const response = await fetcher(OPENAI_RESPONSES_URL, {
+		response = await (args.fetcher ?? fetch)(OPENAI_RESPONSES_URL, {
 			method: "POST",
 			headers: {
 				Authorization: `Bearer ${args.config.apiKey}`,
 				"Content-Type": "application/json",
 			},
 			body: JSON.stringify(buildMnemonicResponsesPayload(args.config, args.input)),
-			signal: AbortSignal.timeout(args.config.generationTimeoutMs),
+			signal,
 		});
-		if (!response.ok) {
-			await discardBody(response);
-			return null;
-		}
-		const body = await readBoundedJson(response, MAX_PROVIDER_BODY_BYTES);
-		const draft = parseMnemonic(parseOpenAiOutputJson(body), {
-			kanji: args.input.kanji,
-			isSingleKanji: args.input.isSingleKanji,
-		});
-		// Re-run the canonical server-side sanitize so the value that reaches the
-		// commit body is already NFKC-normalized and length-capped (ADR-012 #5).
-		const slots = sanitizeMnemonicSlots(draft.slots);
-		const explanation = sanitizeMnemonicExplanation(draft.explanation);
-		if (slots === undefined || explanation === undefined) return null;
-		return { slots, explanation };
 	} catch {
-		// Provider errors carry response text; they are swallowed rather than logged.
-		return null;
+		return { ok: false, code: signal.aborted ? "MNEMONIC_TIMEOUT" : "MNEMONIC_NETWORK" };
 	}
+	if (!response.ok) {
+		await discardBody(response);
+		return {
+			ok: false,
+			code:
+				response.status === 408 || response.status === 429 || response.status >= 500
+					? "MNEMONIC_HTTP_TRANSIENT"
+					: "MNEMONIC_HTTP_PERMANENT",
+		};
+	}
+	let draft: MnemonicDraft;
+	try {
+		draft = parseMnemonic(
+			parseOpenAiOutputJson(await readBoundedJson(response, MAX_PROVIDER_BODY_BYTES)),
+			{
+				kanji: args.input.kanji,
+				isSingleKanji: args.input.isSingleKanji,
+			}
+		);
+	} catch (error) {
+		return {
+			ok: false,
+			code: signal.aborted
+				? "MNEMONIC_TIMEOUT"
+				: error instanceof AiCardGenerationError && error.code === "OPENAI_REFUSAL"
+					? "MNEMONIC_REFUSED"
+					: "MNEMONIC_RESPONSE_INVALID",
+		};
+	}
+	const slots = sanitizeMnemonicSlots(draft.slots);
+	const explanation = sanitizeMnemonicExplanation(draft.explanation);
+	if (slots === undefined || explanation === undefined)
+		return { ok: false, code: "MNEMONIC_VALIDATION_FAILED" };
+	return { ok: true, draft: { slots, explanation } };
 }
 
-/**
- * Output-stage moderation for one mnemonic. `false` means "drop this concept" —
- * both a flagged result and an unavailable moderation service.  Per concept, not
- * per batch, so one flagged card cannot discard the others.
- */
-export async function moderateMnemonicDraft(
+/** Legacy draft-only caller. MCP uses the lossless outcome API below. */
+export async function generateMnemonicDraft(args: {
+	readonly config: OpenAiCardGenerationConfig;
+	readonly input: MnemonicGenerationInput;
+	readonly fetcher?: typeof fetch;
+}): Promise<MnemonicDraft | null> {
+	const result = await generateMnemonicResult(args);
+	return result.ok ? result.draft : null;
+}
+
+export async function moderateMnemonicResult(
 	config: OpenAiCardGenerationConfig,
 	draft: MnemonicDraft,
-	fetcher?: typeof fetch
-): Promise<boolean> {
+	fetcher?: typeof fetch,
+	signal?: AbortSignal
+): Promise<{ readonly ok: true } | { readonly ok: false; readonly code: MnemonicErrorCode }> {
 	try {
 		await moderate({
 			config,
 			input: { kind: "text", text: serializeMnemonicForModeration(draft) },
 			flaggedCode: "OPENAI_OUTPUT_MODERATION",
 			fetcher,
+			signal,
 		});
-		return true;
-	} catch {
-		return false;
+		return { ok: true };
+	} catch (error) {
+		return {
+			ok: false,
+			code:
+				error instanceof AiCardGenerationError && error.code === "OPENAI_OUTPUT_MODERATION"
+					? "MNEMONIC_MODERATION_BLOCKED"
+					: "MNEMONIC_MODERATION_UNAVAILABLE",
+		};
 	}
 }
 
-/**
- * Generates and moderates mnemonics for the eligible concepts of one request.
- * Concepts beyond `maxConcepts`, concepts not started before the wall-clock budget
- * runs out, and concepts whose generation or moderation fails are simply absent
- * from the result; the caller commits the cards either way (S-21 D7 / D9).
- */
+export async function moderateMnemonicDraft(
+	config: OpenAiCardGenerationConfig,
+	draft: MnemonicDraft,
+	fetcher?: typeof fetch
+): Promise<boolean> {
+	return (await moderateMnemonicResult(config, draft, fetcher)).ok;
+}
+
+/** One result per concept, including targets never started due to limits. */
+export async function generateMnemonicOutcomes(args: {
+	readonly config?: OpenAiCardGenerationConfig;
+	readonly items: readonly MnemonicSourceItem[];
+	readonly limits: MnemonicGenerationLimits;
+	readonly fetcher?: typeof fetch;
+	readonly now?: () => number;
+}): Promise<readonly MnemonicOutcome[]> {
+	const now = args.now ?? Date.now;
+	const deadline = now() + args.limits.budgetMs;
+	const representatives = new Map<string, MnemonicSourceItem>();
+	for (const item of args.items) {
+		if (!representatives.has(item.conceptId) || item.pattern === "R1")
+			representatives.set(item.conceptId, item);
+	}
+	const eligible: MnemonicKanjiTarget[] = [];
+	const results = new Map<string, MnemonicOutcome>();
+	for (const item of representatives.values()) {
+		const target = deriveKanjiTargetFromItem(item);
+		if (target === null) {
+			const kanji = normalizeDisplayText(item.pattern === "R1" ? item.front : item.back);
+			results.set(
+				item.conceptId,
+				HAN_PATTERN.test(kanji)
+					? { conceptId: item.conceptId, status: "blocked", code: "MNEMONIC_TARGET_UNSUPPORTED" }
+					: { conceptId: item.conceptId, status: "not_required" }
+			);
+		} else {
+			eligible.push(target);
+			results.set(item.conceptId, {
+				conceptId: item.conceptId,
+				status: "blocked",
+				code:
+					args.limits.maxConcepts <= 0
+						? "MNEMONIC_DISABLED"
+						: args.config === undefined
+							? "MNEMONIC_CONFIG_MISSING"
+							: eligible.length > args.limits.maxConcepts
+								? "MNEMONIC_LIMIT_EXCEEDED"
+								: "MNEMONIC_BUDGET_EXCEEDED",
+			});
+		}
+	}
+	const config = args.config;
+	if (config === undefined || args.limits.maxConcepts <= 0) return [...results.values()];
+	const targets = eligible.slice(0, args.limits.maxConcepts);
+	let cursor = 0;
+	const worker = async () => {
+		for (;;) {
+			const target = targets[cursor++];
+			if (target === undefined) return;
+			const remaining = deadline - now();
+			if (remaining <= 0) return;
+			const signal = AbortSignal.timeout(
+				Math.max(1, Math.min(config.generationTimeoutMs, remaining))
+			);
+			const draft = await generateMnemonicResult({
+				config,
+				input: target,
+				fetcher: args.fetcher,
+				signal,
+			});
+			if (!draft.ok) {
+				results.set(target.conceptId, {
+					conceptId: target.conceptId,
+					status: "blocked",
+					code: now() >= deadline ? "MNEMONIC_BUDGET_EXCEEDED" : draft.code,
+				});
+				continue;
+			}
+			const moderationRemaining = deadline - now();
+			if (moderationRemaining <= 0) continue;
+			const moderation = await moderateMnemonicResult(
+				config,
+				draft.draft,
+				args.fetcher,
+				AbortSignal.timeout(Math.max(1, Math.min(config.moderationTimeoutMs, moderationRemaining)))
+			);
+			results.set(
+				target.conceptId,
+				moderation.ok
+					? { conceptId: target.conceptId, status: "approved", mnemonic: draft.draft }
+					: {
+							conceptId: target.conceptId,
+							status: "blocked",
+							code: now() >= deadline ? "MNEMONIC_BUDGET_EXCEEDED" : moderation.code,
+						}
+			);
+		}
+	};
+	await Promise.all(
+		Array.from({ length: Math.min(MNEMONIC_GENERATION_CONCURRENCY, targets.length) }, worker)
+	);
+	return [...results.values()];
+}
+
+/** Compatibility projection for draft-only callers; import completion must use lossless outcomes. */
 export async function generateApprovedMnemonics(args: {
 	readonly config: OpenAiCardGenerationConfig;
 	readonly items: readonly MnemonicSourceItem[];
@@ -298,41 +431,10 @@ export async function generateApprovedMnemonics(args: {
 	readonly fetcher?: typeof fetch;
 	readonly now?: () => number;
 }): Promise<readonly MnemonicDraftEntry[]> {
-	const now = args.now ?? (() => Date.now());
-	const targets = deriveKanjiTarget(args.items).slice(0, Math.max(0, args.limits.maxConcepts));
-	if (targets.length === 0) return [];
-	const deadline = now() + args.limits.budgetMs;
-	const drafts = new Array<MnemonicDraftEntry | undefined>(targets.length);
-	let cursor = 0;
-	const worker = async (): Promise<void> => {
-		for (;;) {
-			const index = cursor;
-			cursor += 1;
-			if (index >= targets.length || now() >= deadline) return;
-			const target = targets[index];
-			if (target === undefined) return;
-			const draft = await generateMnemonicDraft({
-				config: args.config,
-				input: {
-					kanji: target.kanji,
-					isSingleKanji: target.isSingleKanji,
-					meaning: target.meaning,
-				},
-				fetcher: args.fetcher,
-			});
-			if (draft === null) continue;
-			if (!(await moderateMnemonicDraft(args.config, draft, args.fetcher))) continue;
-			drafts[index] = {
-				conceptId: target.conceptId,
-				slots: draft.slots,
-				explanation: draft.explanation,
-			};
-		}
-	};
-	await Promise.all(
-		Array.from({ length: Math.min(MNEMONIC_GENERATION_CONCURRENCY, targets.length) }, worker)
+	const outcomes = await generateMnemonicOutcomes(args);
+	return outcomes.flatMap((outcome) =>
+		outcome.status === "approved" ? [{ conceptId: outcome.conceptId, ...outcome.mnemonic }] : []
 	);
-	return drafts.filter((entry): entry is MnemonicDraftEntry => entry !== undefined);
 }
 
 /** Same serialization as the app-path output moderation (`generation-service.ts`). */
