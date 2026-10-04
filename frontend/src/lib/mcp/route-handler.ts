@@ -1,5 +1,5 @@
-import { generateApprovedMnemonics } from "@/lib/ai-card-generation/mnemonic-generation";
-import type { CommitMnemonicEntry } from "@/lib/ai-import/service";
+import { generateMnemonicOutcomes } from "@/lib/ai-card-generation/mnemonic-generation";
+import type { MnemonicOutcome } from "@/lib/ai-card-generation/mnemonic-outcomes";
 import {
 	type McpEnvConfig,
 	getAiPreviewHmacSecret,
@@ -63,25 +63,22 @@ export function createDefaultMcpRouteDependencies(): McpRouteDependencies {
  *
  * The flag, the provider config and the limits are read per call, so
  * `MCP_AUTO_MNEMONIC_MAX_CONCEPTS=0` works as an immediate kill switch. Whenever any
- * of them is missing or disabled the function returns `undefined`, which keeps the
- * pre-S-21 behaviour: the cards are committed without mnemonics.
+ * of them is missing or disabled, required words get an explicit blocked outcome.
+ * Import completion is gated by the authenticated database commit.
  */
 export function createDefaultMnemonicGenerator(): (
 	request: McpImportRequest
-) => Promise<readonly CommitMnemonicEntry[] | undefined> {
+) => Promise<readonly MnemonicOutcome[]> {
 	return async (request) => {
-		if (!isAiCardImportEnabled()) return undefined;
 		const config = getOpenAiCardGenerationConfig();
-		const limits = getMcpAutoMnemonicConfig();
-		if (config === undefined || limits === undefined || limits.maxConcepts === 0) return undefined;
-		const entries = await generateApprovedMnemonics({
+		const limits = !isAiCardImportEnabled()
+			? { maxConcepts: 0, budgetMs: 0 }
+			: (getMcpAutoMnemonicConfig() ?? { maxConcepts: 0, budgetMs: 0 });
+		return await generateMnemonicOutcomes({
 			config,
-			// Only `ai` concepts get an illustration row, so only they can own a
-			// card_mnemonics row (S-21 D4).
 			items: request.items.filter((item) => item.image.mode === "ai"),
 			limits,
 		});
-		return entries.length === 0 ? undefined : entries;
 	};
 }
 

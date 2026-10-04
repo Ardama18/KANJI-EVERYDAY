@@ -96,3 +96,8 @@ design.md に記録する。
 2. 新規 migration の適用（`s14_remote_commit_import` の signature 変更）。適用先環境の確認が必要。
 3. MCP route への `maxDuration` 設定（Vercel 実行時間・課金に影響）。
 4. 新規環境変数（生成上限・並列度）の追加。
+
+
+## S-30による後続契約（2026-10-04）
+
+Issue #97の恒久対策は `../S-30-mnemonic-completion-and-repair/requirements.md` とADR-015を正本とする。Remote MCPのAI画像で漢字を含む語について、生成・安全確認の失敗、件数超過・時間切れ時にmnemonicを省略して完成させる旧契約は置換する。これらの語は理由付きの未完了状態となり、語単位の明示的な再試行で復旧する。

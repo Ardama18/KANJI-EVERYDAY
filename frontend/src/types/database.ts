@@ -3,6 +3,53 @@ export type Json = string | number | boolean | null | { [key: string]: Json | un
 export type Database = {
 	public: {
 		Tables: {
+			ai_illustration_repair_jobs: {
+				Row: {
+					id: string;
+					owner_user_id: string;
+					original_job_id: string;
+					old_illustration_id: string;
+					new_illustration_id: string;
+					idempotency_key: string;
+					card_snapshot: Json;
+					old_mnemonic_updated_at: string | null;
+					state: string;
+					slots: Json | null;
+					explanation: Json | null;
+					claim_token: string | null;
+					claim_expires_at: string | null;
+					error_code: string | null;
+					attempt: number;
+					image_reserved: boolean;
+					next_attempt_at: string | null;
+					created_at: string;
+					updated_at: string;
+				};
+				Insert: {
+					id?: string;
+					owner_user_id: string;
+					original_job_id: string;
+					old_illustration_id: string;
+					new_illustration_id: string;
+					idempotency_key: string;
+					card_snapshot: Json;
+					old_mnemonic_updated_at?: string | null;
+					state?: string;
+					slots?: Json | null;
+					explanation?: Json | null;
+					claim_token?: string | null;
+					claim_expires_at?: string | null;
+					error_code?: string | null;
+					attempt?: number;
+					image_reserved?: boolean;
+					next_attempt_at?: string | null;
+					created_at?: string;
+					updated_at?: string;
+				};
+				Update: Partial<Database["public"]["Tables"]["ai_illustration_repair_jobs"]["Insert"]>;
+				Relationships: [];
+			};
+
 			ai_upload_consumers: {
 				Row: {
 					created_at: string;
@@ -21,6 +68,12 @@ export type Database = {
 			};
 			ai_import_concept_jobs: {
 				Row: {
+					mnemonic_required: boolean;
+					mnemonic_state: string;
+					mnemonic_error_code: string | null;
+					mnemonic_attempt: number;
+					mnemonic_claim_token: string | null;
+					mnemonic_claim_expires_at: string | null;
 					attempt: number;
 					batch_id: string;
 					claim_expires_at: string | null;
@@ -40,6 +93,12 @@ export type Database = {
 					updated_at: string;
 				};
 				Insert: {
+					mnemonic_required?: boolean;
+					mnemonic_state?: string;
+					mnemonic_error_code?: string | null;
+					mnemonic_attempt?: number;
+					mnemonic_claim_token?: string | null;
+					mnemonic_claim_expires_at?: string | null;
 					attempt?: number;
 					batch_id: string;
 					claim_expires_at?: string | null;
@@ -63,6 +122,11 @@ export type Database = {
 			};
 			ai_illustration_objects: {
 				Row: {
+					repair_job_id: string | null;
+					mnemonic_slots_snapshot: Json | null;
+					mnemonic_slots_hash: string | null;
+					prompt_version: string | null;
+					prompt_hash: string | null;
 					cleanup_claimed_at: string | null;
 					cleanup_claim_token: string | null;
 					cleanup_previous_state: string | null;
@@ -74,7 +138,7 @@ export type Database = {
 					height: number | null;
 					id: string;
 					illustration_id: string;
-					job_id: string;
+					job_id: string | null;
 					owner_user_id: string;
 					reference_count: number;
 					state: string;
@@ -84,6 +148,11 @@ export type Database = {
 					width: number | null;
 				};
 				Insert: {
+					repair_job_id?: string | null;
+					mnemonic_slots_snapshot?: Json | null;
+					mnemonic_slots_hash?: string | null;
+					prompt_version?: string | null;
+					prompt_hash?: string | null;
 					cleanup_claimed_at?: string | null;
 					cleanup_claim_token?: string | null;
 					cleanup_previous_state?: string | null;
@@ -95,7 +164,7 @@ export type Database = {
 					height?: number | null;
 					id?: string;
 					illustration_id: string;
-					job_id: string;
+					job_id?: string | null;
 					owner_user_id: string;
 					reference_count?: number;
 					state?: string;
@@ -912,6 +981,66 @@ export type Database = {
 			[_ in never]: never;
 		};
 		Functions: {
+			s14_remote_prepare_mnemonic_retry: {
+				Args: {
+					p_client_id: string;
+					p_session_id: string;
+					p_batch_id: string;
+					p_concept_id: string;
+				};
+				Returns: Json;
+			};
+			s14_remote_complete_mnemonic_retry: {
+				Args: {
+					p_client_id: string;
+					p_session_id: string;
+					p_job_id: string;
+					p_token: string;
+					p_outcome: Json;
+				};
+				Returns: Json;
+			};
+			s14_remote_prepare_illustration_repair: {
+				Args: {
+					p_client_id: string;
+					p_session_id: string;
+					p_card_id: string;
+					p_expected_updated_at: string;
+					p_idempotency_key: string;
+				};
+				Returns: Json;
+			};
+			s14_remote_complete_illustration_repair: {
+				Args: {
+					p_client_id: string;
+					p_session_id: string;
+					p_repair_id: string;
+					p_token: string;
+					p_outcome: Json;
+				};
+				Returns: Json;
+			};
+			claim_ai_illustration_repair: { Args: { p_claim_token: string }; Returns: Json };
+			mark_ai_repair_generated: {
+				Args: {
+					p_repair_id: string;
+					p_token: string;
+					p_digest: string;
+					p_width: number;
+					p_height: number;
+					p_prompt_hash: string;
+				};
+				Returns: undefined;
+			};
+			fail_ai_illustration_repair: {
+				Args: { p_repair_id: string; p_token: string; p_error_code: string };
+				Returns: undefined;
+			};
+			finalize_ai_illustration_repair: {
+				Args: { p_repair_id: string; p_token: string };
+				Returns: Json;
+			};
+
 			ai_s13_assert_managed_card: {
 				Args: { p_owner_user_id: string; p_card_id: string };
 				Returns: string;

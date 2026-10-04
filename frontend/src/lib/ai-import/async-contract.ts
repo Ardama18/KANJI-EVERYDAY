@@ -1,4 +1,5 @@
 import type { Json } from "@/types/database";
+import { MNEMONIC_ERROR_CODES } from "../ai-card-generation/mnemonic-outcomes";
 import type { NormalizedImportRequest } from "./schema";
 import { isCanonicalUuid } from "./uuid";
 
@@ -18,15 +19,23 @@ export interface CommitAsyncResponse {
 }
 
 export type ImportBatchStatus =
+	| "blocked_mnemonic"
 	| "queued"
 	| "processing"
 	| "completed"
 	| "partial"
 	| "failed"
 	| "undone";
-export type ImportItemStatus = "queued" | "processing" | "succeeded" | "failed" | "undone";
+export type ImportItemStatus =
+	| "blocked_mnemonic"
+	| "queued"
+	| "processing"
+	| "succeeded"
+	| "failed"
+	| "undone";
 
 export const SAFE_IMPORT_ERROR_CODES = [
+	...MNEMONIC_ERROR_CODES,
 	"INVALID_QUEUE_MESSAGE",
 	"CLAIM_LOST",
 	"PROVIDER_CONFIG_ERROR",
@@ -169,7 +178,11 @@ function parseStatusItem(value: unknown): ImportStatusResponse["items"][number] 
 	) {
 		return undefined;
 	}
-	if (value.status === "failed" ? errorCode === undefined : errorCode !== undefined)
+	if (
+		["failed", "blocked_mnemonic"].includes(String(value.status))
+			? errorCode === undefined
+			: errorCode !== undefined
+	)
 		return undefined;
 	return {
 		itemId: value.itemId.toLowerCase(),
@@ -190,6 +203,11 @@ function statusMatchesCounts(
 	const undone = items.filter((item) => item.status === "undone").length;
 	if (undone > 0) return status === "undone" && undone === items.length;
 	if (status === "undone") return false;
+	if (status === "blocked_mnemonic")
+		return (
+			items.some((item) => item.status === "blocked_mnemonic") &&
+			!items.some((item) => item.status === "queued" || item.status === "processing")
+		);
 	if (status === "completed") return succeeded === items.length;
 	if (status === "partial")
 		return succeeded > 0 && failed > 0 && succeeded + failed === items.length;
@@ -202,13 +220,21 @@ function statusMatchesCounts(
 }
 
 function isBatchStatus(value: unknown): value is ImportBatchStatus {
-	return ["queued", "processing", "completed", "partial", "failed", "undone"].includes(
-		String(value)
-	);
+	return [
+		"queued",
+		"processing",
+		"completed",
+		"partial",
+		"failed",
+		"undone",
+		"blocked_mnemonic",
+	].includes(String(value));
 }
 
 function isItemStatus(value: unknown): value is ImportItemStatus {
-	return ["queued", "processing", "succeeded", "failed", "undone"].includes(String(value));
+	return ["queued", "processing", "succeeded", "failed", "undone", "blocked_mnemonic"].includes(
+		String(value)
+	);
 }
 
 function nonNegativeInteger(value: unknown): number | undefined {

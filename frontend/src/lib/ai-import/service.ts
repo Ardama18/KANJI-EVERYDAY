@@ -3,6 +3,7 @@ import type {
 	MnemonicSlotsDraft,
 	PreviewEnvelope,
 } from "../ai-card-generation/contracts";
+import { type MnemonicOutcome, isMnemonicErrorCode } from "../ai-card-generation/mnemonic-outcomes";
 import {
 	sanitizeMnemonicExplanation,
 	sanitizeMnemonicSlots,
@@ -80,6 +81,7 @@ export interface AiImportRepository {
 			cardReservationKey: string;
 			previewToken: string;
 			mnemonics?: readonly SanitizedMnemonicEntry[];
+			mnemonicOutcomes?: readonly MnemonicOutcome[];
 		}>
 	): Promise<AiImportRepositoryResult<unknown>>;
 	getStatus(
@@ -216,6 +218,19 @@ export async function commitCardImport(
 			if (sanitized === undefined) return validationFailure();
 			mnemonics = sanitized;
 		}
+		const mnemonicOutcomes =
+			parsed.mnemonicOutcomes === undefined
+				? undefined
+				: sanitizeOutcomes(
+						parsed.mnemonicOutcomes,
+						new Set(
+							validated.data.items
+								.filter((item) => item.image.mode === "ai")
+								.map((item) => item.conceptId)
+						)
+					);
+		if (parsed.mnemonicOutcomes !== undefined && mnemonicOutcomes === undefined)
+			return validationFailure();
 		let result: AiImportRepositoryResult<unknown>;
 		try {
 			result = await input.repository.commit({
@@ -225,6 +240,7 @@ export async function commitCardImport(
 				cardReservationKey: parsed.cardReservationKey,
 				previewToken: parsed.previewToken,
 				mnemonics,
+				mnemonicOutcomes,
 			});
 		} catch {
 			return failure("SERVICE_UNAVAILABLE", 503);
@@ -297,6 +313,40 @@ export function sanitizeMnemonics(
 	return result;
 }
 
+export function sanitizeOutcomes(
+	entries: readonly unknown[],
+	allowed: ReadonlySet<string>
+): readonly MnemonicOutcome[] | undefined {
+	if (entries.length > allowed.size) return undefined;
+	const outcomes: MnemonicOutcome[] = [];
+	const seen = new Set<string>();
+	for (const entry of entries) {
+		if (
+			!isRecord(entry) ||
+			typeof entry.conceptId !== "string" ||
+			!allowed.has(entry.conceptId) ||
+			seen.has(entry.conceptId)
+		)
+			return undefined;
+		seen.add(entry.conceptId);
+		if (entry.status === "blocked" && isMnemonicErrorCode(entry.code))
+			outcomes.push({ conceptId: entry.conceptId, status: "blocked", code: entry.code });
+		else if (entry.status === "not_required")
+			outcomes.push({ conceptId: entry.conceptId, status: "not_required" });
+		else if (entry.status === "approved" && isRecord(entry.mnemonic)) {
+			const slots = sanitizeMnemonicSlots(entry.mnemonic.slots);
+			const explanation = sanitizeMnemonicExplanation(entry.mnemonic.explanation);
+			if (slots === undefined || explanation === undefined) return undefined;
+			outcomes.push({
+				conceptId: entry.conceptId,
+				status: "approved",
+				mnemonic: { slots, explanation },
+			});
+		} else return undefined;
+	}
+	return outcomes;
+}
+
 function parseCommitInput(value: unknown):
 	| Readonly<{
 			confirmedWarnings: boolean;
@@ -306,6 +356,7 @@ function parseCommitInput(value: unknown):
 			previewToken: string;
 			request: unknown;
 			mnemonics?: readonly unknown[];
+			mnemonicOutcomes?: readonly unknown[];
 	  }>
 	| undefined {
 	if (!isRecord(value)) return undefined;
@@ -328,6 +379,8 @@ function parseCommitInput(value: unknown):
 		if (!Array.isArray(value.mnemonics)) return undefined;
 		mnemonics = value.mnemonics;
 	}
+	if (value.mnemonicOutcomes !== undefined && !Array.isArray(value.mnemonicOutcomes))
+		return undefined;
 	return {
 		confirmedWarnings: value.confirmedWarnings === true,
 		idempotencyKey,
@@ -336,6 +389,7 @@ function parseCommitInput(value: unknown):
 		previewToken,
 		request: value.request,
 		mnemonics,
+		mnemonicOutcomes: value.mnemonicOutcomes as readonly unknown[] | undefined,
 	};
 }
 

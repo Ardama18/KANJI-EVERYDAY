@@ -92,6 +92,7 @@ async function initialize(wasmBytes: Uint8Array | undefined): Promise<void> {
 	// Passing the raw bytes makes the Emscripten module retain the full WASM
 	// payload after instantiation. Compile first so only the immutable module is
 	// retained while request image buffers are decoded inside the Edge envelope.
-	const module = await WebAssembly.compile(bytes);
+	// Own the buffer: newer Deno lib types exclude SharedArrayBuffer from BufferSource.
+	const module = await WebAssembly.compile(new Uint8Array(bytes).buffer);
 	await initializeImageMagick(module);
 }

@@ -90,12 +90,13 @@ describe("generatePrompt（単字）", () => {
 });
 
 describe("generatePrompt（複数字）", () => {
-	it("UT-AC02-MULTI-SUPPRESS-SHAPE-MAPPING: 【形の手掛かり】の部首→絵マッピングを出力しない", () => {
+	it("UT-AC02-MULTI-INCLUDE-SHAPE-MAPPING: 【形の手掛かり】の語の形を変形せず具体物を使う", () => {
 		const prompt = generatePrompt(multiKanjiSlots);
 
 		expect(prompt).not.toContain("【形の手掛かり】");
 		expect(prompt).not.toContain("に関連づける");
-		expect(prompt).not.toContain("偏");
+		expect(prompt).toContain("偏");
+		expect(prompt).toContain("【形と場面の手掛かり】");
 	});
 
 	it("UT-AC01-MULTI-KEEP-SHAPE-ACCURACY: 【正確な字形】の省略なし指定は維持する", () => {
@@ -110,7 +111,7 @@ describe("generatePrompt（複数字）", () => {
 
 		expect(prompt).toContain("【記憶の物語】");
 		expect(prompt).toContain(
-			"「子どもたちが校舎で一緒に学ぶ」という一つの場面で、語全体の意味を表す"
+			"「子どもたちが校舎で一緒に学ぶ」に登場する具体物・動作・位置関係を一つの場面として描き、形の手掛かりと語の意味を結びつける"
 		);
 	});
 

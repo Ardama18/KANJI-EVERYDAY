@@ -115,8 +115,8 @@ export function isAiCardImportEnabled(): boolean {
 /**
  * Latency and cost guard for the mnemonics generated during one Remote MCP commit
  * (S-21 D7). `maxConcepts = 0` disables generation entirely (kill switch), and an
- * out-of-range value returns `undefined` so the caller fails closed and commits
- * cards without mnemonics rather than running unbounded provider calls.
+ * out-of-range value returns `undefined`; required concepts then stay blocked
+ * without starting unbounded provider calls (Issue #97).
  */
 export function getMcpAutoMnemonicConfig(): McpAutoMnemonicConfig | undefined {
 	const maxConcepts = parseIntegerEnv(process.env.MCP_AUTO_MNEMONIC_MAX_CONCEPTS, 20, 0, 50);

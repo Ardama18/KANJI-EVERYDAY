@@ -46,12 +46,18 @@ export const buildMnemonicPrompt = (slots: MnemonicSlots): string => {
 		"・正しい字形の維持を、装飾より優先する",
 	];
 
-	// 【形の手掛かり】の部首→絵1対1マッピングは単字のみ。複数字では省略する。
+	// 複数文字語は語全体を一つの部首として扱わず、具体的な記憶の場面と併置する。
 	if (slots.isSingleKanji) {
 		lines.push(
 			"【形の手掛かり】",
 			`・「${kanji}」の${part}を、${picture}に関連づける`,
 			"・ただし、元の線を消したり別の形に置き換えたりしない"
+		);
+	} else {
+		lines.push(
+			"【形と場面の手掛かり】",
+			`・「${part}」を「${picture}」に関連づけた具体物を描く`,
+			"・語の各文字は正しい形で場面のそばに置き、語全体を一つの部首として変形しない"
 		);
 	}
 
@@ -61,7 +67,7 @@ export const buildMnemonicPrompt = (slots: MnemonicSlots): string => {
 		"【記憶の物語】",
 		slots.isSingleKanji
 			? `「${story}」という一つの場面で、漢字の形と意味を結びつける`
-			: `「${story}」という一つの場面で、語全体の意味を表す`,
+			: `「${story}」に登場する具体物・動作・位置関係を一つの場面として描き、形の手掛かりと語の意味を結びつける`,
 		"【構成】",
 		"・漢字自体を主役にする",
 		"・関係のないアイコンや説明は入れない",
@@ -108,6 +114,17 @@ export const parseMnemonicSlots = (value: unknown): MnemonicSlots | undefined =>
 	) {
 		return undefined;
 	}
-	if (sanitizePromptInput(kanji).length === 0) return undefined;
+	if (
+		Array.from(kanji).length < 1 ||
+		Array.from(kanji).length > 16 ||
+		isSingleKanji !== (Array.from(kanji).length === 1) ||
+		[kanji, part, picture, meaningHint, story].some(
+			(text) =>
+				text.trim().length === 0 ||
+				text.length > MAX_PROMPT_INPUT_LENGTH ||
+				sanitizePromptInput(text) !== text
+		)
+	)
+		return undefined;
 	return { kanji, isSingleKanji, shapeHint: { part, picture }, meaningHint, story };
 };

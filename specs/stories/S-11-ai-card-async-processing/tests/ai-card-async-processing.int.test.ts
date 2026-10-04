@@ -2633,7 +2633,7 @@ describe("S-11 reviewer regression boundaries", () => {
 		expect(gate).toContain('name: "provider-max-4mib-1024px"');
 		expect(gate).toContain('["max-1mp.jpg", "image/jpeg", true]');
 		expect(gate).toContain('["max-1mp.webp", "image/webp", true]');
-		expect(codec).toContain("const module = await WebAssembly.compile(bytes)");
+		expect(codec).toContain("const module = await WebAssembly.compile(new Uint8Array(bytes).buffer)");
 		expect(codec).toContain("await initializeImageMagick(module)");
 		expect(codec).not.toContain("await initializeImageMagick(bytes)");
 	});

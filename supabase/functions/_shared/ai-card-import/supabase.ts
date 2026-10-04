@@ -175,6 +175,7 @@ export function createSupabaseDatabase(input: {
 				p_digest: args.digest,
 				p_width: args.width,
 				p_height: args.height,
+				p_prompt_hash: args.promptHash,
 			});
 		},
 		async markObjectOrphan(args): Promise<void> {
@@ -243,8 +244,8 @@ export function createSupabaseDatabase(input: {
 function parseClaim(value: unknown): ClaimResult {
 	const row = isRecord(value) ? value : firstRecord(value);
 	if (row === undefined || typeof row.outcome !== "string") throw new Error("RPC_CONTRACT_ERROR");
-	if (["terminal", "stale", "active", "missing"].includes(row.outcome)) {
-		return { outcome: row.outcome as "terminal" | "stale" | "active" | "missing" };
+	if (["terminal", "stale", "active", "missing", "blocked"].includes(row.outcome)) {
+		return { outcome: row.outcome as "terminal" | "stale" | "active" | "missing" | "blocked" };
 	}
 	if (row.outcome !== "claimed") throw new Error("RPC_CONTRACT_ERROR");
 	const jobId = stringValue(row.jobId ?? row.job_id);
@@ -285,7 +286,9 @@ function parseClaimPrompt(
 	// 承認済みニーモニック slots があれば S-16B テンプレでプロンプトを組む（S-16H AC-1〜AC-3）。
 	const slots = parseMnemonicSlots(row.mnemonicSlots ?? row.mnemonic_slots);
 	if (slots !== undefined) return buildMnemonicPrompt(slots);
-	// 未承認 / 不正形は旧汎用プロンプトへフォールバックし、生成は続行する（S-16H AC-4 / design.md D3）。
+	if (row.mnemonicRequired === true || row.mnemonic_required === true)
+		throw new Error("MNEMONIC_VALIDATION_FAILED");
+	// Only non-required targets retain the legacy prompt policy.
 	const backText = stringValue(row.backText ?? row.back_text);
 	const skill = stringValue(row.skill);
 	if (backText === undefined || (skill !== "reading" && skill !== "writing")) {

@@ -87,6 +87,14 @@ export const mcpToolInputSchemas = Object.freeze({
 		})
 		.strict(),
 	get_import_status: statusInput,
+	retry_mnemonic: z.object({ batchId: uuid, conceptId: z.string().min(1).max(64) }).strict(),
+	repair_card_illustration: z
+		.object({
+			cardId: uuid,
+			expectedUpdatedAt: timestamp,
+			idempotencyKey: z.string().min(1).max(128),
+		})
+		.strict(),
 	list_ai_cards: z
 		.object({
 			limit: z.number().int().min(1).max(100).optional(),
@@ -125,6 +133,12 @@ export const mcpToolInputSchemas = Object.freeze({
 export type McpToolName = keyof typeof mcpToolInputSchemas;
 
 export interface McpToolServices {
+	readonly retryMnemonic?: (input: { batchId: string; conceptId: string }) => Promise<unknown>;
+	readonly repairCardIllustration?: (input: {
+		cardId: string;
+		expectedUpdatedAt: string;
+		idempotencyKey: string;
+	}) => Promise<unknown>;
 	readonly listDecks: () => Promise<unknown>;
 	readonly getDailyStudyStatus: () => Promise<unknown>;
 	readonly createDeck: (
@@ -162,6 +176,8 @@ export const MCP_TOOL_NAMES = Object.freeze([
 	"preview_card_import",
 	"commit_card_import",
 	"get_import_status",
+	"retry_mnemonic",
+	"repair_card_illustration",
 	"list_ai_cards",
 	"update_ai_card",
 	"delete_ai_cards",
@@ -175,6 +191,13 @@ export const mcpToolDescriptors = Object.freeze({
 	preview_card_import: descriptor("R1/W1 private card import の事前確認", true, false, false),
 	commit_card_import: descriptor("確認済み preview を非同期登録", false, false, false),
 	get_import_status: descriptor("非同期 import 状態を取得", true, false, false),
+	retry_mnemonic: descriptor("未完了の語のニーモニックを再試行", false, false, false),
+	repair_card_illustration: descriptor(
+		"カードと学習状態を保持して共有画像を修復",
+		false,
+		false,
+		false
+	),
 	list_ai_cards: descriptor("AI private card の一覧", true, false, false),
 	update_ai_card: descriptor("AI private card を編集", false, false, false),
 	delete_ai_cards: descriptor("AI private card を削除", false, true, true),
@@ -232,6 +255,18 @@ async function executeKnownTool(
 	services: McpToolServices
 ): Promise<unknown> {
 	switch (name) {
+		case "retry_mnemonic":
+			return (
+				services.retryMnemonic?.(
+					input as z.infer<(typeof mcpToolInputSchemas)["retry_mnemonic"]>
+				) ?? { ok: false, error: { code: "SERVICE_UNAVAILABLE" } }
+			);
+		case "repair_card_illustration":
+			return (
+				services.repairCardIllustration?.(
+					input as z.infer<(typeof mcpToolInputSchemas)["repair_card_illustration"]>
+				) ?? { ok: false, error: { code: "SERVICE_UNAVAILABLE" } }
+			);
 		case "list_decks":
 			return await services.listDecks();
 		case "get_daily_study_status":

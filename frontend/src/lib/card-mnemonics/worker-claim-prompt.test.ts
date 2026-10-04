@@ -53,6 +53,49 @@ async function claimWith(row: Readonly<Record<string, unknown>>): Promise<string
 }
 
 describe("S-16H worker claim プロンプト分岐", () => {
+	it("records prompt proof on upload RPC while keeping finalize signature unchanged", async () => {
+		const calls: { name: string; body: Record<string, unknown> }[] = [];
+		const database = createSupabaseDatabase({
+			supabaseUrl: "http://supabase.local",
+			serviceRoleKey: "fixture",
+			fetchImplementation: async (url, init) => {
+				const name = String(url).split("/").at(-1) ?? "";
+				calls.push({ name, body: JSON.parse(String(init?.body)) });
+				return Response.json(
+					name === "finalize_ai_import_concept" ? { status: "succeeded" } : null
+				);
+			},
+		});
+		const identity = {
+			jobId: CLAIM_BASE.jobId,
+			claimToken: CLAIM_BASE.claimToken,
+			digest: "a".repeat(64),
+			width: 64,
+			height: 64,
+		};
+		await database.markObjectUploading({ ...identity, promptHash: "b".repeat(64) });
+		await database.finalize({
+			...identity,
+			messageId: 7,
+			illustrationId: "44444444-4444-4444-8444-444444444444",
+		});
+		expect(calls[0]).toMatchObject({
+			name: "mark_ai_illustration_uploading",
+			body: { p_prompt_hash: "b".repeat(64) },
+		});
+		expect(calls[1]?.name).toBe("finalize_ai_import_concept");
+		expect(Object.keys(calls[1]?.body ?? {}).sort()).toEqual(
+			[
+				"p_job_id",
+				"p_message_id",
+				"p_claim_token",
+				"p_illustration_id",
+				"p_digest",
+				"p_width",
+				"p_height",
+			].sort()
+		);
+	});
 	it("UT-S16H-W01-SINGLE-SLOTS: 承認済み slots（単字）で S-16B テンプレを使い旧文言を使わない", async () => {
 		const prompt = await claimWith({ ...CLAIM_BASE, mnemonicSlots: SINGLE_SLOTS });
 
@@ -122,4 +165,17 @@ describe("S-16H worker claim プロンプト分岐", () => {
 
 		expect(prompt).toBe(generatePrompt(SINGLE_SLOTS));
 	});
+});
+
+it("Issue #97: required mnemonic never falls back to a generic prompt", async () => {
+	await expect(claimWith({ ...CLAIM_BASE, mnemonicRequired: true })).rejects.toThrow(
+		"MNEMONIC_VALIDATION_FAILED"
+	);
+	await expect(
+		claimWith({
+			...CLAIM_BASE,
+			mnemonicRequired: true,
+			mnemonicSlots: { ...SINGLE_SLOTS, story: "" },
+		})
+	).rejects.toThrow("MNEMONIC_VALIDATION_FAILED");
 });

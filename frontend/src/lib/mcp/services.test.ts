@@ -371,7 +371,9 @@ describe("S-21 MCP auto mnemonic wiring", () => {
 
 		expect(result).toMatchObject({ ok: true });
 		expect(generateMnemonics).toHaveBeenCalledWith(input.request);
-		expect(commitArgs(client).p_mnemonics).toEqual([mnemonicEntry("concept-001")]);
+		expect(commitArgs(client).p_mnemonics).toEqual([
+			{ ...mnemonicEntry("concept-001"), status: "approved" },
+		]);
 	});
 
 	it("AC-1: does not call the provider when no concept asks for an image", async () => {
@@ -384,7 +386,7 @@ describe("S-21 MCP auto mnemonic wiring", () => {
 
 		expect(result).toMatchObject({ ok: true });
 		expect(generateMnemonics).not.toHaveBeenCalled();
-		expect(commitArgs(client).p_mnemonics).toBeNull();
+		expect(commitArgs(client).p_mnemonics).toEqual([]);
 	});
 
 	it('AC-6: rejects image.mode="ai" and skips generation while the flag is off', async () => {
@@ -416,10 +418,10 @@ describe("S-21 MCP auto mnemonic wiring", () => {
 		const result = await services.commitCardImport(await commitInput("none"));
 
 		expect(result).toMatchObject({ ok: true });
-		expect(commitArgs(client).p_mnemonics).toBeNull();
+		expect(commitArgs(client).p_mnemonics).toEqual([]);
 	});
 
-	it("AC-4: commits without mnemonics when generation yields nothing", async () => {
+	it("AC-4: persists a blocked mnemonic outcome when generation yields nothing", async () => {
 		vi.stubEnv("AI_CARD_IMPORT_ENABLED", "true");
 		const client = commitRpcClient();
 		const services = createMcpToolServices(
@@ -429,10 +431,12 @@ describe("S-21 MCP auto mnemonic wiring", () => {
 		const result = await services.commitCardImport(await commitInput("ai"));
 
 		expect(result).toMatchObject({ ok: true });
-		expect(commitArgs(client).p_mnemonics).toBeNull();
+		expect(commitArgs(client).p_mnemonics).toEqual([
+			{ conceptId: "concept-001", status: "blocked", code: "MNEMONIC_DISABLED" },
+		]);
 	});
 
-	it("AC-4: commits without mnemonics when generation throws", async () => {
+	it("AC-4: persists a blocked mnemonic outcome when generation throws", async () => {
 		vi.stubEnv("AI_CARD_IMPORT_ENABLED", "true");
 		const client = commitRpcClient();
 		const services = createMcpToolServices(
@@ -446,10 +450,12 @@ describe("S-21 MCP auto mnemonic wiring", () => {
 		const result = await services.commitCardImport(await commitInput("ai"));
 
 		expect(result).toMatchObject({ ok: true });
-		expect(commitArgs(client).p_mnemonics).toBeNull();
+		expect(commitArgs(client).p_mnemonics).toEqual([
+			{ conceptId: "concept-001", status: "blocked", code: "MNEMONIC_INTERNAL_ERROR" },
+		]);
 	});
 
-	it("AC-4: drops only the malformed entries instead of failing the whole commit", async () => {
+	it("AC-4: retains malformed entries as blocked outcomes", async () => {
 		vi.stubEnv("AI_CARD_IMPORT_ENABLED", "true");
 		const client = commitRpcClient();
 		const malformed = {
@@ -471,7 +477,10 @@ describe("S-21 MCP auto mnemonic wiring", () => {
 		const result = await services.commitCardImport(await commitInput("ai", "ai"));
 
 		expect(result).toMatchObject({ ok: true });
-		expect(commitArgs(client).p_mnemonics).toEqual([mnemonicEntry("concept-001")]);
+		expect(commitArgs(client).p_mnemonics).toEqual([
+			{ ...mnemonicEntry("concept-001"), status: "approved" },
+			{ conceptId: "concept-002", status: "blocked", code: "MNEMONIC_VALIDATION_FAILED" },
+		]);
 	});
 
 	it("AC-5: the commit response carries only batchId/status/statusUrl", async () => {

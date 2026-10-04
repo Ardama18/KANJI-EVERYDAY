@@ -1,4 +1,12 @@
+import { generateMnemonicOutcomes } from "@/lib/ai-card-generation/mnemonic-generation";
+import { deriveKanjiTargetFromItem } from "@/lib/ai-card-generation/mnemonic-generation";
+import {
+	type MnemonicOutcome,
+	isMnemonicErrorCode,
+} from "@/lib/ai-card-generation/mnemonic-outcomes";
+import { getMcpAutoMnemonicConfig, getOpenAiCardGenerationConfig } from "@/lib/env";
 import type { z } from "zod";
+import { createMnemonicRecoveryServices } from "./mnemonic-recovery";
 
 import { normalizeDeckNameInput } from "@/actions/deck-action-types";
 import {
@@ -38,14 +46,14 @@ export interface McpToolServiceDependencies {
 	/**
 	 * Server-side mnemonic generation for the `image.mode="ai"` concepts of one
 	 * commit (S-21 D6).  Injected rather than imported so the tool layer stays
-	 * testable and so a disabled flag or missing provider config simply leaves it
-	 * out.  `undefined` (returned or omitted) means "commit without mnemonics".
+	 * testable. Missing or invalid results become explicit blocked outcomes;
+	 * only non-Han targets can complete without a mnemonic.
 	 * The MCP client can never reach this: the tool schema is `.strict()`, so only
 	 * the server itself supplies mnemonics.
 	 */
 	readonly generateMnemonics?: (
 		request: McpImportRequest
-	) => Promise<readonly CommitMnemonicEntry[] | undefined>;
+	) => Promise<readonly (MnemonicOutcome | CommitMnemonicEntry)[] | undefined>;
 }
 
 /**
@@ -58,6 +66,12 @@ export function createMcpToolServices(dependencies: McpToolServiceDependencies):
 	const imports = createRemoteMcpImportRepository(client, actor);
 	const cards = createRemoteMcpCardManagementRepository(client, actor);
 	return {
+		...createMnemonicRecoveryServices(
+			client,
+			actor,
+			() => getOpenAiCardGenerationConfig(),
+			() => isAiCardImportEnabled() && (getMcpAutoMnemonicConfig()?.maxConcepts ?? 0) > 0
+		),
 		listDecks: async () => await listOwnerDecks(client),
 		getDailyStudyStatus: async () => await getDailyStudyStatusForActor(client, actor),
 		createDeck: async ({ name }) => await createOwnerDeck(client, actor, name),
@@ -80,10 +94,13 @@ export function createMcpToolServices(dependencies: McpToolServiceDependencies):
 			if (rejectsAiImage(input.request)) return aiImageDisabled();
 			// Generated on the server inside this same request and handed straight to
 			// the shared service, so it never travels through the MCP client (AC-5).
-			const mnemonics = await generateSanitizedMnemonics(dependencies, input.request);
+			const mnemonicOutcomes = await generateSanitizedMnemonics(dependencies, input.request);
+			const mnemonics = mnemonicOutcomes.flatMap((outcome) =>
+				outcome.status === "approved" ? [{ conceptId: outcome.conceptId, ...outcome.mnemonic }] : []
+			);
 			return await commitCardImport({
 				actor: { userId: actor.userId, clientId: actor.clientId, kind: "remote_mcp" },
-				input: mnemonics === undefined ? input : { ...input, mnemonics },
+				input: { ...input, mnemonics, mnemonicOutcomes },
 				repository: imports,
 				secret,
 				nowSeconds: dependencies.nowSeconds,
@@ -160,37 +177,68 @@ function rejectsAiImage(request: McpImportRequest): boolean {
  * Generates mnemonics for the `image.mode="ai"` concepts only: `none` concepts get
  * no illustration row, so `card_mnemonics` has nothing to hang them on.
  *
- * Every failure degrades to "no mnemonic for that concept" (AC-4).  The shared
- * service's `sanitizeMnemonics` rejects the whole array when one entry is malformed,
- * which would turn the commit itself into a VALIDATION_ERROR, so each entry is
- * verified on its own here and the failures are dropped.
+ * Validate each concept independently so one malformed draft does not erase
+ * other successes. Every required concept keeps an explicit approved or blocked
+ * outcome; missing outcomes are never interpreted as completed work (S-30).
  */
 async function generateSanitizedMnemonics(
 	dependencies: McpToolServiceDependencies,
 	request: McpImportRequest
-): Promise<readonly CommitMnemonicEntry[] | undefined> {
-	const generate = dependencies.generateMnemonics;
-	if (generate === undefined) return undefined;
-	const aiConceptIds = new Set(
-		request.items.filter((item) => item.image.mode === "ai").map((item) => item.conceptId)
-	);
-	if (aiConceptIds.size === 0) return undefined;
-	let generated: readonly CommitMnemonicEntry[] | undefined;
+): Promise<readonly MnemonicOutcome[]> {
+	const aiItems = request.items.filter((item) => item.image.mode === "ai");
+	const ids = new Set(aiItems.map((item) => item.conceptId));
+	const fallback = await generateMnemonicOutcomes({
+		items: aiItems,
+		limits: { maxConcepts: 0, budgetMs: 0 },
+	});
+	if (ids.size === 0) return [];
+	let generated: readonly (MnemonicOutcome | CommitMnemonicEntry)[] | undefined;
 	try {
-		generated = await generate(request);
+		generated = await dependencies.generateMnemonics?.(request);
 	} catch {
-		return undefined;
+		return fallback.map((entry) =>
+			entry.status === "not_required"
+				? entry
+				: { conceptId: entry.conceptId, status: "blocked", code: "MNEMONIC_INTERNAL_ERROR" }
+		);
 	}
-	if (generated === undefined) return undefined;
-	const accepted: CommitMnemonicEntry[] = [];
-	const seen = new Set<string>();
-	for (const entry of generated) {
-		const sanitized = sanitizeMnemonics([entry], aiConceptIds)?.[0];
-		if (sanitized === undefined || seen.has(sanitized.conceptId)) continue;
-		seen.add(sanitized.conceptId);
-		accepted.push(sanitized);
+	const accepted = new Map<string, MnemonicOutcome>();
+	for (const entry of generated ?? []) {
+		if (!ids.has(entry.conceptId) || accepted.has(entry.conceptId)) continue;
+		if ("status" in entry && entry.status === "blocked" && isMnemonicErrorCode(entry.code)) {
+			accepted.set(entry.conceptId, entry);
+			continue;
+		}
+		if ("status" in entry && entry.status === "not_required") continue; // necessity is derived, never supplied
+		const candidate =
+			"status" in entry
+				? entry.status === "approved"
+					? { conceptId: entry.conceptId, ...entry.mnemonic }
+					: undefined
+				: entry;
+		const sanitized =
+			candidate === undefined ? undefined : sanitizeMnemonics([candidate], ids)?.[0];
+		const item =
+			aiItems.find((item) => item.conceptId === entry.conceptId && item.pattern === "R1") ??
+			aiItems.find((item) => item.conceptId === entry.conceptId);
+		const target = item === undefined ? null : deriveKanjiTargetFromItem(item);
+		accepted.set(
+			entry.conceptId,
+			sanitized !== undefined &&
+				target !== null &&
+				sanitized.slots.kanji === target.kanji &&
+				sanitized.slots.isSingleKanji === target.isSingleKanji
+				? {
+						conceptId: entry.conceptId,
+						status: "approved",
+						mnemonic: { slots: sanitized.slots, explanation: sanitized.explanation },
+					}
+				: { conceptId: entry.conceptId, status: "blocked", code: "MNEMONIC_VALIDATION_FAILED" }
+		);
 	}
-	return accepted.length === 0 ? undefined : accepted;
+	return fallback.map((entry) =>
+		entry.status === "not_required" ? entry : (accepted.get(entry.conceptId) ?? entry)
+	);
 }
 
 async function createOwnerDeck(

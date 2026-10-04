@@ -55,7 +55,7 @@ function commitInput(image: { mode: "none" | "ai" }) {
 }
 
 describe("S-14 static MCP tools", () => {
-	it("exposes exactly the approved ten-tool allowlist", () => {
+	it("exposes exactly the approved recovery-tool allowlist", () => {
 		expect(MCP_TOOL_NAMES).toEqual([
 			"list_decks",
 			"get_daily_study_status",
@@ -63,6 +63,8 @@ describe("S-14 static MCP tools", () => {
 			"preview_card_import",
 			"commit_card_import",
 			"get_import_status",
+			"retry_mnemonic",
+			"repair_card_illustration",
 			"list_ai_cards",
 			"update_ai_card",
 			"delete_ai_cards",

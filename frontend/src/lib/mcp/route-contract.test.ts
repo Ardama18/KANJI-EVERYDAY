@@ -314,12 +314,24 @@ describe("S-21 default mnemonic generator", () => {
 			},
 		],
 	] as const)(
-		"returns undefined without calling the provider when %s",
+		"returns explicit outcomes without calling the provider when %s",
 		async (_case, env, body) => {
 			for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
 			forbidNetwork();
 
-			await expect(createDefaultMnemonicGenerator()(body)).resolves.toBeUndefined();
+			const result = await createDefaultMnemonicGenerator()(body);
+			expect(result).toEqual(
+				body.items[0]?.image.mode === "none"
+					? []
+					: [
+							expect.objectContaining({
+								conceptId: "concept-001",
+								status: "blocked",
+								code: expect.stringMatching(/^MNEMONIC_(DISABLED|CONFIG_MISSING)$/u),
+							}),
+						]
+			);
+			expect(fetch).not.toHaveBeenCalled();
 		}
 	);
 });

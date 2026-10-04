@@ -38,7 +38,7 @@ export interface ClaimedConcept {
 
 export type ClaimResult =
 	| ClaimedConcept
-	| { readonly outcome: "terminal" | "stale" | "active" | "missing" };
+	| { readonly outcome: "terminal" | "stale" | "active" | "missing" | "blocked" };
 
 export interface PendingWorkerEvent {
 	readonly eventId: string;
@@ -114,6 +114,7 @@ export interface WorkerDatabase {
 		readonly digest: string;
 		readonly width: number;
 		readonly height: number;
+		readonly promptHash?: string;
 	}): Promise<void>;
 	markObjectOrphan(input: {
 		readonly jobId: string;
@@ -153,6 +154,7 @@ export interface WorkerDependencies {
 
 export type WorkerOutcome =
 	| "idle"
+	| "blocked"
 	| "acked"
 	| "busy"
 	| "retried"
@@ -193,6 +195,7 @@ export async function processOneConcept(dependencies: WorkerDependencies): Promi
 		}
 		return "acked";
 	}
+	if (claim.outcome === "blocked") return "blocked";
 	if (claim.outcome === "active") return "busy";
 	if (claim.outcome !== "claimed") return "busy";
 
@@ -251,6 +254,7 @@ export async function processOneConcept(dependencies: WorkerDependencies): Promi
 			digest,
 			width: normalized.width,
 			height: normalized.height,
+			promptHash: claim.prompt === undefined ? undefined : await sha256Hex(new TextEncoder().encode(claim.prompt)),
 		});
 		const write = await dependencies.storage.writeIllustration(
 			claim.illustrationPath,
